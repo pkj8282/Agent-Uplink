@@ -10,26 +10,33 @@
 
 ## 빌드
 
-```cmd
-cd C:\Research\Agent-Uplink
+```bash
+git clone https://github.com/pkj8282/Agent-Uplink.git
+cd Agent-Uplink
 npm install
 npm run build
 ```
-→ `dist/mcp/index.js`, `dist/hub/index.js` 생성.
+→ `dist/mcp/index.js`, `dist/hub/index.js` 생성. (Node.js 22 이상 필요)
 
 ## MCP 등록 (Claude Code 예시)
 
-각 세션의 MCP 설정에 아래를 추가합니다(세션마다 붙이면 됩니다):
+각 세션의 MCP 설정에 아래를 추가합니다. `<빌드한 경로>`를 이 저장소를 빌드한 실제 경로로 바꾸세요(`dist/mcp/index.js`의 절대 경로).
 
 ```json
 {
   "mcpServers": {
     "agent-uplink": {
       "command": "node",
-      "args": ["C:\\Research\\Agent-Uplink\\dist\\mcp\\index.js"]
+      "args": ["<빌드한 경로>/dist/mcp/index.js"]
     }
   }
 }
+```
+
+또는 Claude Code CLI로 등록할 수 있습니다:
+
+```bash
+claude mcp add agent-uplink -- node "<빌드한 경로>/dist/mcp/index.js"
 ```
 
 첫 세션이 툴을 호출하면 Hub가 자동으로 백그라운드에서 시작됩니다. 별도 설치·수동 실행은 필요 없습니다.
