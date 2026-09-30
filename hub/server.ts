@@ -1,7 +1,9 @@
 import net from "node:net";
+import http from "node:http";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 import { MessageStore } from "./store.js";
 import { SessionRegistry, Session } from "./sessions.js";
+import { renderViewerHtml } from "./viewer.js";
 import { MAGIC, PROTOCOL_VERSION, Message, Request, Response } from "../shared/protocol.js";
 
 export interface HubOptions {
@@ -15,6 +17,8 @@ export class Hub {
   protected store: MessageStore;
   private registry = new SessionRegistry();
   private tcp: net.Server;
+  private http: http.Server;
+  private sseClients = new Set<http.ServerResponse>();
   private idleTimer: NodeJS.Timeout | null = null;
   protected opts: HubOptions;
 
@@ -22,6 +26,7 @@ export class Hub {
     this.opts = opts;
     this.store = new MessageStore({ dir: opts.dataDir });
     this.tcp = net.createServer((sock) => this.onConnection(sock));
+    this.http = http.createServer((req, res) => this.onHttp(req, res));
   }
 
   startTcp(): Promise<void> {
@@ -41,8 +46,45 @@ export class Hub {
     return { port: this.opts.tcpPort };
   }
 
+  startHttp(): Promise<void> {
+    return new Promise((resolve) => {
+      this.http.once("error", () => resolve()); // 뷰어 포트 실패는 치명적이지 않다
+      this.http.listen(this.opts.httpPort, "127.0.0.1", () => resolve());
+    });
+  }
+
+  get httpAddress(): { port: number } {
+    const a = this.http.address();
+    if (a && typeof a === "object") return { port: a.port };
+    return { port: this.opts.httpPort };
+  }
+
+  private onHttp(req: http.IncomingMessage, res: http.ServerResponse): void {
+    if (req.url === "/events") {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      res.write(`event: init\ndata: ${JSON.stringify(this.store.recent(200))}\n\n`);
+      this.sseClients.add(res);
+      req.on("close", () => this.sseClients.delete(res));
+    } else {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(renderViewerHtml());
+    }
+  }
+
+  private pushSse(msg: Message): void {
+    const data = `data: ${JSON.stringify(msg)}\n\n`;
+    for (const res of this.sseClients) res.write(data);
+  }
+
   stop(): void {
     this.tcp.close();
+    this.http.close();
+    for (const res of this.sseClients) res.end();
+    this.sseClients.clear();
     for (const s of this.registry.all()) this.registry.remove(s);
   }
 
@@ -150,6 +192,7 @@ export class Hub {
         w.resolve([msg]);
       }
     }
+    this.pushSse(msg);
   }
 
   private maybeIdle(): void {
