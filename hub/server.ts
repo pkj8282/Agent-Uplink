@@ -68,7 +68,11 @@ export class Hub {
       });
       res.write(`event: init\ndata: ${JSON.stringify(this.store.recent(200))}\n\n`);
       this.sseClients.add(res);
-      req.on("close", () => this.sseClients.delete(res));
+      const drop = () => this.sseClients.delete(res);
+      req.on("close", drop);
+      // 뷰어가 비정상 종료되면 write 시 'error'가 발생할 수 있다. 처리기가 없으면
+      // uncaught 예외로 Hub 전체가 죽으므로 반드시 붙여 두고 목록에서 제거한다.
+      res.on("error", drop);
     } else {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(renderViewerHtml());
@@ -77,7 +81,18 @@ export class Hub {
 
   private pushSse(msg: Message): void {
     const data = `data: ${JSON.stringify(msg)}\n\n`;
-    for (const res of this.sseClients) res.write(data);
+    for (const res of this.sseClients) {
+      if (res.writableEnded || res.destroyed) {
+        this.sseClients.delete(res);
+        continue;
+      }
+      try {
+        res.write(data);
+      } catch {
+        // 쓰기 실패한 응답은 목록에서 제거한다(예외로 Hub가 죽지 않게).
+        this.sseClients.delete(res);
+      }
+    }
   }
 
   stop(): void {
@@ -98,7 +113,8 @@ export class Hub {
       });
     });
     sock.on("close", () => {
-      if (state.session) this.registry.remove(state.session);
+      // 재연결로 세션이 더 새 소켓에 넘어갔다면(owner가 이 소켓이 아니면) 제거하지 않는다.
+      if (state.session && state.session.owner === sock) this.registry.remove(state.session);
       this.maybeIdle();
     });
     sock.on("error", () => {
@@ -107,9 +123,15 @@ export class Hub {
   }
 
   private dispatch(sock: net.Socket, session: Session | null, req: Request): Session | null {
-    const reply = (r: Omit<Response, "id">) => sock.write(encodeFrame({ ...r, id: req.id }));
+    // 프레임화된 값이 형태 불량(null·숫자·op/id 누락)이면 응답할 수도 없으므로 조용히 버린다.
+    const r = req as { op?: unknown; id?: unknown } | null;
+    if (!r || typeof r !== "object" || typeof r.op !== "string" || typeof r.id !== "number") {
+      return session;
+    }
+    const reply = (res: Omit<Response, "id">) => sock.write(encodeFrame({ ...res, id: req.id }));
     const ensure = (): Session => {
       if (!session) session = this.registry.create(this.store.lastSeq);
+      session.owner = sock;
       return session;
     };
 
@@ -119,7 +141,18 @@ export class Hub {
         return session;
 
       case "register": {
-        const s = ensure();
+        // clientId가 있고 기존 세션이 있으면 새 세션을 만들지 않고 그 세션에 이어붙인다
+        // (재연결 시 이름·커서 유지, 유령 세션·A-2 방지).
+        const existing = req.clientId ? this.registry.byClient(req.clientId) : undefined;
+        let s: Session;
+        if (existing) {
+          s = existing;
+          s.owner = sock;
+          session = s;
+        } else {
+          s = ensure();
+          if (req.clientId) this.registry.bindClient(s, req.clientId);
+        }
         const name = req.name ? this.registry.rename(s, req.name) : s.name;
         reply({ ok: true, sessionId: name, name });
         return s;

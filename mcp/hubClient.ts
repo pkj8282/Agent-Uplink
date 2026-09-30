@@ -1,5 +1,6 @@
 import net from "node:net";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
@@ -28,6 +29,7 @@ export class HubClient {
   private nextId = 1;
   private pending = new Map<number, Pending>();
   private name: string | null = null;
+  private readonly clientId = randomUUID(); // 재연결 시 같은 세션으로 이어지기 위한 안정적 식별자
   private connecting: Promise<void> | null = null;
 
   constructor(opts: HubClientOptions = {}) {
@@ -40,7 +42,7 @@ export class HubClient {
 
   async register(name?: string): Promise<Response> {
     await this.ensureConnected();
-    const r = await this.request("register", name ? { name } : {});
+    const r = await this.request("register", { clientId: this.clientId, ...(name ? { name } : {}) });
     if (r.ok && r.name) this.name = r.name;
     return r;
   }
@@ -101,8 +103,8 @@ export class HubClient {
     this.attach(sock);
     await this.handshake();
     if (this.name) {
-      // 재연결 시 동일 이름으로 재등록
-      const r = await this.request("register", { name: this.name });
+      // 재연결 시 동일 clientId·이름으로 재등록 → Hub가 같은 세션에 이어붙인다.
+      const r = await this.request("register", { name: this.name, clientId: this.clientId });
       if (r.ok && r.name) this.name = r.name;
     }
   }
@@ -164,7 +166,16 @@ export class HubClient {
   }
 
   private async handshake(): Promise<void> {
-    const r = await this.request("hello", {}, 5000);
+    let r: Response;
+    try {
+      r = await this.request("hello", {}, 5000);
+    } catch (e) {
+      // 타임아웃 등 어떤 실패든 소켓을 반드시 정리해 좀비 연결이 남지 않게 한다.
+      this.close();
+      throw new Error(
+        `포트 ${this.port}가 응답하지 않습니다(Agent-Uplink Hub가 아닐 수 있음): ${(e as Error).message}`,
+      );
+    }
     if (r.magic !== MAGIC || r.version !== PROTOCOL_VERSION) {
       this.close();
       throw new Error(`포트 ${this.port}가 Agent-Uplink Hub가 아닙니다(다른 프로세스 점유 가능).`);

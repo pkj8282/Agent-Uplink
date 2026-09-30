@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "tsx --test \"**/*.test.ts\"",
+    "test": "tsx --test --test-force-exit \"**/*.test.ts\"",
     "start:hub": "tsx hub/index.ts",
     "start:mcp": "tsx mcp/index.ts"
   },

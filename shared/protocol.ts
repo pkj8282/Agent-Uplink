@@ -14,7 +14,7 @@ export interface Message {
 
 export type Request =
   | { op: "hello"; id: number }
-  | { op: "register"; id: number; name?: string }
+  | { op: "register"; id: number; name?: string; clientId?: string }
   | { op: "send"; id: number; text: string; to?: string | null }
   | { op: "check"; id: number }
   | { op: "wait"; id: number; timeoutMs?: number }

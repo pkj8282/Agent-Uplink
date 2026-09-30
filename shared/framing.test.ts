@@ -24,3 +24,15 @@ test("바이트 단위로 쪼개 들어와도 완성된 프레임만 방출한�
   for (const byte of frame) dec.push(Buffer.from([byte]), (o) => out.push(o));
   assert.deepEqual(out, [{ hello: "world" }]);
 });
+
+test("본문이 JSON이 아닌 프레임은 건너뛰고 다음 프레임을 계속 디코딩한다", () => {
+  const dec = new FrameDecoder();
+  const out: any[] = [];
+  const badBody = Buffer.from("{oops", "utf8");
+  const len = Buffer.alloc(4);
+  len.writeUInt32LE(badBody.length, 0);
+  const bad = Buffer.concat([len, badBody]);
+  // 잘못된 프레임 + 정상 프레임을 한 번에 밀어넣어도 예외 없이 정상만 방출해야 한다.
+  dec.push(Buffer.concat([bad, encodeFrame({ ok: 1 })]), (o) => out.push(o));
+  assert.deepEqual(out, [{ ok: 1 }]);
+});

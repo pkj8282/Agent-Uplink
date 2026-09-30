@@ -64,6 +64,21 @@ test("포트를 Hub가 아닌 프로세스가 점유하면 명확히 실패한�
   squatter.close();
 });
 
+test("응답하지 않는 프로세스가 포트를 점유하면 정리 후 명확히 실패한다(좀비 소켓 없음)", { timeout: 20000 }, async () => {
+  const port = freshPort();
+  // 연결은 받지만 hello에 절대 응답하지 않는 서버 → handshake 타임아웃 경로.
+  const squatter = net.createServer(() => { /* accept, never reply */ });
+  await new Promise<void>((res) => squatter.listen(port, "127.0.0.1", () => res()));
+  const c = new HubClient({ port, hubEntry: HUB_ENTRY, nodeArgs: NODE_ARGS });
+  // 첫 호출은 handshake 타임아웃(~5s)으로 명확히 거부돼야 한다.
+  await assert.rejects(() => c.register("A"), /응답하지 않|Hub가 아닙|타임아웃/);
+  // 좀비 소켓이 남지 않았다면 두 번째 호출도 60초 매달리지 않고 다시 ~5s에 거부된다.
+  // (좀비가 남으면 이 호출이 60초 대기 → 테스트 타임아웃으로 실패)
+  await assert.rejects(() => c.register("A"), /응답하지 않|Hub가 아닙|타임아웃/);
+  c.close();
+  squatter.close();
+});
+
 test("연결이 끊겨도 다음 호출에서 재연결하고 이름을 유지한다", async () => {
   const port = freshPort();
   const c = makeClient(port);

@@ -22,7 +22,14 @@ export class FrameDecoder {
       const body = this.buf.subarray(0, this.expected).toString("utf8");
       this.buf = this.buf.subarray(this.expected);
       this.expected = -1;
-      onFrame(JSON.parse(body));
+      let obj: unknown;
+      try {
+        obj = JSON.parse(body);
+      } catch {
+        // 본문이 JSON이 아니면 그 프레임만 버리고 다음 프레임을 계속 처리한다.
+        continue;
+      }
+      onFrame(obj);
     }
   }
 }
