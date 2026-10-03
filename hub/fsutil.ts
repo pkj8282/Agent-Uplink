@@ -10,3 +10,14 @@ export function writeFileAtomic(file: string, data: string): void {
   fs.writeFileSync(tmp, data);
   fs.renameSync(tmp, file);
 }
+
+/** 읽을 수 없는 파일을 같은 폴더의 '<이름>.corrupt-<ms>'로 옮겨 보존한다(실패 시 null). */
+export function backupCorrupt(file: string, now: number = Date.now()): string | null {
+  const dest = `${file}.corrupt-${now}`;
+  try {
+    fs.renameSync(file, dest);
+    return dest;
+  } catch {
+    return null;
+  }
+}
