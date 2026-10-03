@@ -37,11 +37,23 @@ export interface InboxItem {
 export interface AccountInfo {
   uuid: string;
   name: string;
+  description?: string;
+  online?: boolean;
+}
+
+export interface AccountStatus {
+  uuid: string;
+  exists: boolean;
+  name: string;
+  description: string;
+  online: boolean;
 }
 
 export type Request =
   | { op: "hello"; id: number }
-  | { op: "login"; id: number; uuid: string; name?: string }
+  | { op: "login"; id: number; uuid: string; name?: string; exclusive?: boolean; sessionToken?: string }
+  | { op: "set_profile"; id: number; description: string }
+  | { op: "account_status"; id: number; uuids: string[] }
   | { op: "whoami"; id: number }
   | { op: "set_name"; id: number; name: string }
   | { op: "list_accounts"; id: number }
@@ -71,6 +83,8 @@ export interface Response {
   uuid?: string;
   name?: string;
   accounts?: AccountInfo[];
+  description?: string; // whoami / set_profile
+  statuses?: AccountStatus[]; // account_status
   seq?: number;
   messages?: Message[];
   items?: InboxItem[];

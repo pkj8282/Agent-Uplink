@@ -31,6 +31,13 @@ interface Waiter {
   timer: NodeJS.Timeout;
 }
 
+/** 연결 1개의 로그인 상태. 집합으로 모아 online·독점 판정에 쓴다. */
+interface ConnState {
+  uuid: string | null;
+  waiter: Waiter | null;
+  sessionToken: string | null;
+}
+
 // 계정 인박스가 이 수를 넘으면 소비분을 압축한다(무한 증가 방지, 재작성 빈도 억제).
 const INBOX_COMPACT_THRESHOLD = 1000;
 
@@ -49,6 +56,7 @@ export class Hub {
   private connections = new Set<net.Socket>();
   private waiters = new Map<string, Set<Waiter>>(); // uuid → 대기자들
   private idleTimer: NodeJS.Timeout | null = null;
+  private connStates = new Set<ConnState>();
 
   constructor(opts: HubOptions) {
     this.opts = opts;
@@ -147,10 +155,12 @@ export class Hub {
     this.cancelIdle();
     this.connections.add(sock);
     const dec = new FrameDecoder();
-    const state: { uuid: string | null; waiter: Waiter | null } = { uuid: null, waiter: null };
+    const state: ConnState = { uuid: null, waiter: null, sessionToken: null };
+    this.connStates.add(state);
     sock.on("data", (chunk) => dec.push(chunk, (req: Request) => this.dispatch(sock, state, req)));
     sock.on("close", () => {
       this.connections.delete(sock);
+      this.connStates.delete(state);
       if (state.uuid && state.waiter) this.removeWaiter(state.uuid, state.waiter);
       this.maybeIdle();
     });
@@ -161,7 +171,7 @@ export class Hub {
 
   private dispatch(
     sock: net.Socket,
-    state: { uuid: string | null; waiter: Waiter | null },
+    state: ConnState,
     req: Request,
   ): void {
     const r = req as { op?: unknown; id?: unknown } | null;
@@ -199,8 +209,19 @@ export class Hub {
           reply({ ok: false, error: "login에는 uuid가 필요합니다." });
           return;
         }
+        const token = typeof req.sessionToken === "string" && req.sessionToken.length > 0 ? req.sessionToken : null;
+        if (req.exclusive === true) {
+          // 같은 계정을 다른 세션(다른 sessionToken 또는 비독점 연결)이 쓰고 있으면 거부. 상태는 바꾸지 않는다.
+          for (const other of this.connStates) {
+            if (other !== state && other.uuid === req.uuid && (token === null || other.sessionToken !== token)) {
+              reply({ ok: false, error: "이미 다른 세션이 사용 중인 계정입니다." });
+              return;
+            }
+          }
+        }
         const acc = this.accounts.getOrCreate(req.uuid, req.name);
         state.uuid = acc.uuid;
+        state.sessionToken = token;
         reply({ ok: true, uuid: acc.uuid, name: acc.name });
         return;
       }
@@ -209,7 +230,7 @@ export class Hub {
         const uuid = needLogin();
         if (!uuid) return;
         const a = this.accounts.get(uuid)!;
-        reply({ ok: true, uuid: a.uuid, name: a.name });
+        reply({ ok: true, uuid: a.uuid, name: a.name, description: a.description ?? "" });
         return;
       }
 
@@ -225,8 +246,8 @@ export class Hub {
       }
 
       case "list_accounts": {
-        if (!needLogin()) return;
-        reply({ ok: true, accounts: this.accounts.list() });
+        // 역할 선택 전에도 누가 있는지 볼 수 있도록 로그인 불필요(로컬 전용).
+        reply({ ok: true, accounts: this.accounts.list().map((a) => ({ ...a, online: this.isOnline(a.uuid) })) });
         return;
       }
 
@@ -509,6 +530,34 @@ export class Hub {
         return;
       }
 
+      case "set_profile": {
+        const uuid = needLogin();
+        if (!uuid) return;
+        const d = (req as { description?: unknown }).description;
+        if (typeof d !== "string" || d.length > 500) {
+          reply({ ok: false, error: "description은 500자 이하 문자열이어야 합니다." });
+          return;
+        }
+        reply({ ok: true, description: this.accounts.setDescription(uuid, d) });
+        return;
+      }
+
+      case "account_status": {
+        const uuids = (req as { uuids?: unknown }).uuids;
+        if (!Array.isArray(uuids) || uuids.length > 100 || !uuids.every((u) => typeof u === "string")) {
+          reply({ ok: false, error: "uuids는 문자열 배열(최대 100개)이어야 합니다." });
+          return;
+        }
+        reply({
+          ok: true,
+          statuses: (uuids as string[]).map((u) => {
+            const a = this.accounts.get(u);
+            return { uuid: u, exists: !!a, name: a?.name ?? "", description: a?.description ?? "", online: this.isOnline(u) };
+          }),
+        });
+        return;
+      }
+
       default:
         reply({ ok: false, error: "알 수 없는 op" });
         return;
@@ -558,6 +607,12 @@ export class Hub {
     this.accounts.setDm(a, b, rec.channelId);
     this.accounts.setDm(b, a, rec.channelId);
     return rec.channelId;
+  }
+
+  /** 그 계정으로 로그인된 연결이 하나라도 살아 있는가. */
+  protected isOnline(uuid: string): boolean {
+    for (const s of this.connStates) if (s.uuid === uuid) return true;
+    return false;
   }
 
   /** 채널 메시지를 수신 대상 계정들의 인박스에 append하고, 대기자를 깨운다. */

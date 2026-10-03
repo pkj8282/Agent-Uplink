@@ -9,6 +9,7 @@ export interface Account {
   createdAt: number;
   dm: Record<string, string>;
   inboxCursor: number;
+  description?: string;
 }
 
 export class AccountStore {
@@ -62,7 +63,14 @@ export class AccountStore {
   }
 
   list(): AccountInfo[] {
-    return [...this.accounts.values()].map((a) => ({ uuid: a.uuid, name: a.name }));
+    return [...this.accounts.values()].map((a) => ({ uuid: a.uuid, name: a.name, description: a.description ?? "" }));
+  }
+
+  setDescription(uuid: string, description: string): string {
+    const a = this.getOrCreate(uuid);
+    a.description = description;
+    this.save(a);
+    return description;
   }
 
   allUuids(): string[] {

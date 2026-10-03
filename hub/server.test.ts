@@ -430,3 +430,103 @@ test("삭제된 계정으로 연결된 클라이언트의 다음 op는 크래시
   assert.equal((await b.req("hello")).ok, true);
   a.close(); admin.close(); b.close(); hub.stop();
 });
+
+async function until(cond: () => Promise<boolean>, ms = 2000): Promise<void> {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { if (await cond()) return; await new Promise((r) => setTimeout(r, 20)); }
+  throw new Error("조건 시간 초과");
+}
+
+test("exclusive login은 다른 세션이 쓰는 계정을 거부하고 같은 sessionToken 재연결은 허용한다", async () => {
+  const { hub, port } = await startHub();
+  const a = new Client(port); await a.ready();
+  assert.equal((await a.req("login", { uuid: "r1", name: "기획", exclusive: true, sessionToken: "T1" })).ok, true);
+  const b = new Client(port); await b.ready();
+  const rb = await b.req("login", { uuid: "r1", exclusive: true, sessionToken: "T2" });
+  assert.equal(rb.ok, false);
+  assert.match(rb.error!, /이미 다른 세션이 사용 중/);
+  const a2 = new Client(port); await a2.ready(); // 같은 프로세스의 재연결(이전 소켓이 아직 살아 있어도)
+  assert.equal((await a2.req("login", { uuid: "r1", exclusive: true, sessionToken: "T1" })).ok, true);
+  a.close(); a2.close(); b.close(); hub.stop();
+});
+
+test("연결이 끊기면 계정이 즉시 비워져 다른 세션이 독점할 수 있다", async () => {
+  const { hub, port } = await startHub();
+  const a = new Client(port); await a.ready();
+  await a.req("login", { uuid: "r1", exclusive: true, sessionToken: "T1" });
+  const probe = new Client(port); await probe.ready();
+  assert.equal((await probe.req("account_status", { uuids: ["r1"] })).statuses![0].online, true);
+  a.close();
+  await until(async () => (await probe.req("account_status", { uuids: ["r1"] })).statuses![0].online === false);
+  const b = new Client(port); await b.ready();
+  assert.equal((await b.req("login", { uuid: "r1", exclusive: true, sessionToken: "T2" })).ok, true);
+  probe.close(); b.close(); hub.stop();
+});
+
+test("비독점 login은 검사하지 않지만 online에 포함되고, 그 계정의 독점 login은 거부된다", async () => {
+  const { hub, port } = await startHub();
+  const legacy1 = new Client(port); await legacy1.ready();
+  const legacy2 = new Client(port); await legacy2.ready();
+  assert.equal((await legacy1.req("login", { uuid: "shared", name: "S" })).ok, true);
+  assert.equal((await legacy2.req("login", { uuid: "shared" })).ok, true); // 기존 동작: 공유 허용
+  const role = new Client(port); await role.ready();
+  assert.equal((await role.req("login", { uuid: "shared", exclusive: true, sessionToken: "T" })).ok, false);
+  legacy1.close(); legacy2.close(); role.close(); hub.stop();
+});
+
+test("exclusive 거부 시 기존 로그인은 유지되고, 다른 계정으로 login하면 이전 계정은 비워진다", async () => {
+  const { hub, port } = await startHub();
+  const holder = new Client(port); await holder.ready();
+  await holder.req("login", { uuid: "plan", exclusive: true, sessionToken: "H" });
+  const s = new Client(port); await s.ready();
+  await s.req("login", { uuid: "impl", name: "구현", exclusive: true, sessionToken: "S" });
+  assert.equal((await s.req("login", { uuid: "plan", exclusive: true, sessionToken: "S" })).ok, false);
+  assert.equal((await s.req("whoami")).uuid, "impl"); // 실패해도 기존 역할 유지
+  await s.req("login", { uuid: "other", exclusive: true, sessionToken: "S" }); // 전환
+  const st = await s.req("account_status", { uuids: ["impl", "other"] });
+  assert.deepEqual(st.statuses!.map((x) => x.online), [false, true]);
+  holder.close(); s.close(); hub.stop();
+});
+
+test("set_profile은 설명을 저장(재시작 후에도)하고 500자 초과·비문자열을 거부한다", async () => {
+  const dataDir = tmp();
+  const { hub, port } = await startHub(dataDir);
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "기획" });
+  assert.equal((await a.req("set_profile", { description: "게임 기획 담당" })).description, "게임 기획 담당");
+  assert.equal((await a.req("set_profile", { description: "x".repeat(501) })).ok, false);
+  assert.equal((await a.req("set_profile", { description: 3 })).ok, false);
+  assert.equal((await a.req("whoami")).description, "게임 기획 담당");
+  a.close(); hub.stop();
+  const again = await startHub(dataDir);
+  const c = new Client(again.port); await c.ready();
+  const st = await c.req("account_status", { uuids: ["u1"] });
+  assert.equal(st.statuses![0].description, "게임 기획 담당");
+  c.close(); again.hub.stop();
+});
+
+test("account_status는 로그인 없이 존재·이름·설명·online을 주고 잘못된 입력을 거부한다", async () => {
+  const { hub, port } = await startHub();
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  const anon = new Client(port); await anon.ready(); // 로그인 안 함
+  const r = await anon.req("account_status", { uuids: ["u1", "nope"] });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.statuses, [
+    { uuid: "u1", exists: true, name: "A", description: "", online: true },
+    { uuid: "nope", exists: false, name: "", description: "", online: false },
+  ]);
+  assert.equal((await anon.req("account_status", { uuids: "u1" })).ok, false);
+  assert.equal((await anon.req("account_status", { uuids: [1] })).ok, false);
+  assert.equal((await anon.req("account_status", { uuids: Array.from({ length: 101 }, (_, i) => `u${i}`) })).ok, false);
+  a.close(); anon.close(); hub.stop();
+});
+
+test("list_accounts는 로그인 없이 description·online을 준다", async () => {
+  const { hub, port } = await startHub();
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  await a.req("set_profile", { description: "설명A" });
+  const anon = new Client(port); await anon.ready();
+  const r = await anon.req("list_accounts");
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.accounts, [{ uuid: "u1", name: "A", description: "설명A", online: true }]);
+  a.close(); anon.close(); hub.stop();
+});
