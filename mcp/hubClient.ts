@@ -1,5 +1,6 @@
 import net from "node:net";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
@@ -7,8 +8,11 @@ import { MAGIC, PROTOCOL_VERSION, DEFAULT_TCP_PORT, Response } from "../shared/p
 
 export interface HubClientOptions {
   port?: number;
-  accountUuid: string;
+  /** 없으면 로그인하지 않는다(역할 선택 전). */
+  accountUuid?: string;
   accountName?: string;
+  /** true면 독점 로그인(역할 계정). UPLINK_ACCOUNT 단일 경로는 false. */
+  exclusive?: boolean;
   hubEntry?: string;
   nodeArgs?: string[];
 }
@@ -23,8 +27,9 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export class HubClient {
   private readonly port: number;
-  private readonly uuid: string;
-  private readonly name?: string;
+  /** MCP 프로세스 1개 = 세션 1개. 같은 프로세스의 재연결은 독점 검사를 통과한다. */
+  readonly sessionToken = randomUUID();
+  private account: { uuid: string; name?: string; exclusive: boolean } | null;
   private readonly hubEntry: string;
   private readonly nodeArgs: string[];
   private sock: net.Socket | null = null;
@@ -35,13 +40,24 @@ export class HubClient {
 
   constructor(opts: HubClientOptions) {
     this.port = opts.port ?? DEFAULT_TCP_PORT;
-    this.uuid = opts.accountUuid;
-    this.name = opts.accountName;
+    this.account = opts.accountUuid
+      ? { uuid: opts.accountUuid, name: opts.accountName, exclusive: opts.exclusive ?? false }
+      : null;
     this.hubEntry =
       opts.hubEntry ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "hub", "index.js");
     this.nodeArgs = opts.nodeArgs ?? [];
   }
 
+  /** 계정을 독점 선택해 로그인한다. 거부되면 기존 계정 상태를 그대로 둔다. */
+  async selectAccount(uuid: string, name?: string): Promise<Response> {
+    await this.ensureConnected();
+    const next = { uuid, name, exclusive: true };
+    const r = await this.request("login", this.loginParams(next));
+    if (r.ok) this.account = next;
+    return r;
+  }
+  async accountStatus(uuids: string[]): Promise<Response> { await this.ensureConnected(); return this.request("account_status", { uuids }); }
+  async setProfile(description: string): Promise<Response> { await this.ensureConnected(); return this.request("set_profile", { description }); }
   async whoami(): Promise<Response> { await this.ensureConnected(); return this.request("whoami", {}); }
   async setName(name: string): Promise<Response> { await this.ensureConnected(); return this.request("set_name", { name }); }
   async listAccounts(): Promise<Response> { await this.ensureConnected(); return this.request("list_accounts", {}); }
@@ -78,7 +94,18 @@ export class HubClient {
     catch { this.spawnHub(); sock = await this.retryConnect(); }
     this.attach(sock);
     await this.handshake();
-    await this.request("login", this.name ? { uuid: this.uuid, name: this.name } : { uuid: this.uuid });
+    if (this.account) {
+      const r = await this.request("login", this.loginParams(this.account));
+      if (!r.ok) { this.close(); throw new Error(`Hub 재로그인 실패: ${r.error}`); }
+    }
+  }
+
+  private loginParams(a: { uuid: string; name?: string; exclusive: boolean }): object {
+    return {
+      uuid: a.uuid,
+      ...(a.name ? { name: a.name } : {}),
+      ...(a.exclusive ? { exclusive: true, sessionToken: this.sessionToken } : {}),
+    };
   }
 
   private connectOnce(): Promise<net.Socket> {

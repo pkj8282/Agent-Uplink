@@ -30,7 +30,7 @@ function rpc(reqs: object[], env: Record<string, string>): Promise<any[]> {
   });
 }
 
-test("MCP v2는 tools/list에서 15개 툴을 노출한다", async () => {
+test("MCP v2는 tools/list에서 17개 툴을 노출한다", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-smoke-"));
   const out = await rpc([
     { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } } },
@@ -41,6 +41,20 @@ test("MCP v2는 tools/list에서 15개 툴을 노출한다", async () => {
   assert.deepEqual(names, [
     "check", "create_channel", "create_server", "delete_channel", "delete_server",
     "list_accounts", "list_channels", "list_dms", "list_servers",
-    "open_dm", "read", "send", "set_name", "wait", "whoami",
+    "open_dm", "read", "send", "set_name", "set_profile", "use_account", "wait", "whoami",
   ].sort());
+});
+
+test("env 없는 세션은 역할 선택 전 send를 막고 use_account를 안내한다", async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-smoke-"));
+  const env: Record<string, string> = { UPLINK_DATA_DIR: dataDir, UPLINK_TCP_PORT: "1" };
+  const out = await rpc([
+    { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } } },
+    { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "send", arguments: { channelId: "lobby", text: "x" } } },
+  ], { ...env, UPLINK_ACCOUNT: "" });
+  const init = out.find((m) => m.id === 1);
+  assert.match(init.result.instructions, /use_account/);
+  const call = out.find((m) => m.id === 2);
+  assert.equal(call.result.isError, true);
+  assert.match(call.result.content[0].text, /먼저 계정을 선택하세요/);
 });
