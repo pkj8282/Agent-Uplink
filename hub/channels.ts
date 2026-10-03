@@ -1,0 +1,74 @@
+import fs from "node:fs";
+import path from "node:path";
+import { Channel, Message } from "../shared/protocol.js";
+
+interface Entry {
+  channel: Channel;
+  ring: Message[];
+  seq: number;
+  file: string;
+}
+
+export class ChannelStore {
+  private readonly dir: string;
+  private readonly ringSize: number;
+  private entries = new Map<string, Entry>();
+
+  constructor(opts: { dir: string; ringSize?: number }) {
+    this.dir = opts.dir;
+    this.ringSize = opts.ringSize ?? 1000;
+  }
+
+  private pathFor(ch: Channel): string {
+    const sub = ch.kind === "dm" ? "dm" : "servers";
+    return path.join(this.dir, sub, `${ch.id}.jsonl`);
+  }
+
+  register(ch: Channel): void {
+    const existing = this.entries.get(ch.id);
+    if (existing) {
+      existing.channel = ch; // 메타 갱신(멱등)
+      return;
+    }
+    const file = this.pathFor(ch);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const entry: Entry = { channel: ch, ring: [], seq: 0, file };
+    if (fs.existsSync(file)) {
+      const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
+      for (const line of lines.slice(-this.ringSize)) {
+        try {
+          const m = JSON.parse(line) as Message;
+          entry.ring.push(m);
+          if (m.seq > entry.seq) entry.seq = m.seq;
+        } catch {
+          // 손상 줄 무시
+        }
+      }
+    }
+    this.entries.set(ch.id, entry);
+  }
+
+  getChannel(id: string): Channel | undefined {
+    return this.entries.get(id)?.channel;
+  }
+
+  append(channelId: string, from: string, fromName: string, text: string): Message {
+    const e = this.entries.get(channelId);
+    if (!e) throw new Error(`채널이 없습니다: ${channelId}`);
+    const msg: Message = { seq: ++e.seq, ts: Date.now(), channelId, from, fromName, text };
+    e.ring.push(msg);
+    if (e.ring.length > this.ringSize) e.ring.shift();
+    try {
+      fs.appendFileSync(e.file, JSON.stringify(msg) + "\n");
+    } catch {
+      // 디스크 오류 시에도 인메모리 유지
+    }
+    return msg;
+  }
+
+  recent(channelId: string, limit: number): Message[] {
+    const e = this.entries.get(channelId);
+    if (!e) return [];
+    return e.ring.slice(-limit);
+  }
+}
