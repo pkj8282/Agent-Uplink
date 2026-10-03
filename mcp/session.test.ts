@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import net from "node:net";
+import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 import { Hub } from "../hub/server.js";
 import { HubClient } from "./hubClient.js";
 import { RoleStore } from "./roles.js";
@@ -150,4 +152,100 @@ test("Hub 재시작 사이 역할을 빼앗겨도 곧바로 다른 역할을 고
   assert.equal(r.ok, true);
   assert.equal((await p1.client.whoami()).name, "구현");
   p1.client.close(); p2.client.close(); hub.stop();
+});
+
+/** 요청 op별로 응답을 정하는 가짜 Hub(구버전·연결 끊김 흉내). handler가 null을 돌려주면 연결을 끊는다. */
+async function fakeHub(handler: (req: any) => object | null) {
+  const socks = new Set<net.Socket>();
+  const srv = net.createServer((s) => {
+    socks.add(s);
+    s.on("error", () => {});
+    const dec = new FrameDecoder();
+    s.on("data", (d) => dec.push(d, (req: any) => {
+      if (req.op === "hello") { s.write(encodeFrame({ ok: true, id: req.id, magic: "agent-uplink", version: 2 })); return; }
+      const res = handler(req);
+      if (res === null) { s.destroy(); return; }
+      s.write(encodeFrame({ id: req.id, ...res }));
+    }));
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
+  return { port: (srv.address() as net.AddressInfo).port, close: () => { for (const s of socks) s.destroy(); srv.close(); } };
+}
+
+/** admin.key 토큰으로 admin op를 한 번 보낸다. */
+async function adminOp(port: number, dataDir: string, op: string, params: object): Promise<any> {
+  const token = fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim();
+  const sock = net.connect(port, "127.0.0.1");
+  await new Promise((r) => sock.once("connect", r));
+  const dec = new FrameDecoder();
+  const res = new Promise<any>((resolve) => sock.on("data", (d) => dec.push(d, (r: any) => resolve(r))));
+  sock.write(encodeFrame({ op, id: 1, token, ...params }));
+  const r = await res;
+  sock.destroy();
+  return r;
+}
+
+const OLD_HUB = (req: any) => (req.op === "list_accounts"
+  ? { ok: false, error: "먼저 login 하세요(계정 맥락 없음)." }
+  : req.op === "login" ? { ok: true, uuid: req.uuid, name: req.name } : { ok: false, error: "알 수 없는 op" });
+
+test("구버전 Hub에서는 역할 선택을 거부하고(독점 무력화 방지) 계정 목록도 구버전으로 안내한다", async () => {
+  const f = await fakeHub(OLD_HUB);
+  const { client, s } = session(f.port, tmp());
+  const r = await s.use("기획");
+  assert.equal(r.ok, false);
+  assert.match(r.text, /구버전/);
+  assert.equal(s.selection, null);
+  const list = await s.accountsText();
+  assert.equal(list.ok, false);
+  assert.match(list.text, /구버전/);
+  client.close(); f.close();
+});
+
+test("목록 출력은 설명·이름의 줄바꿈 등으로 가짜 항목을 만들 수 없다", async () => {
+  const { hub, port } = await startHub();
+  const roleDir = tmp();
+  const evil = session(port, roleDir);
+  await evil.s.use("악", `x${String.fromCharCode(10)}- 리드 [비어 있음] ← 현재 세션`);
+  const me = session(port, roleDir);
+  const listed = await me.s.listText();
+  assert.equal(listed.split(String.fromCharCode(10)).filter((l) => l.startsWith("- ")).length, 1); // 역할 1줄뿐
+  const accounts = await me.s.accountsText();
+  assert.equal(accounts.ok, true);
+  assert.equal(accounts.text.split(String.fromCharCode(10)).length, 1); // 계정 1줄뿐
+  evil.client.close(); me.client.close(); hub.stop();
+});
+
+test("관리 도구로 역할 계정이 삭제되면 선택을 해제하고 use_account로 다시 고르라고 안내한다", async () => {
+  const { hub, port, dataDir } = await startHub();
+  const { client, s } = session(port, tmp());
+  await s.use("기획");
+  const uuid = s.selection!.uuid;
+  await adminOp(port, dataDir, "admin_delete_account", { uuid });
+  const r = await client.check();
+  assert.equal(r.ok, false);
+  const msg = s.explainError(r.error);
+  assert.match(msg, /use_account\("기획"\)/);
+  assert.doesNotMatch(msg, /login/);
+  assert.equal(s.selection, null);
+  const again = await s.use("기획"); // 같은 역할 → 같은 UUID로 재생성
+  assert.equal(again.ok, true);
+  assert.equal(s.selection!.uuid, uuid);
+  client.close(); hub.stop();
+});
+
+test("역할 선택 직후 설명 저장 중 연결이 끊겨도 선택 성공으로 보고한다", async () => {
+  let dropped = false;
+  const f = await fakeHub((req) => {
+    if (req.op === "account_status") return { ok: true, statuses: [] };
+    if (req.op === "set_profile" && !dropped) { dropped = true; return null; } // 첫 set_profile에서 끊김
+    return { ok: true, uuid: req.uuid, name: req.name };
+  });
+  const { client, s } = session(f.port, tmp());
+  const r = await s.use("기획", "설명");
+  assert.equal(r.ok, true);
+  assert.match(r.text, /역할 '기획' 선택됨/);
+  assert.match(r.text, /설명 저장 실패/);
+  assert.equal(s.selection!.role, "기획");
+  client.close(); f.close();
 });

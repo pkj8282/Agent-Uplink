@@ -53,22 +53,29 @@ export class HubClient {
 
   /** 계정을 독점 선택해 로그인한다. 거부되면 기존 계정 상태를 그대로 둔다. */
   async selectAccount(uuid: string, name?: string): Promise<Response> {
-    try {
-      await this.ensureConnected();
-    } catch (e) {
-      // 이전 계정 재로그인만 거부된 경우 연결은 살아 있다 → 새 계정 선택을 계속한다.
-      if (!this.sock || this.sock.destroyed) throw e;
-    }
+    await this.ensureLink();
     const next = { uuid, name, exclusive: true };
     const r = await this.request("login", this.loginParams(next));
     if (r.ok) this.account = next;
     return r;
   }
-  async accountStatus(uuids: string[]): Promise<Response> { await this.ensureConnected(); return this.request("account_status", { uuids }); }
+  async accountStatus(uuids: string[]): Promise<Response> { await this.ensureLink(); return this.request("account_status", { uuids }); }
   async setProfile(description: string): Promise<Response> { await this.ensureConnected(); return this.request("set_profile", { description }); }
   async whoami(): Promise<Response> { await this.ensureConnected(); return this.request("whoami", {}); }
   async setName(name: string): Promise<Response> { await this.ensureConnected(); return this.request("set_name", { name }); }
-  async listAccounts(): Promise<Response> { await this.ensureConnected(); return this.request("list_accounts", {}); }
+  async listAccounts(): Promise<Response> { await this.ensureLink(); return this.request("list_accounts", {}); }
+
+  /**
+   * 로그인 없이 쓸 수 있는 op용 연결 보장. 이전 계정의 독점 재로그인만 거부된 경우(역할을 빼앗김)
+   * 연결은 살아 있으므로 계속 진행한다 — 역할 목록 조회·다른 역할 선택이 막히지 않도록.
+   */
+  private async ensureLink(): Promise<void> {
+    try {
+      await this.ensureConnected();
+    } catch (e) {
+      if (!this.sock || this.sock.destroyed) throw e;
+    }
+  }
   async openDm(peer: string): Promise<Response> { await this.ensureConnected(); return this.request("open_dm", { peer }); }
   async listDms(): Promise<Response> { await this.ensureConnected(); return this.request("list_dms", {}); }
   async createServer(name: string): Promise<Response> { await this.ensureConnected(); return this.request("create_server", { name }); }
