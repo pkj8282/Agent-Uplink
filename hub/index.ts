@@ -1,11 +1,17 @@
 import fs from "node:fs";
 import { Hub } from "./server.js";
-import { resolveOptions } from "./options.js";
+import { resolveOptions, explainStartupError } from "./options.js";
 import { restrictDataDirAcl } from "./acl.js";
 
 async function main(): Promise<void> {
   const opts = resolveOptions(process.env);
-  const hub = new Hub(opts);
+  let hub: Hub;
+  try {
+    hub = new Hub(opts);
+  } catch (e) {
+    process.stderr.write(`${explainStartupError(e, opts.dataDir)}\n`);
+    process.exit(1);
+  }
   try {
     await hub.startTcp();
   } catch (e) {

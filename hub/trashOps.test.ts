@@ -204,7 +204,7 @@ test("탐색기로 파일이 지워진 항목·두 번째 복원은 trash_missin
   assert.equal((await restore(admin, token, "../../etc")).code, "trash_bad_id");
   const oid = "1759500000000-orphan-0000beef";
   fs.mkdirSync(path.join(dataDir, "trash", oid));
-  fs.writeFileSync(path.join(dataDir, "trash", oid, "meta.json"), JSON.stringify({ v: 1, id: oid, kind: "orphan", state: "done", deletedAt: 1759500000000, deletedBy: "recovery", name: "servers/x.jsonl", files: [] }));
+  fs.writeFileSync(path.join(dataDir, "trash", oid, "meta.json"), JSON.stringify({ v: 1, id: oid, kind: "orphan", state: "done", deletedAt: 1759500000000, deletedBy: "recovery", name: "servers/33333333-3333-4333-8333-333333333333.jsonl", files: [] }));
   assert.equal((await restore(admin, token, oid)).code, "trash_not_restorable");
   admin.close(); s.a.close(); s.b.close(); hub.stop();
 });

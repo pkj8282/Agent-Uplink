@@ -7,7 +7,7 @@ import { ServerStore } from "./servers.js";
 import { DmStore } from "./dm.js";
 import { AccountStore } from "./accounts.js";
 import { InboxStore } from "./inbox.js";
-import { TrashStore, TrashMeta, isTrashId, isUuidLogName } from "./trash.js";
+import { TrashStore, TrashMeta, isTrashId, isUuidLogName, parseAccountRecord } from "./trash.js";
 import { uniqueName } from "./names.js";
 import { NameConflict, RestoreReport } from "../shared/protocol.js";
 
@@ -35,7 +35,21 @@ type By = "admin" | "mcp";
 export class TrashOps {
   constructor(private readonly d: TrashDeps) {}
 
+  /** 같은 대상을 다루다 중간에 실패한(state=deleting) 항목. 다시 삭제하면 새 항목 대신 그것을 이어서 끝낸다. */
+  private pendingDelete(match: (m: TrashMeta) => boolean): TrashMeta | null {
+    for (const it of this.d.trash.list()) {
+      const m = this.d.trash.readMeta(it.id);
+      if (m && m.state === "deleting" && match(m)) return m;
+    }
+    return null;
+  }
+
   deleteChannel(channelId: string, by: By): boolean {
+    const pending = this.pendingDelete((m) => (m.kind === "channel" || m.kind === "server") && !!m.channels?.some((c) => c.id === channelId));
+    if (pending) {
+      this.finishDelete(pending);
+      return true;
+    }
     const found = this.d.servers.findChannel(channelId);
     if (!found) return false;
     const meta = this.d.trash.create("channel", {
@@ -48,6 +62,11 @@ export class TrashOps {
   }
 
   deleteServer(serverId: string, by: By): boolean {
+    const pending = this.pendingDelete((m) => m.kind === "server" && m.serverId === serverId);
+    if (pending) {
+      this.finishDelete(pending);
+      return true;
+    }
     const srv = this.d.servers.getServer(serverId);
     if (!srv) return false;
     const meta = this.d.trash.create("server", {
@@ -59,6 +78,11 @@ export class TrashOps {
   }
 
   deleteAccount(uuid: string, by: By): boolean {
+    const pending = this.pendingDelete((m) => m.kind === "account" && m.account?.uuid === uuid);
+    if (pending) {
+      this.finishDelete(pending);
+      return true;
+    }
     const a = this.d.accounts.get(uuid);
     if (!a) return false;
     const dms = this.d.dm.byMember(uuid).map((r) => ({
@@ -76,8 +100,13 @@ export class TrashOps {
     for (const it of this.d.trash.list()) {
       const m = this.d.trash.readMeta(it.id);
       if (!m) continue;
-      if (m.state === "deleting") this.finishDelete(m);
-      else if (m.state === "restoring") this.finishRestore(m);
+      // 한 항목의 실패(파일 잠김 등)가 Hub 시작 전체를 막지 않게 한다 — 그 항목은 다음 시작이나 재시도 때 마무리.
+      try {
+        if (m.state === "deleting") this.finishDelete(m);
+        else if (m.state === "restoring") this.finishRestore(m);
+      } catch (e) {
+        process.stderr.write(`휴지통 항목 ${m.id} 복구를 미룹니다: ${(e as Error).message}\n`);
+      }
     }
   }
 
@@ -98,9 +127,15 @@ export class TrashOps {
       }
       for (const f of files) {
         if (!isUuidLogName(f) || known[sub].has(f.slice(0, -".jsonl".length))) continue;
-        const meta = this.d.trash.create("orphan", { deletedBy: "recovery", name: `${sub}/${f}` });
-        this.finishDelete(meta);
-        n++;
+        const name = `${sub}/${f}`;
+        try {
+          const meta = this.pendingDelete((m) => m.kind === "orphan" && m.name === name)
+            ?? this.d.trash.create("orphan", { deletedBy: "recovery", name });
+          this.finishDelete(meta);
+          n++;
+        } catch (e) {
+          process.stderr.write(`고아 로그 ${name} 정리를 미룹니다: ${(e as Error).message}\n`);
+        }
       }
     }
     return n;
@@ -167,8 +202,11 @@ export class TrashOps {
   restore(id: unknown, confirmRename: boolean): RestoreResult {
     if (!isTrashId(id)) return fail("trash_bad_id", "잘못된 휴지통 항목 ID입니다.");
     const meta = this.d.trash.readMeta(id);
-    if (!meta || !this.d.trash.isIntact(meta)) return fail("trash_missing", "휴지통 항목 파일이 없습니다(이미 지워진 것 같습니다).");
-    if (meta.state !== "done") return fail("trash_busy", "이 항목은 처리 중입니다. Hub를 재시작한 뒤 다시 시도하세요.");
+    if (!meta) return fail("trash_missing", "휴지통 항목 파일이 없습니다(이미 지워진 것 같습니다).");
+    // 이전 복원이 중간에 실패해 restoring으로 남았으면 기록된 plan대로 이어서 끝낸다(일부 파일은 이미 옮겨져 있음).
+    if (meta.state === "restoring") return { ok: true, report: this.finishRestore(meta) };
+    if (!this.d.trash.isIntact(meta)) return fail("trash_missing", "휴지통 항목 파일이 없거나 손상됐습니다(이미 지워진 것 같습니다).");
+    if (meta.state !== "done") return fail("trash_busy", "이 항목은 삭제를 마무리하는 중입니다. 같은 대상을 다시 삭제하거나 Hub를 재시작하세요.");
     if (meta.kind === "orphan") return fail("trash_not_restorable", "고아 로그는 복원할 위치 정보가 없습니다.");
 
     const renamed: RestoreReport["renamed"] = [];
@@ -229,10 +267,11 @@ export class TrashOps {
     }
     if (meta.kind === "account") {
       const uuid = meta.account!.uuid;
-      if (!meta.accountRestored && !accounts.get(uuid)) {
-        const raw = trash.readFile(meta.id, "account.json");
-        const rec = raw ? (JSON.parse(raw) as { uuid: string; name: string; createdAt: number; description?: string }) : null;
-        accounts.restore(rec ?? { uuid, name: meta.name, createdAt: meta.deletedAt });
+      // 계정이 없으면(처음 복원이든, 일부 복원 뒤 다시 삭제됐든) 원래 정보로 다시 만든다 —
+      // 그러지 않으면 아래 setDm이 이름 없는 유령 계정을 만든다.
+      if (!accounts.get(uuid)) {
+        const rec = parseAccountRecord(trash.readFile(meta.id, "account.json"));
+        accounts.restore(rec && rec.uuid === uuid ? rec : { uuid, name: meta.name, createdAt: meta.deletedAt });
       }
       const left: NonNullable<TrashMeta["dms"]> = [];
       for (const d of meta.dms ?? []) {
@@ -256,10 +295,10 @@ export class TrashOps {
         report.itemRemoved = true;
         return report;
       }
-      trash.deleteFile(meta.id, "account.json");
+      // account.json은 남겨 둔다: 계정이 다시 삭제된 뒤 남은 DM을 복원할 때 원래 이름으로 되살리기 위해.
       meta.accountRestored = true;
       meta.dms = left;
-      meta.files = left.map((d) => `${d.channelId}.jsonl`).filter((f) => trash.has(meta.id, f));
+      meta.files = [...left.map((d) => `${d.channelId}.jsonl`), "account.json"].filter((f) => trash.has(meta.id, f));
       meta.state = "done";
       trash.writeMeta(meta);
       return report;

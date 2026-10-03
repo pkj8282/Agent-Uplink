@@ -10,6 +10,7 @@ import { InboxStore } from "./inbox.js";
 import { DmStore } from "./dm.js";
 import { ServerStore } from "./servers.js";
 import { nameKey } from "./names.js";
+import { isSafeAccountId } from "./ids.js";
 import { TrashStore } from "./trash.js";
 import { TrashOps } from "./trashOps.js";
 import { rebuildDmIndex } from "./recovery.js";
@@ -100,7 +101,7 @@ export class Hub {
       this.channels.register({ id: c.channelId, kind: "server", label: `${c.serverName}/${c.channelName}`, members: null });
     }
     // 이전 버전 삭제·크래시로 남은 로그를 휴지통으로(손상된 서버 인덱스면 서버 쪽은 건너뜀 — 손으로 되살릴 여지)
-    this.trashOps.sweepOrphans({ servers: !this.servers.corrupt, dm: true });
+    this.trashOps.sweepOrphans({ servers: !this.servers.sweepBlocked, dm: true });
     this.adminKey = loadOrCreateAdminKey(opts.dataDir);
     this.tcp = net.createServer((sock) => this.onConnection(sock));
     this.http = http.createServer((req, res) => this.onHttp(req, res));
@@ -201,7 +202,17 @@ export class Hub {
     this.connStates.add(state);
     sock.on("data", (chunk) => {
       try {
-        dec.push(chunk, (req: Request) => this.dispatch(sock, state, req));
+        dec.push(chunk, (req: Request) => {
+          try {
+            this.dispatch(sock, state, req);
+          } catch (e) {
+            // 파일 잠김·손상 등 처리 중 예외가 Hub 프로세스를 죽이지 않게 한다(휴지통 저널은 남아 재시도·재시작 때 마무리).
+            const id = (req as { id?: unknown } | null)?.id;
+            if (typeof id === "number" && !sock.destroyed) {
+              sock.write(encodeFrame({ ok: false, id, code: "io_error", error: `처리 중 오류가 났습니다: ${(e as Error).message}` }));
+            }
+          }
+        });
       } catch (e) {
         // 상한을 넘는 길이 선언(HTTP 요청 바이트·악의적 대용량)은 그 연결만 끊는다.
         if (e instanceof FrameTooLargeError) sock.destroy();
@@ -257,6 +268,11 @@ export class Hub {
       case "login": {
         if (typeof req.uuid !== "string" || req.uuid.length === 0) {
           reply({ ok: false, error: "login에는 uuid가 필요합니다." });
+          return;
+        }
+        // uuid는 계정 파일 이름이 된다 → 경로 조작 문자를 거부한다.
+        if (!isSafeAccountId(req.uuid)) {
+          reply({ ok: false, error: "uuid에는 영숫자와 '-', '_', '.'만 쓸 수 있습니다(128자 이하)." });
           return;
         }
         const token = typeof req.sessionToken === "string" && req.sessionToken.length > 0 ? req.sessionToken : null;

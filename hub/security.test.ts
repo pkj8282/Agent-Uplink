@@ -166,6 +166,29 @@ test("send는 65536자를 넘는 메시지를 거부한다", async () => {
   }
 });
 
+test("login uuid에 경로 조작이 있으면 거부하고 데이터 폴더 밖에 계정 파일을 만들지 않는다", async () => {
+  const dataDir = tmp();
+  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0 });
+  await hub.startTcp();
+  const port = hub.tcpAddress.port;
+  try {
+    const replies: any[] = [];
+    await new Promise<void>((resolve) => {
+      const s = net.connect(port, "127.0.0.1", () => {
+        s.write(encodeFrame({ op: "login", id: 1, uuid: "../../escaped-account", name: "x" }));
+        s.write(encodeFrame({ op: "login", id: 2, uuid: "ok-account_1.a", name: "y" }));
+      });
+      const dec = new FrameDecoder();
+      s.on("data", (d) => dec.push(d, (r: any) => { replies.push(r); if (replies.length === 2) { s.destroy(); resolve(); } }));
+    });
+    assert.equal(replies[0].ok, false);
+    assert.equal(fs.existsSync(path.join(dataDir, "..", "escaped-account.json")), false);
+    assert.equal(replies[1].ok, true); // 기존 형식(영숫자·-·_·.)은 그대로 허용
+  } finally {
+    hub.stop();
+  }
+});
+
 test("isAllowedHost: 루프백 이름+정확한 포트만", () => {
   assert.equal(isAllowedHost("127.0.0.1:47801", 47801), true);
   assert.equal(isAllowedHost("LOCALHOST:47801", 47801), true);

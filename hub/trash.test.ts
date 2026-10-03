@@ -8,6 +8,7 @@ import { backupCorrupt } from "./fsutil.js";
 
 function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-trash-")); }
 const U1 = "11111111-1111-4111-8111-111111111111";
+const S1 = "22222222-2222-4222-8222-222222222222";
 
 test("isTrashId/isTrashFileName은 형식만 통과시킨다(경로 조작 차단)", () => {
   assert.equal(isTrashId("1759500000000-channel-0a1b2c3d"), true);
@@ -27,7 +28,7 @@ test("create → moveIn → done 이면 목록에 intact·restorable·크기로 
   const src = path.join(dir, "servers", `${U1}.jsonl`);
   fs.mkdirSync(path.dirname(src), { recursive: true });
   fs.writeFileSync(src, "abc\n");
-  const m = t.create("channel", { deletedBy: "admin", name: "일반", serverId: "s1", serverName: "Main", channels: [{ id: U1, name: "일반" }] }, 1759500000000);
+  const m = t.create("channel", { deletedBy: "admin", name: "일반", serverId: S1, serverName: "Main", channels: [{ id: U1, name: "일반" }] }, 1759500000000);
   assert.equal(m.state, "deleting");
   assert.equal(t.moveIn(m.id, src, `${U1}.jsonl`), true);
   assert.equal(fs.existsSync(src), false);
@@ -43,7 +44,7 @@ test("create → moveIn → done 이면 목록에 intact·restorable·크기로 
 test("파일이 탐색기로 지워지면 intact=false, orphan은 restorable=false", () => {
   const dir = tmp();
   const t = new TrashStore({ dir });
-  const m = t.create("server", { deletedBy: "admin", name: "S", channels: [] });
+  const m = t.create("server", { deletedBy: "admin", name: "S", serverId: S1, serverName: "S", channels: [] });
   t.writeFile(m.id, `${U1}.jsonl`, "x\n"); m.files.push(`${U1}.jsonl`); m.state = "done"; t.writeMeta(m);
   fs.rmSync(path.join(t.dir, m.id, `${U1}.jsonl`));
   assert.equal(t.list()[0].intact, false);
@@ -90,7 +91,7 @@ test("RT6: 항목 폴더가 junction이면 따라가지 않는다(itemDir null, 
 test("deleting/restoring 상태 항목은 비우기에서 건너뛴다", () => {
   const dir = tmp();
   const t = new TrashStore({ dir });
-  t.create("channel", { deletedBy: "admin", name: "진행중" }); // state=deleting
+  t.create("channel", { deletedBy: "admin", name: "진행중", serverId: S1, serverName: "S", channels: [] }); // state=deleting
   assert.equal(t.empty(), 0);
   assert.equal(t.list().length, 1);
 });

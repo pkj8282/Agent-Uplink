@@ -19,6 +19,18 @@ export class ServerStore {
   private servers = new Map<string, ServerRecord>();
   /** index.json을 읽지 못해 빈 상태로 시작했는가(고아 정리를 건너뛰는 근거). */
   corrupt = false;
+  /**
+   * 서버 로그 고아 정리를 막아야 하는가: 이번에 손상을 발견했거나, 이전 손상의 백업(index.json.corrupt-*)이
+   * 아직 남아 있으면 true. 사용자가 백업으로 인덱스를 되살릴 수 있도록 로그를 건드리지 않는다(백업을 지우면 재개).
+   */
+  get sweepBlocked(): boolean {
+    if (this.corrupt) return true;
+    try {
+      return fs.readdirSync(path.dirname(this.file)).some((f) => f.startsWith("index.json.corrupt-"));
+    } catch {
+      return true;
+    }
+  }
 
   constructor(opts: { dir: string }) {
     const dir = path.join(opts.dir, "servers");

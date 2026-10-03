@@ -5,6 +5,7 @@ import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { writeFileAtomic } from "./fsutil.js";
 import { TrashItemInfo } from "../shared/protocol.js";
+import { isSafeAccountId, isUuid } from "./ids.js";
 
 export type TrashKind = "channel" | "server" | "account" | "orphan";
 export type TrashState = "deleting" | "done" | "restoring";
@@ -47,6 +48,61 @@ export function isUuidLogName(s: string): boolean {
 }
 
 type CreateFields = Omit<TrashMeta, "v" | "id" | "kind" | "state" | "deletedAt" | "files">;
+
+const isStr = (v: unknown): v is string => typeof v === "string";
+
+/**
+ * 종류별 필수 필드와 경로로 쓰이는 id 형식을 검사한다. meta는 사용자가 손댈 수 있는 파일이라,
+ * 여기서 걸러야 복원이 데이터 폴더 밖에 쓰거나 예외로 Hub를 죽이지 않는다.
+ */
+function validShape(m: TrashMeta): boolean {
+  if (m.plan !== undefined) {
+    if (typeof m.plan !== "object" || m.plan === null) return false;
+    if (m.plan.serverName !== undefined && !isStr(m.plan.serverName)) return false;
+    const cn = m.plan.channelNames;
+    if (cn !== undefined && (typeof cn !== "object" || cn === null || !Object.values(cn).every(isStr))) return false;
+  }
+  switch (m.kind) {
+    case "channel":
+    case "server":
+      return isUuid(m.serverId) && isStr(m.serverName) && Array.isArray(m.channels)
+        && m.channels.every((c) => c && isUuid(c.id) && isStr(c.name));
+    case "account":
+      return !!m.account && isSafeAccountId(m.account.uuid) && Array.isArray(m.dms)
+        && m.dms.every((x) => x && isUuid(x.channelId) && isSafeAccountId(x.peer) && isStr(x.label));
+    case "orphan": {
+      const [sub, file, extra] = m.name.split("/");
+      return (sub === "servers" || sub === "dm") && isStr(file) && UUID_LOG_RE.test(file) && extra === undefined;
+    }
+  }
+}
+
+/** account.json이 복원에 쓸 수 있는 모양인가. */
+export function parseAccountRecord(raw: string | null): { uuid: string; name: string; createdAt: number; description?: string } | null {
+  if (raw === null) return null;
+  try {
+    const r = JSON.parse(raw) as { uuid?: unknown; name?: unknown; createdAt?: unknown; description?: unknown };
+    if (!isSafeAccountId(r.uuid) || !isStr(r.name) || typeof r.createdAt !== "number") return null;
+    if (r.description !== undefined && !isStr(r.description)) return null;
+    return { uuid: r.uuid, name: r.name, createdAt: r.createdAt, ...(r.description ? { description: r.description } : {}) };
+  } catch {
+    return null;
+  }
+}
+
+/** 다른 프로그램(백신·백업 도구)이 잠시 잡고 있는 파일을 위해 짧게 재시도하는 rename. */
+function renameWithRetry(src: string, dest: string): void {
+  for (let i = 0; ; i++) {
+    try {
+      fs.renameSync(src, dest);
+      return;
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (i >= 4 || (code !== "EBUSY" && code !== "EPERM" && code !== "EACCES")) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30);
+    }
+  }
+}
 
 export class TrashStore {
   readonly dir: string;
@@ -98,7 +154,7 @@ export class TrashStore {
       if (m.v !== 1 || m.id !== id || !KINDS.has(m.kind) || !STATES.has(m.state)) return null;
       if (!Array.isArray(m.files) || !m.files.every(isTrashFileName)) return null;
       if (typeof m.name !== "string" || typeof m.deletedAt !== "number") return null;
-      return m;
+      return validShape(m) ? m : null;
     } catch {
       return null;
     }
@@ -121,7 +177,7 @@ export class TrashStore {
     if (!dest) return false;
     if (fs.existsSync(dest)) return true;
     if (!fs.existsSync(src)) return false;
-    fs.renameSync(src, dest);
+    renameWithRetry(src, dest);
     return true;
   }
 
@@ -131,7 +187,7 @@ export class TrashStore {
     if (fs.existsSync(dest)) return true;
     if (!src || !fs.existsSync(src)) return false;
     fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.renameSync(src, dest);
+    renameWithRetry(src, dest);
     return true;
   }
 
@@ -156,8 +212,10 @@ export class TrashStore {
     if (f) fs.rmSync(f, { force: true });
   }
 
+  /** files가 전부 있고, account.json이 있으면 복원에 쓸 수 있는 모양이어야 한다. */
   isIntact(m: TrashMeta): boolean {
-    return m.files.every((f) => this.has(m.id, f));
+    if (!m.files.every((f) => this.has(m.id, f))) return false;
+    return !m.files.includes("account.json") || parseAccountRecord(this.readFile(m.id, "account.json")) !== null;
   }
 
   list(): TrashItem[] {
