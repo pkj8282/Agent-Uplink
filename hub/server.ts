@@ -116,7 +116,12 @@ export class Hub {
   private onHttp(req: http.IncomingMessage, res: http.ServerResponse): void {
     if (req.url === "/events") {
       res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
-      res.write(`event: init\ndata: ${JSON.stringify(this.channels.recent(LOBBY_CHANNEL_ID, 200))}\n\n`);
+      // 실시간 메시지(pushSse)와 같은 모양으로 보낸다 — 라벨이 없으면 뷰어가 채널 ID로 대신 표시해 lobby가 두 이름으로 갈린다.
+      const lobbyLabel = this.channels.getChannel(LOBBY_CHANNEL_ID)?.label ?? LOBBY_CHANNEL_ID;
+      const history = this.channels
+        .recent(LOBBY_CHANNEL_ID, 200)
+        .map((m) => ({ ts: m.ts, channelId: m.channelId, fromUuid: m.from, fromName: m.fromName, text: m.text, channelLabel: lobbyLabel }));
+      res.write(`event: init\ndata: ${JSON.stringify(history)}\n\n`);
       this.sseClients.add(res);
       const drop = () => this.sseClients.delete(res);
       req.on("close", drop);

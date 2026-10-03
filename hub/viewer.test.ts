@@ -100,3 +100,30 @@ test("뷰어는 /accounts로 참여자 목록을 그리고 발신자에 설명 �
   assert.match(html, /\.title = /);
   assert.doesNotMatch(html, /innerHTML/);
 });
+
+test("뷰어 초기 기록과 실시간 메시지는 같은 채널 라벨과 보낸 사람 uuid를 쓴다(lobby가 두 이름으로 갈리지 않음)", async () => {
+  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir: tmp(), idleShutdownMs: 0 });
+  await hub.startTcp(); await hub.startHttp();
+  const sock = net.connect(hub.tcpAddress.port, "127.0.0.1");
+  await new Promise((r) => sock.once("connect", r));
+  sock.write(encodeFrame({ op: "login", id: 1, uuid: "sender-1", name: "S" }));
+  sock.write(encodeFrame({ op: "send", id: 2, channelId: "lobby", text: "이전기록" }));
+  await new Promise((r) => setTimeout(r, 100));
+  const events = new Promise<string>((resolve) => {
+    http.get({ host: "127.0.0.1", port: hub.httpAddress.port, path: "/events" }, (res) => {
+      let buf = "";
+      res.on("data", (d) => { buf += d; if (buf.includes("실시간")) resolve(buf); });
+    });
+  });
+  await new Promise((r) => setTimeout(r, 100));
+  sock.write(encodeFrame({ op: "send", id: 3, channelId: "lobby", text: "실시간" }));
+  const buf = await events;
+  const initLine = buf.split("\n").find((l, i, all) => l.startsWith("data:") && all[i - 1] === "event: init")!;
+  const old = JSON.parse(initLine.slice(5)).find((m: any) => m.text === "이전기록");
+  const liveLine = buf.split("\n").find((l) => l.startsWith("data:") && l.includes("실시간"))!;
+  const live = JSON.parse(liveLine.slice(5));
+  assert.equal(old.channelLabel, live.channelLabel);
+  assert.equal(old.channelLabel, "main/lobby");
+  assert.equal(old.fromUuid, "sender-1");
+  sock.destroy(); hub.stop();
+});
