@@ -1,5 +1,7 @@
 import net from "node:net";
+import http from "node:http";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
+import { renderViewerHtml } from "./viewer.js";
 import { loadConfig, Config } from "./config.js";
 import { ChannelStore } from "./channels.js";
 import { AccountStore } from "./accounts.js";
@@ -33,6 +35,8 @@ export class Hub {
   protected accounts: AccountStore;
   protected inbox: InboxStore;
   private tcp: net.Server;
+  private http: http.Server;
+  private sseClients = new Set<http.ServerResponse>();
   private connections = new Set<net.Socket>();
   private waiters = new Map<string, Set<Waiter>>(); // uuid → 대기자들
   private idleTimer: NodeJS.Timeout | null = null;
@@ -46,6 +50,7 @@ export class Hub {
     // 1단계 검증용 lobby 채널(전체 공개)
     this.channels.register({ id: LOBBY_CHANNEL_ID, kind: "server", label: "main/lobby", members: null });
     this.tcp = net.createServer((sock) => this.onConnection(sock));
+    this.http = http.createServer((req, res) => this.onHttp(req, res));
   }
 
   startTcp(): Promise<void> {
@@ -64,8 +69,52 @@ export class Hub {
     return a && typeof a === "object" ? { port: a.port } : { port: this.opts.tcpPort };
   }
 
+  startHttp(): Promise<void> {
+    return new Promise((resolve) => {
+      this.http.once("error", () => resolve()); // 뷰어 포트 실패는 치명적이지 않다
+      this.http.listen(this.opts.httpPort, "127.0.0.1", () => resolve());
+    });
+  }
+
+  get httpAddress(): { port: number } {
+    const a = this.http.address();
+    return a && typeof a === "object" ? { port: a.port } : { port: this.opts.httpPort };
+  }
+
+  private onHttp(req: http.IncomingMessage, res: http.ServerResponse): void {
+    if (req.url === "/events") {
+      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+      res.write(`event: init\ndata: ${JSON.stringify(this.channels.recent(LOBBY_CHANNEL_ID, 200))}\n\n`);
+      this.sseClients.add(res);
+      const drop = () => this.sseClients.delete(res);
+      req.on("close", drop);
+      res.on("error", drop);
+    } else {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(renderViewerHtml());
+    }
+  }
+
+  private pushSse(label: string, m: { ts: number; channelId: string; fromName: string; text: string }): void {
+    const data = `data: ${JSON.stringify({ ...m, channelLabel: label })}\n\n`;
+    for (const res of this.sseClients) {
+      if (res.writableEnded || res.destroyed) {
+        this.sseClients.delete(res);
+        continue;
+      }
+      try {
+        res.write(data);
+      } catch {
+        this.sseClients.delete(res);
+      }
+    }
+  }
+
   stop(): void {
     this.tcp.close();
+    this.http.close();
+    for (const res of this.sseClients) res.end();
+    this.sseClients.clear();
     for (const s of this.connections) s.destroy();
     this.connections.clear();
   }
@@ -249,6 +298,7 @@ export class Hub {
       });
       this.wake(uuid);
     }
+    this.pushSse(ch.label, { ts, channelId: ch.id, fromName, text });
   }
 
   private addWaiter(uuid: string, w: Waiter): void {
