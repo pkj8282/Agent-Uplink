@@ -19,6 +19,13 @@ test("뷰어 HTML은 외부 CDN 없이 EventSource를 쓴다", () => {
   assert.match(html, /EventSource\(/);
 });
 
+test("뷰어에 채널 필터 셀렉트와 채널별 분류 로직이 있다", () => {
+  const html = renderViewerHtml();
+  assert.match(html, /id="chan"/); // 채널 필터 select
+  assert.match(html, /addEventListener\("change"/); // 필터 변경 핸들러
+  assert.match(html, /dataset\.ch|data-ch|setAttribute\("data-ch"/); // 행별 채널 표식으로 필터
+});
+
 test("send하면 SSE로 채널 라벨과 함께 실시간 전달된다", async () => {
   const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir: tmp(), idleShutdownMs: 0 });
   await hub.startTcp(); await hub.startHttp();
