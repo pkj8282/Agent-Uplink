@@ -62,16 +62,32 @@ export type DeleteTarget =
 
 const IRREVERSIBLE = "\n\n이 작업은 되돌릴 수 없습니다.";
 
+// C0/C1 제어문자(개행 포함), 줄·문단 구분자, bidi 방향 제어
+const UNSAFE_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+
+/** 확인창 등 평문 UI에 넣을 이름: 에이전트가 정한 이름이 문구를 위장하지 못하게 정리하고 길이를 자른다. */
+export function displayName(s: string, max = 80): string {
+  const flat = s.replace(UNSAFE_CHARS, " ");
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
+
 /** 삭제 확인 대화상자 문구. */
 export function deleteConfirmMessage(t: DeleteTarget): string {
   switch (t.kind) {
     case "channel":
-      return `채널 '${t.serverName}/${t.name}'을(를) 삭제합니다.${IRREVERSIBLE}`;
+      return `채널 '${displayName(t.serverName)}/${displayName(t.name)}'을(를) 삭제합니다.${IRREVERSIBLE}`;
     case "server":
-      return `서버 '${t.name}'과(와) 그 채널 ${t.channelCount}개를 삭제합니다.${IRREVERSIBLE}`;
+      return `서버 '${displayName(t.name)}'과(와) 그 채널 ${t.channelCount}개를 삭제합니다.${IRREVERSIBLE}`;
     case "account":
-      return `계정 '${t.name}' (${t.uuid})을(를) 삭제합니다.\n이 계정의 DM ${t.dmCount}개와 알림도 함께 정리됩니다.${IRREVERSIBLE}`;
+      return `계정 '${displayName(t.name)}' (${displayName(t.uuid)})을(를) 삭제합니다.\n이 계정의 DM ${t.dmCount}개와 알림도 함께 정리됩니다.${IRREVERSIBLE}`;
   }
+}
+
+/** 동시에 여러 번 시작된 비동기 요청 중 마지막 것만 반영하기 위한 순번. */
+export class LatestOnly {
+  private n = 0;
+  begin(): number { return ++this.n; }
+  isLatest(t: number): boolean { return t === this.n; }
 }
 
 /** 그 계정이 멤버인 DM 수. */

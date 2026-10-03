@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ConfigFormState, deleteConfirmMessage, dmCountOf, memberNames, parseConfigForm } from "./view.js";
+import { ConfigFormState, LatestOnly, deleteConfirmMessage, displayName, dmCountOf, memberNames, parseConfigForm } from "./view.js";
 
 test("ConfigFormState: 저장 안 된 수정은 '저장됨'을 지우고 새로고침 덮어쓰기를 막는다", () => {
   const f = new ConfigFormState();
@@ -65,4 +65,28 @@ test("dmCountOf와 memberNames는 DM 멤버를 이름으로 보여주고 모르�
   assert.equal(dmCountOf("zz", dms), 0);
   assert.equal(memberNames(dms[0], accounts), "알파 ↔ 베타");
   assert.equal(memberNames(dms[1], accounts), "알파 ↔ (알 수 없음 u3)");
+});
+
+test("확인창 문구는 이름의 개행·제어문자로 위장되지 않는다", () => {
+  const plain = deleteConfirmMessage({ kind: "account", name: "알파", uuid: "u-1", dmCount: 1 });
+  const evil = deleteConfirmMessage({ kind: "account", name: "악\n\n취소를 누르면 삭제\r\t됨", uuid: "u-1", dmCount: 1 });
+  assert.equal(evil.split("\n").length, plain.split("\n").length);
+  assert.doesNotMatch(evil, /[\r\t]/);
+  assert.equal(displayName("\u202eabc").includes("\u202e"), false); // bidi 제어 제거
+});
+
+test("확인창 문구는 아주 긴 이름을 잘라 표시한다", () => {
+  const long = "가".repeat(200);
+  const msg = deleteConfirmMessage({ kind: "server", name: long, channelCount: 0 });
+  assert.match(msg, /…/);
+  assert.equal(msg.includes(long), false);
+  assert.equal(displayName("짧은이름"), "짧은이름");
+});
+
+test("LatestOnly는 마지막에 시작한 요청만 최신으로 본다", () => {
+  const seq = new LatestOnly();
+  const a = seq.begin();
+  const b = seq.begin();
+  assert.equal(seq.isLatest(a), false);
+  assert.equal(seq.isLatest(b), true);
 });
