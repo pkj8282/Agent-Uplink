@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ConfigFormState, LatestOnly, accountMeta, deleteConfirmMessage, displayName, dmCountOf, memberNames, parseConfigForm } from "./view.js";
+import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle } from "./view.js";
 
 test("ConfigFormState: 저장 안 된 수정은 '저장됨'을 지우고 새로고침 덮어쓰기를 막는다", () => {
   const f = new ConfigFormState();
@@ -95,4 +95,50 @@ test("accountMeta는 접속 여부와 DM 수를 보여준다", () => {
   assert.equal(accountMeta(true, 2), "접속 중 · DM 2");
   assert.equal(accountMeta(false, 0), "DM 0");
   assert.equal(accountMeta(undefined, 1), "DM 1"); // 구버전 Hub
+});
+
+test("displayName: 서로게이트 쌍을 자르지 않고 LRM·RLM·ALM·영폭·BOM을 정리한다", () => {
+  const emoji = String.fromCodePoint(0x1f600);
+  assert.equal(displayName(emoji.repeat(3), 2), `${emoji}${emoji}…`);
+  const hidden = ["a", String.fromCodePoint(0x200e), "b", String.fromCodePoint(0x061c), "c", String.fromCodePoint(0x200b), "d", String.fromCodePoint(0xfeff)].join("");
+  assert.equal(displayName(hidden), "a b c d ");
+});
+
+test("휴지통 표시 문구", () => {
+  const item = { id: "1759500000000-channel-0a1b2c3d", kind: "channel" as const, name: "일반", serverName: "Main", deletedAt: 0, deletedBy: "admin" as const, bytes: 2048, fileCount: 1, intact: true, restorable: true };
+  assert.equal(trashKindLabel("orphan"), "고아 로그");
+  assert.equal(formatBytes(512), "512 B");
+  assert.equal(formatBytes(2048), "2.0 KB");
+  assert.equal(formatBytes(5 * 1024 * 1024), "5.0 MB");
+  assert.equal(trashTitle(item), "Main/일반");
+  assert.deepEqual(trashFlags({ ...item, intact: false }), ["손상됨"]);
+  assert.deepEqual(trashFlags({ ...item, kind: "account", dmLeftover: 2 }), ["DM 2개 남음"]);
+  assert.match(restoreConfirmMessage(item), /채널 'Main\/일반'을\(를\) 복원합니다/);
+  assert.equal(trashSummary(undefined), "이 Hub는 휴지통을 지원하지 않습니다.");
+  assert.equal(trashSummary([item, { ...item, bytes: 1024 }]), "2개 항목 · 3.0 KB");
+  assert.match(emptyTrashConfirmMessage(2, 3072), /2개 항목\(3\.0 KB\)을 영구 삭제합니다[\s\S]*되돌릴 수 없습니다/);
+});
+
+test("이름 충돌 확인 문구: 서버 충돌이 있으면 허브 문구, 채널만이면 채널 문구 + 바뀔 이름 목록", () => {
+  const both = conflictConfirmMessage([{ kind: "server", name: "Main", to: "Main (2)" }, { kind: "channel", name: "일반", to: "일반 (2)" }]);
+  assert.match(both, /^이미 똑같은 이름의 허브가 올려져 있어요! 복원할까요\?/);
+  assert.match(both, /Main → Main \(2\)/);
+  assert.match(both, /일반 → 일반 \(2\)/);
+  const ch = conflictConfirmMessage([{ kind: "channel", name: "일반", to: "일반 (4)" }]);
+  assert.match(ch, /^이미 똑같은 이름의 채널이 올려져 있어요! 복원할까요\?/);
+});
+
+test("오류 코드 문구: trash_missing은 '이미 지워져있는 것 같아요!', 모르는 코드는 원문", () => {
+  assert.equal(opErrorMessage("trash_missing", "x"), "이미 지워져있는 것 같아요!");
+  assert.match(opErrorMessage("channel_limit", "x"), /채널 수 한계/);
+  assert.match(opErrorMessage("trash_not_restorable", "x"), /고아 로그/);
+  assert.equal(opErrorMessage(undefined, "원문 오류"), "원문 오류");
+});
+
+test("복원 결과 문구: 바뀐 이름·다시 만든 서버·남은 DM", () => {
+  const m = restoreResultMessage({ renamed: [{ kind: "channel", from: "일반", to: "일반 (2)" }], recreatedServer: { id: "s", name: "Main" }, dmsRestored: 0, dmsLeft: 1, itemRemoved: false });
+  assert.match(m, /복원했습니다/);
+  assert.match(m, /일반 → 일반 \(2\)/);
+  assert.match(m, /서버 'Main'을\(를\) 다시 만들었습니다/);
+  assert.match(m, /DM 1개는 상대 계정이 없거나 이미 다른 DM이 있어 휴지통에 남았습니다/);
 });

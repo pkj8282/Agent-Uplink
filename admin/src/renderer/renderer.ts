@@ -1,6 +1,8 @@
-import type { AdminApi, AdminConfig, IpcResult, Snapshot } from "../types.js";
+import type { AdminApi, AdminConfig, IpcResult, Snapshot, TrashItem } from "../types.js";
 import {
-  ConfigFormState, LatestOnly, accountMeta, deleteConfirmMessage, displayName, dmCountOf, memberNames, parseConfigForm,
+  ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf,
+  emptyTrashConfirmMessage, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage,
+  restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle,
 } from "./view.js";
 import type { FormMessage } from "./view.js";
 
@@ -29,13 +31,39 @@ function showBanner(text: string): void {
   b.hidden = text === "";
 }
 
+// 작업 결과·오류: Hub 상태 배너와 분리 — 새로고침이 지우지 않고, 다음 작업 시작이나 닫기로만 지운다.
+function showOpMsg(m: { text: string; kind: "ok" | "err" } | null): void {
+  const box = byId("op-msg");
+  if (!m) { box.hidden = true; return; }
+  byId("op-msg-text").textContent = m.text;
+  box.className = `opmsg ${m.kind}`;
+  box.hidden = false;
+}
+byId("op-msg-close").addEventListener("click", () => showOpMsg(null));
+
 type ViewState = "loading" | "ready" | "hubdown" | "error";
 
-/** 화면 상태: ready가 아니면 본문을 inert로 막아 마우스·키보드 조작을 모두 차단한다. */
+let lastFocus: HTMLElement | null = null;
+
+/** 화면 상태: ready가 아니면 본문을 inert로 막아 마우스·키보드 조작을 모두 차단한다. 막기 직전 포커스를 기억한다. */
 function setState(state: ViewState): void {
+  const main = document.querySelector("main")!;
+  if (state !== "ready" && !main.inert) {
+    const a = document.activeElement;
+    lastFocus = a instanceof HTMLElement && main.contains(a) ? a : null;
+  }
   document.body.dataset.state = state;
-  document.querySelector("main")!.inert = state !== "ready";
+  main.inert = state !== "ready";
   byId("status").textContent = state === "loading" ? "불러오는 중…" : "";
+}
+
+/** 다시 그린 뒤 포커스 복원: 원래 요소가 남아 있으면 그것, 다시 그려져 사라졌거나 비활성이면 현재 탭 버튼. */
+function restoreFocus(): void {
+  if (!lastFocus) return;
+  const keep = lastFocus.isConnected && !(lastFocus as HTMLButtonElement).disabled;
+  const target = keep ? lastFocus : document.querySelector<HTMLElement>('[data-tab][aria-selected="true"]');
+  lastFocus = null;
+  target?.focus();
 }
 
 async function refresh(): Promise<void> {
@@ -53,6 +81,8 @@ async function refresh(): Promise<void> {
   if (formState.acceptsRefresh()) renderConfig(r.data.config); // 저장 안 된 수정은 덮어쓰지 않는다
   renderServers(r.data);
   renderAccounts(r.data);
+  renderTrash(r.data);
+  restoreFocus();
 }
 
 function renderConfig(c: AdminConfig): void {
@@ -61,19 +91,74 @@ function renderConfig(c: AdminConfig): void {
   byId<HTMLInputElement>("cfg-dev-delete").checked = c.allowDevDelete;
 }
 
-/** 확인 대화상자 → 삭제 → 새로고침. 실패 사유는 새로고침 뒤에 배너로 남긴다. */
+/** 확인 대화상자 → 삭제(휴지통으로) → 새로고침. 결과는 작업 메시지 영역에 남긴다(배너와 분리). */
 function deleteButton(label: string, confirmText: string, action: () => Promise<IpcResult<void>>): HTMLButtonElement {
   const b = el("button", label, "danger");
   b.type = "button";
   b.addEventListener("click", async () => {
     if (!window.confirm(confirmText)) return;
+    showOpMsg(null);
     b.disabled = true;
     const r = await action();
     await refresh();
-    if (!r.ok) showBanner(`삭제 실패: ${r.error}`);
+    showOpMsg(r.ok
+      ? { text: "삭제했습니다(휴지통으로 이동).", kind: "ok" }
+      : { text: `삭제 실패: ${opErrorMessage(r.code, r.error)}`, kind: "err" });
   });
   return b;
 }
+
+let trashItems: TrashItem[] | undefined;
+
+function renderTrash(s: Snapshot): void {
+  trashItems = s.trash;
+  byId("trash-summary").textContent = trashSummary(s.trash);
+  byId<HTMLButtonElement>("empty-trash").disabled = !s.trash || s.trash.length === 0;
+  const list = byId("trash-list");
+  list.replaceChildren();
+  if (!s.trash) return;
+  if (s.trash.length === 0) { list.append(el("li", "휴지통이 비어 있습니다.", "empty")); return; }
+  for (const t of [...s.trash].reverse()) { // 최근 삭제가 위
+    const li = el("li", undefined, "row");
+    li.dataset.kind = "trash";
+    li.append(
+      el("span", trashKindLabel(t.kind), "meta"),
+      el("span", trashTitle(t) || t.id, "name"),
+      el("span", `${new Date(t.deletedAt).toLocaleString()} · ${formatBytes(t.bytes)} · ${t.deletedBy}`, "meta"),
+    );
+    for (const f of trashFlags(t)) li.append(el("span", f, "flag"));
+    const b = el("button", "복원");
+    b.type = "button";
+    b.disabled = !t.restorable;
+    b.addEventListener("click", () => void restoreFlow(t, b));
+    li.append(b);
+    list.append(li);
+  }
+}
+
+/** 복원: 확인 → 이름이 겹치면 확인 입력 창 → 예일 때만 번호를 붙여 복원. */
+async function restoreFlow(t: TrashItem, b: HTMLButtonElement): Promise<void> {
+  if (!window.confirm(restoreConfirmMessage(t))) return;
+  showOpMsg(null);
+  b.disabled = true;
+  let r = await window.admin.restoreTrash(t.id, false);
+  if (!r.ok && r.code === "name_conflict" && r.conflicts) {
+    if (!window.confirm(conflictConfirmMessage(r.conflicts))) { await refresh(); return; }
+    r = await window.admin.restoreTrash(t.id, true);
+  }
+  await refresh();
+  showOpMsg(r.ok ? { text: restoreResultMessage(r.data), kind: "ok" } : { text: opErrorMessage(r.code, r.error), kind: "err" });
+}
+
+byId("empty-trash").addEventListener("click", async () => {
+  const items = trashItems ?? [];
+  if (items.length === 0) return;
+  if (!window.confirm(emptyTrashConfirmMessage(items.length, items.reduce((s, t) => s + t.bytes, 0)))) return;
+  showOpMsg(null);
+  const r = await window.admin.emptyTrash();
+  await refresh();
+  showOpMsg(r.ok ? { text: `휴지통을 비웠습니다(${r.data.removed}개).`, kind: "ok" } : { text: opErrorMessage(r.code, r.error), kind: "err" });
+});
 
 function renderServers(s: Snapshot): void {
   const list = byId("server-list");

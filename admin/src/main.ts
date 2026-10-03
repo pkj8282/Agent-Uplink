@@ -27,7 +27,12 @@ function handle(channel: string, fn: (arg: unknown) => Promise<IpcResult<unknown
 }
 
 // Hub가 값을 재검증하므로 patch는 그대로 전달한다.
-handle("admin:snapshot", () => toResult(() => client.snapshot()));
+// 스모크 전용: 새로고침 응답을 늦춰 inert 중 포커스 소실·복원을 재현한다(UPLINK_ADMIN_SMOKE와 함께일 때만).
+const smokeSnapshotDelay = process.env.UPLINK_ADMIN_SMOKE ? Number(process.env.UPLINK_ADMIN_SMOKE_SNAPSHOT_DELAY_MS ?? 0) : 0;
+handle("admin:snapshot", async () => {
+  if (smokeSnapshotDelay > 0) await new Promise((r) => setTimeout(r, smokeSnapshotDelay));
+  return toResult(() => client.snapshot());
+});
 handle("admin:setConfig", (patch) => toResult(() => client.setConfig(patch as ConfigPatch)));
 handle("admin:deleteChannel", (id) => toResult(() => client.deleteChannel(asId(id))));
 handle("admin:deleteServer", (id) => toResult(() => client.deleteServer(asId(id))));
@@ -91,7 +96,18 @@ function runSmoke(win: BrowserWindow, outFile: string): void {
         descriptions: [...document.querySelectorAll("[data-kind=account] .desc")].map((e) => e.textContent),
         dms: document.querySelectorAll("[data-kind=dm]").length,
         injected: document.querySelectorAll("main img, main script, main iframe").length,
+        trash: document.querySelectorAll("[data-kind=trash]").length,
+        trashSummary: document.getElementById("trash-summary").textContent,
+        opMsgHidden: document.getElementById("op-msg").hidden,
       })`);
+      // inert 전환 뒤 포커스 복원 확인: 설정 입력에 포커스 → 새로고침 → 끝난 뒤 포커스 위치
+      report.focusAfterRefresh = await win.webContents.executeJavaScript(`(async () => {
+        document.getElementById("cfg-max").focus();
+        document.getElementById("refresh").click();
+        for (let i = 0; i < 50 && document.body.dataset.state === "loading"; i++) await new Promise((r) => setTimeout(r, 100));
+        await new Promise((r) => setTimeout(r, 100));
+        return document.activeElement ? document.activeElement.id : "";
+      })()`);
     } catch (e) {
       report = { state: "smoke-error", error: (e as Error).message };
     }

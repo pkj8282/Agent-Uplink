@@ -1,5 +1,6 @@
 // 렌더러의 순수 로직(DOM 없음 → Node에서 테스트).
-import type { ConfigPatch, SnapshotAccount, SnapshotDm } from "../types.js";
+import type { ConfigPatch, NameConflict, RestoreReport, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
+import { oneLine } from "../text.js";
 
 export interface ConfigFormInput {
   maxChannelsPerServer: string;
@@ -62,13 +63,76 @@ export type DeleteTarget =
 
 const IRREVERSIBLE = "\n\n이 작업은 되돌릴 수 없습니다.";
 
-// C0/C1 제어문자(개행 포함), 줄·문단 구분자, bidi 방향 제어
-const UNSAFE_CHARS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
-
-/** 확인창 등 평문 UI에 넣을 이름: 에이전트가 정한 이름이 문구를 위장하지 못하게 정리하고 길이를 자른다. */
+/** 확인창 등 평문 UI에 넣을 이름: 위장 문자(제어·방향·폭 0)를 정리하고 코드포인트 기준으로 자른다. */
 export function displayName(s: string, max = 80): string {
-  const flat = s.replace(UNSAFE_CHARS, " ");
-  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+  return oneLine(s, max);
+}
+
+const KIND_LABEL: Record<TrashItem["kind"], string> = { channel: "채널", server: "서버", account: "계정", orphan: "고아 로그" };
+
+export function trashKindLabel(kind: TrashItem["kind"]): string {
+  return KIND_LABEL[kind];
+}
+
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** 휴지통 항목 제목: 채널은 '서버/채널'. */
+export function trashTitle(t: TrashItem): string {
+  return t.kind === "channel" && t.serverName !== undefined ? `${t.serverName}/${t.name}` : t.name;
+}
+
+export function trashFlags(t: TrashItem): string[] {
+  const f: string[] = [];
+  if (!t.intact) f.push("손상됨");
+  if (t.dmLeftover) f.push(`DM ${t.dmLeftover}개 남음`);
+  return f;
+}
+
+export function trashSummary(items: TrashItem[] | undefined): string {
+  if (items === undefined) return "이 Hub는 휴지통을 지원하지 않습니다.";
+  return `${items.length}개 항목 · ${formatBytes(items.reduce((s, t) => s + t.bytes, 0))}`;
+}
+
+export function restoreConfirmMessage(t: TrashItem): string {
+  return `${trashKindLabel(t.kind)} '${displayName(trashTitle(t))}'을(를) 복원합니다.\n이름이 겹치면 다음 단계에서 확인합니다.`;
+}
+
+/** 이름 충돌 확인 입력 창 문구(서버 충돌이 하나라도 있으면 허브 문구). */
+export function conflictConfirmMessage(conflicts: NameConflict[]): string {
+  const head = conflicts.some((c) => c.kind === "server")
+    ? "이미 똑같은 이름의 허브가 올려져 있어요! 복원할까요?"
+    : "이미 똑같은 이름의 채널이 올려져 있어요! 복원할까요?";
+  const lines = conflicts.map((c) => `${trashKindLabel(c.kind)}: ${displayName(c.name)} → ${displayName(c.to)}`);
+  return `${head}\n\n${lines.join("\n")}`;
+}
+
+export function restoreResultMessage(r: RestoreReport): string {
+  const parts = ["복원했습니다."];
+  for (const x of r.renamed) parts.push(`이름 변경: ${displayName(x.from)} → ${displayName(x.to)}`);
+  if (r.recreatedServer) parts.push(`서버 '${displayName(r.recreatedServer.name)}'을(를) 다시 만들었습니다.`);
+  if (r.dmsLeft) parts.push(`DM ${r.dmsLeft}개는 상대 계정이 없거나 이미 다른 DM이 있어 휴지통에 남았습니다.`);
+  return parts.join(" ");
+}
+
+const CODE_TEXT: Record<string, string> = {
+  trash_missing: "이미 지워져있는 것 같아요!",
+  trash_not_restorable: "고아 로그는 복원할 위치 정보가 없어 복원할 수 없습니다.",
+  trash_bad_id: "잘못된 휴지통 항목입니다. 새로고침하세요.",
+  channel_limit: "복원하면 서버당 채널 수 한계를 넘습니다. 설정에서 한계를 올리거나 채널을 정리한 뒤 다시 시도하세요.",
+  trash_busy: "이 항목은 처리 중입니다. Hub를 재시작한 뒤 다시 시도하세요.",
+};
+
+/** Hub 오류 코드 → 관리 앱 문구(영어 UI를 추가할 때 이 표만 바꾼다). 모르는 코드는 원문. */
+export function opErrorMessage(code: string | undefined, fallback: string): string {
+  return (code && CODE_TEXT[code]) || fallback;
+}
+
+export function emptyTrashConfirmMessage(count: number, bytes: number): string {
+  return `휴지통의 ${count}개 항목(${formatBytes(bytes)})을 영구 삭제합니다.${IRREVERSIBLE}`;
 }
 
 /** 삭제 확인 대화상자 문구. */
