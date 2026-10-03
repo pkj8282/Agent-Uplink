@@ -1,7 +1,7 @@
 import net from "node:net";
 import http from "node:http";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
-import { renderViewerHtml } from "./viewer.js";
+import { renderViewerHtml, isAllowedHost } from "./viewer.js";
 import { loadConfig, saveConfig, Config } from "./config.js";
 import { loadOrCreateAdminKey, verifyAdminToken } from "./adminKey.js";
 import { ChannelStore } from "./channels.js";
@@ -131,6 +131,12 @@ export class Hub {
   }
 
   private onHttp(req: http.IncomingMessage, res: http.ServerResponse): void {
+    // DNS rebinding 방어: 공격자 도메인이 127.0.0.1로 재바인딩돼도 Host가 다르므로 거부한다.
+    if (!isAllowedHost(req.headers.host, this.httpAddress.port)) {
+      res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Forbidden");
+      return;
+    }
     if (req.url === "/events") {
       res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
       // 실시간 메시지(pushSse)와 같은 모양으로 보낸다 — 라벨이 없으면 뷰어가 채널 ID로 대신 표시해 lobby가 두 이름으로 갈린다.

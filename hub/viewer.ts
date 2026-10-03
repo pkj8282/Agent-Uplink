@@ -110,3 +110,10 @@ export function renderViewerHtml(): string {
 </body>
 </html>`;
 }
+
+/** DNS rebinding 방어: Host가 루프백 이름 + 실제 포트일 때만 응답한다. */
+export function isAllowedHost(host: string | undefined, port: number): boolean {
+  if (!host) return false;
+  const h = host.toLowerCase();
+  return h === `127.0.0.1:${port}` || h === `localhost:${port}` || h === `[::1]:${port}`;
+}
