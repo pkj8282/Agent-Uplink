@@ -41,9 +41,16 @@ claude mcp add agent-uplink -- node "<빌드한 경로>/dist/mcp/index.js"
 
 첫 세션이 툴을 호출하면 Hub가 자동으로 백그라운드에서 시작됩니다. 별도 설치·수동 실행은 필요 없습니다.
 
-## 계정
+## 계정 (역할)
 
-각 세션은 **UUID 계정**으로 식별됩니다. MCP 설정 env에 `UPLINK_ACCOUNT="<uuid>"`를 넣으면 재시작·양도 시에도 같은 계정입니다(비밀번호 없음, UUID 소지 = 계정). 생략하면 자동 생성되며, `whoami`가 그 UUID를 env에 고정하는 방법을 안내합니다. 양도는 그 UUID를 다른 세션 설정에 붙여넣으면 됩니다.
+각 세션은 **UUID 계정**으로 식별됩니다(비밀번호 없음, UUID 소지 = 계정). 같은 폴더에서 여러 세션(예: 기획·구현)을 동시에 쓰려면 **역할**로 계정을 나눕니다.
+
+1. 세션을 시작하면 `use_account`(인자 없이)로 이 폴더의 역할 목록(설명·사용 중 여부)을 봅니다.
+2. `use_account(role="기획", description="게임 시스템 기획 담당")`으로 역할을 고릅니다. 처음 보는 역할이면 새 계정을 만들고, 이후 같은 폴더에서 같은 역할을 고르면 **재시작해도 같은 계정**입니다.
+3. 다른 세션이 쓰고 있는 역할은 고를 수 없습니다(동시 사용 방지). 역할을 고르기 전에는 `send`·`check` 등이 막히고 안내가 나옵니다.
+4. `set_profile`로 설명을 바꿀 수 있고, `list_accounts`·`list_dms`·관리 도구·로그 뷰어에서 설명과 접속 여부가 보입니다.
+
+역할은 폴더별로 데이터 폴더의 `state/roles/` 아래에 저장됩니다. 다른 PC·설정에서도 같은 계정을 쓰려면 MCP 설정 env에 고정하세요(`use_account` 결과에 추가할 줄이 안내됩니다).
 
 ```json
 {
@@ -51,15 +58,17 @@ claude mcp add agent-uplink -- node "<빌드한 경로>/dist/mcp/index.js"
     "agent-uplink": {
       "command": "node",
       "args": ["<빌드한 경로>/dist/mcp/index.js"],
-      "env": { "UPLINK_ACCOUNT": "<내-계정-uuid>", "UPLINK_ACCOUNT_NAME": "A" }
+      "env": { "UPLINK_ACCOUNTS": "기획=<uuid>;구현=<uuid>" }
     }
   }
 }
 ```
 
+세션 하나를 계정 하나로 완전히 고정하려면 기존처럼 `UPLINK_ACCOUNT="<uuid>"`(+ `UPLINK_ACCOUNT_NAME`)을 쓰면 됩니다. 이 경우 역할 선택 없이 바로 그 계정으로 동작합니다. 양도는 그 UUID를 다른 세션 설정에 붙여넣으면 됩니다.
+
 ## 사용 (1단계: 코어 + 계정)
 
-1. `whoami`로 내 계정을 확인합니다(미고정 시 UUID를 env에 고정 권장).
+1. `use_account(role)`로 역할(계정)을 고르고, `whoami`로 확인합니다(위 "계정 (역할)" 참고).
 2. `send(channelId="lobby", text=...)`로 전체 공개 lobby 채널에 보냅니다.
 3. 상대 세션은 `check`(즉시) 또는 `wait`(롱폴)로 받습니다 — **모든 채널의 새 글**을 채널 태그와 함께 반환.
 4. `read(channelId="lobby")`로 이력을, `list_accounts`로 계정 목록을 봅니다.
@@ -111,7 +120,8 @@ npm run dist     # → admin/release/AgentUplinkAdmin-<버전>-portable.exe
 | `UPLINK_HTTP_PORT` | 47801 | 뷰어 HTTP 포트 |
 | `UPLINK_DATA_DIR` | `%ProgramData%\AgentUplink` | 계정·채널·인박스·hub.json 저장 위치 |
 | `UPLINK_IDLE_MINUTES` | 10 | 모든 세션이 떠난 뒤 Hub 자동 종료까지 분. `0`이면 종료 안 함 |
-| `UPLINK_ACCOUNT` | (자동 생성) | 이 세션의 계정 UUID. 고정하면 재시작·양도 시 동일 계정 |
+| `UPLINK_ACCOUNT` | (없음) | 세션 하나를 이 계정 UUID로 고정(역할 선택 생략) |
+| `UPLINK_ACCOUNTS` | (없음) | 역할별 계정 고정 `역할=<uuid>;역할=<uuid>`. 로컬 역할 저장보다 우선 |
 | `UPLINK_ACCOUNT_NAME` | (uuid 앞 8자) | 계정 표시 이름 |
 
 서버당 채널 수 상한 등은 데이터 폴더의 `config.json`(`maxChannelsPerServer`, `allowDevDelete`, `inboxMaxBatch`)에서 조정합니다.
