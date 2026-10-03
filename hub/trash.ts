@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { writeFileAtomic } from "./fsutil.js";
+import { TrashItemInfo } from "../shared/protocol.js";
 
 export type TrashKind = "channel" | "server" | "account" | "orphan";
 export type TrashState = "deleting" | "done" | "restoring";
@@ -26,19 +27,7 @@ export interface TrashMeta {
   files: string[];
 }
 
-export interface TrashItem {
-  id: string;
-  kind: TrashKind;
-  name: string;
-  serverName?: string;
-  deletedAt: number;
-  deletedBy: TrashMeta["deletedBy"];
-  bytes: number;
-  fileCount: number;
-  intact: boolean;
-  restorable: boolean;
-  dmLeftover?: number;
-}
+export type TrashItem = TrashItemInfo;
 
 const ID_RE = /^\d{13}-(channel|server|account|orphan)-[0-9a-f]{8}$/;
 const UUID_LOG_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/;

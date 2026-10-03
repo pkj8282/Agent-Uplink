@@ -49,6 +49,34 @@ export interface AccountStatus {
   online: boolean;
 }
 
+export interface TrashItemInfo {
+  id: string;
+  kind: "channel" | "server" | "account" | "orphan";
+  name: string;
+  serverName?: string;
+  deletedAt: number;
+  deletedBy: "admin" | "mcp" | "recovery";
+  bytes: number;
+  fileCount: number;
+  intact: boolean;
+  restorable: boolean;
+  dmLeftover?: number;
+}
+
+export interface NameConflict {
+  kind: "server" | "channel";
+  name: string;
+  to: string;
+}
+
+export interface RestoreReport {
+  renamed: { kind: "server" | "channel"; from: string; to: string }[];
+  recreatedServer?: { id: string; name: string };
+  dmsRestored: number;
+  dmsLeft: number;
+  itemRemoved: boolean;
+}
+
 export type Request =
   | { op: "hello"; id: number }
   | { op: "login"; id: number; uuid: string; name?: string; exclusive?: boolean; sessionToken?: string }
@@ -73,7 +101,9 @@ export type Request =
   | { op: "admin_set_config"; id: number; token: string; patch: { maxChannelsPerServer?: number; allowDevDelete?: boolean; inboxMaxBatch?: number } }
   | { op: "admin_delete_channel"; id: number; token: string; channelId: string }
   | { op: "admin_delete_server"; id: number; token: string; serverId: string }
-  | { op: "admin_delete_account"; id: number; token: string; uuid: string };
+  | { op: "admin_delete_account"; id: number; token: string; uuid: string }
+  | { op: "admin_restore_trash"; id: number; token: string; trashId?: string; confirmRename?: boolean }
+  | { op: "admin_empty_trash"; id: number; token: string };
 
 export interface Response {
   ok: boolean;
@@ -97,5 +127,10 @@ export interface Response {
   snapshotServers?: { id: string; name: string; channels: { id: string; name: string }[] }[]; // admin_snapshot
   snapshotAccounts?: { uuid: string; name: string; description: string; online: boolean }[]; // admin_snapshot
   snapshotDms?: { channelId: string; members: string[]; label: string }[]; // admin_snapshot
+  trash?: TrashItemInfo[]; // admin_snapshot
+  restored?: RestoreReport; // admin_restore_trash
+  removed?: number; // admin_empty_trash
   error?: string;
+  code?: string; // 관리 앱이 문구로 바꾸는 오류 코드(휴지통 op)
+  conflicts?: NameConflict[]; // admin_restore_trash: code=name_conflict
 }

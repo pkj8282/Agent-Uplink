@@ -6,7 +6,17 @@ import { ServerStore } from "./servers.js";
 import { DmStore } from "./dm.js";
 import { AccountStore } from "./accounts.js";
 import { InboxStore } from "./inbox.js";
-import { TrashStore, TrashMeta } from "./trash.js";
+import { TrashStore, TrashMeta, isTrashId } from "./trash.js";
+import { uniqueName } from "./names.js";
+import { NameConflict, RestoreReport } from "../shared/protocol.js";
+
+export type TrashErrorCode = "trash_missing" | "trash_not_restorable" | "trash_bad_id" | "channel_limit" | "trash_busy" | "name_conflict";
+export type RestoreResult =
+  | { ok: true; report: RestoreReport }
+  | { ok: false; code: TrashErrorCode; error: string; conflicts?: NameConflict[] };
+
+const fail = (code: TrashErrorCode, error: string, conflicts?: NameConflict[]): RestoreResult =>
+  conflicts ? { ok: false, code, error, conflicts } : { ok: false, code, error };
 
 export interface TrashDeps {
   dataDir: string;
@@ -124,6 +134,112 @@ export class TrashOps {
     trash.writeMeta(meta);
   }
 
-  // 복원은 Task 4에서 구현한다(이 단계에서는 restoring 상태를 만드는 경로가 없다).
-  private finishRestore(_meta: TrashMeta): void {}
+  /**
+   * 휴지통 항목을 복원한다. 무결성(파일 전부 존재)·상태·이름 충돌·채널 한계를 먼저 검사하고(변경 없음),
+   * 통과하면 plan(최종 이름)을 저널에 기록한 뒤 finishRestore로 실행한다.
+   */
+  restore(id: unknown, confirmRename: boolean): RestoreResult {
+    if (!isTrashId(id)) return fail("trash_bad_id", "잘못된 휴지통 항목 ID입니다.");
+    const meta = this.d.trash.readMeta(id);
+    if (!meta || !this.d.trash.isIntact(meta)) return fail("trash_missing", "휴지통 항목 파일이 없습니다(이미 지워진 것 같습니다).");
+    if (meta.state !== "done") return fail("trash_busy", "이 항목은 처리 중입니다. Hub를 재시작한 뒤 다시 시도하세요.");
+    if (meta.kind === "orphan") return fail("trash_not_restorable", "고아 로그는 복원할 위치 정보가 없습니다.");
+
+    const renamed: RestoreReport["renamed"] = [];
+    if (meta.kind === "channel" || meta.kind === "server") {
+      const existing = this.d.servers.getServer(meta.serverId!);
+      const conflicts: NameConflict[] = [];
+      let serverName = existing?.name ?? meta.serverName!;
+      if (!existing) {
+        const others = this.d.servers.listServers().map((s) => s.name);
+        serverName = uniqueName(meta.serverName!, others);
+        if (serverName !== meta.serverName) conflicts.push({ kind: "server", name: meta.serverName!, to: serverName });
+      }
+      const taken = (existing?.channels ?? []).map((c) => c.name);
+      const channelNames: Record<string, string> = {};
+      for (const ch of meta.channels ?? []) {
+        if (existing?.channels.some((c) => c.id === ch.id)) return fail("trash_busy", "같은 채널이 이미 있습니다.");
+        const to = uniqueName(ch.name, taken);
+        taken.push(to);
+        channelNames[ch.id] = to;
+        if (to !== ch.name) conflicts.push({ kind: "channel", name: ch.name, to });
+      }
+      const total = (existing?.channels.length ?? 0) + (meta.channels?.length ?? 0);
+      if (total > this.d.maxChannelsPerServer()) {
+        return fail("channel_limit", `복원하면 서버당 채널 수 한계(${this.d.maxChannelsPerServer()})를 넘습니다.`);
+      }
+      if (conflicts.length && !confirmRename) return fail("name_conflict", "같은 이름이 이미 있습니다.", conflicts);
+      for (const c of conflicts) renamed.push({ kind: c.kind, from: c.name, to: c.to });
+      meta.plan = { serverName, channelNames };
+    }
+    meta.state = "restoring";
+    this.d.trash.writeMeta(meta);
+    const report = this.finishRestore(meta);
+    report.renamed = renamed;
+    return { ok: true, report };
+  }
+
+  /** 복원 실행(멱등 — 시작 복구가 restoring 항목에 다시 호출한다). */
+  private finishRestore(meta: TrashMeta): RestoreReport {
+    const { trash, channels, servers, dm, accounts } = this.d;
+    const report: RestoreReport = { renamed: [], dmsRestored: 0, dmsLeft: 0, itemRemoved: false };
+    if (meta.kind === "channel" || meta.kind === "server") {
+      const plan = meta.plan ?? {};
+      let srv = servers.getServer(meta.serverId!);
+      if (!srv) {
+        srv = servers.restoreServer(meta.serverId!, plan.serverName ?? meta.serverName!);
+        report.recreatedServer = { id: srv.id, name: srv.name };
+      }
+      for (const ch of meta.channels ?? []) {
+        const name = plan.channelNames?.[ch.id] ?? ch.name;
+        const file = `${ch.id}.jsonl`;
+        if (meta.files.includes(file)) trash.moveOut(meta.id, file, channels.pathOf("server", ch.id));
+        servers.addChannelWithId(srv.id, { id: ch.id, name });
+        channels.register({ id: ch.id, kind: "server", label: `${srv.name}/${name}`, members: null });
+      }
+      trash.remove(meta.id);
+      report.itemRemoved = true;
+      return report;
+    }
+    if (meta.kind === "account") {
+      const uuid = meta.account!.uuid;
+      if (!meta.accountRestored && !accounts.get(uuid)) {
+        const raw = trash.readFile(meta.id, "account.json");
+        const rec = raw ? (JSON.parse(raw) as { uuid: string; name: string; createdAt: number; description?: string }) : null;
+        accounts.restore(rec ?? { uuid, name: meta.name, createdAt: meta.deletedAt });
+      }
+      const left: NonNullable<TrashMeta["dms"]> = [];
+      for (const d of meta.dms ?? []) {
+        const file = `${d.channelId}.jsonl`;
+        const already = dm.get(d.channelId); // 크래시 재실행: 이미 붙인 DM
+        const canAttach = already || (accounts.get(d.peer) && !dm.findByPair(uuid, d.peer));
+        if (!canAttach) {
+          left.push(d);
+          continue;
+        }
+        if (meta.files.includes(file)) trash.moveOut(meta.id, file, channels.pathOf("dm", d.channelId));
+        if (!already) dm.restore({ channelId: d.channelId, members: [uuid, d.peer], label: d.label });
+        channels.register({ id: d.channelId, kind: "dm", label: d.label, members: [uuid, d.peer] });
+        accounts.setDm(uuid, d.peer, d.channelId);
+        accounts.setDm(d.peer, uuid, d.channelId);
+        report.dmsRestored++;
+      }
+      report.dmsLeft = left.length;
+      if (left.length === 0) {
+        trash.remove(meta.id);
+        report.itemRemoved = true;
+        return report;
+      }
+      trash.deleteFile(meta.id, "account.json");
+      meta.accountRestored = true;
+      meta.dms = left;
+      meta.files = left.map((d) => `${d.channelId}.jsonl`).filter((f) => trash.has(meta.id, f));
+      meta.state = "done";
+      trash.writeMeta(meta);
+      return report;
+    }
+    meta.state = "done";
+    trash.writeMeta(meta);
+    return report;
+  }
 }

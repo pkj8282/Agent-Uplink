@@ -507,6 +507,7 @@ export class Hub {
             online: this.isOnline(a.uuid),
           })),
           snapshotDms: this.dm.all().map((r) => ({ channelId: r.channelId, members: [...r.members], label: r.label })),
+          trash: this.trash.list(),
         });
         return;
       }
@@ -563,6 +564,21 @@ export class Hub {
         }
         this.trashOps.deleteAccount(req.uuid, "admin");
         reply({ ok: true });
+        return;
+      }
+
+      case "admin_restore_trash": {
+        if (!adminAuth()) return;
+        const q = req as { trashId?: unknown; confirmRename?: unknown };
+        const r = this.trashOps.restore(q.trashId, q.confirmRename === true);
+        if (r.ok) reply({ ok: true, restored: r.report });
+        else reply({ ok: false, error: r.error, code: r.code, ...(r.conflicts ? { conflicts: r.conflicts } : {}) });
+        return;
+      }
+
+      case "admin_empty_trash": {
+        if (!adminAuth()) return;
+        reply({ ok: true, removed: this.trash.empty() });
         return;
       }
 

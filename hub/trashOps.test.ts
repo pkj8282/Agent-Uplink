@@ -117,3 +117,164 @@ test("시작 복구: state=deleting 항목은 재기동 시 마저 삭제되고,
   assert.equal(m.files.includes("account.json"), true);
   admin.close(); hub.stop();
 });
+
+async function restore(admin: Client, token: string, id: string, confirmRename?: boolean) {
+  return admin.req("admin_restore_trash", { token, trashId: id, ...(confirmRename === undefined ? {} : { confirmRename }) });
+}
+
+test("채널 복원: 같은 id·이름으로 돌아오고 이전 메시지를 read로 볼 수 있다, 항목은 사라진다", async () => {
+  const { hub, port, token } = await startHub();
+  const s = await seed(port);
+  const admin = new Client(port); await admin.ready();
+  await admin.req("admin_delete_channel", { token, channelId: s.ch1 });
+  const snap = await admin.req("admin_snapshot", { token });
+  const item = snap.trash![0];
+  assert.equal(item.restorable, true);
+  const r = await restore(admin, token, item.id);
+  assert.equal(r.ok, true);
+  assert.equal(r.restored!.itemRemoved, true);
+  assert.deepEqual(r.restored!.renamed, []);
+  assert.deepEqual((await s.a.req("read", { channelId: s.ch1 })).messages!.map((m) => m.text), ["채널 메시지"]);
+  assert.deepEqual((await admin.req("admin_snapshot", { token })).trash, []);
+  admin.close(); s.a.close(); s.b.close(); hub.stop();
+});
+
+test("이름 충돌: 확인 없이는 name_conflict+미리보기(변경 없음), confirmRename이면 번호를 붙여 복원", async () => {
+  const { hub, port, token } = await startHub();
+  const s = await seed(port);
+  const admin = new Client(port); await admin.ready();
+  await admin.req("admin_delete_channel", { token, channelId: s.ch1 });
+  await s.a.req("create_channel", { serverId: s.srv, name: "일반" });
+  await s.a.req("create_channel", { serverId: s.srv, name: "일반 (3)" });
+  const id = (await admin.req("admin_snapshot", { token })).trash![0].id;
+  const first = await restore(admin, token, id);
+  assert.equal(first.ok, false);
+  assert.equal(first.code, "name_conflict");
+  assert.deepEqual(first.conflicts, [{ kind: "channel", name: "일반", to: "일반 (4)" }]);
+  assert.equal((await admin.req("admin_snapshot", { token })).trash!.length, 1); // 변경 없음
+  const ok = await restore(admin, token, id, true);
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.restored!.renamed, [{ kind: "channel", from: "일반", to: "일반 (4)" }]);
+  const names = (await s.a.req("list_channels", { serverId: s.srv })).channels!.map((c) => c.name).sort();
+  assert.deepEqual(names, ["빈채널", "일반", "일반 (3)", "일반 (4)"].sort());
+  admin.close(); s.a.close(); s.b.close(); hub.stop();
+});
+
+test("채널 복원 시 서버가 없으면 원래 id로 다시 만들고, 이후 서버 항목 복원은 그 서버로 합친다", async () => {
+  const { hub, port, token } = await startHub();
+  const s = await seed(port);
+  const admin = new Client(port); await admin.ready();
+  await admin.req("admin_delete_channel", { token, channelId: s.ch1 });
+  await admin.req("admin_delete_server", { token, serverId: s.srv });
+  const [chItem, srvItem] = (await admin.req("admin_snapshot", { token })).trash!;
+  assert.equal(chItem.kind, "channel"); assert.equal(srvItem.kind, "server");
+  const r1 = await restore(admin, token, chItem.id);
+  assert.deepEqual(r1.restored!.recreatedServer, { id: s.srv, name: "Main" });
+  const r2 = await restore(admin, token, srvItem.id);
+  assert.equal(r2.ok, true);
+  const servers = (await s.a.req("list_servers")).servers!;
+  assert.deepEqual(servers.map((x) => [x.serverId, x.name, x.channelCount]), [[s.srv, "Main", 2]]);
+  admin.close(); s.a.close(); s.b.close(); hub.stop();
+});
+
+test("복원이 채널 한계를 넘으면 channel_limit, 변경 없음", async () => {
+  const { hub, port, token } = await startHub();
+  const s = await seed(port);
+  const admin = new Client(port); await admin.ready();
+  await admin.req("admin_delete_channel", { token, channelId: s.ch1 });
+  await admin.req("admin_set_config", { token, patch: { maxChannelsPerServer: 1 } });
+  const id = (await admin.req("admin_snapshot", { token })).trash![0].id;
+  const r = await restore(admin, token, id);
+  assert.equal(r.code, "channel_limit");
+  assert.equal((await admin.req("admin_snapshot", { token })).trash!.length, 1);
+  admin.close(); s.a.close(); s.b.close(); hub.stop();
+});
+
+test("탐색기로 파일이 지워진 항목·두 번째 복원은 trash_missing, orphan은 not_restorable, 잘못된 id는 bad_id", async () => {
+  const { hub, port, dataDir, token } = await startHub();
+  const s = await seed(port);
+  const admin = new Client(port); await admin.ready();
+  await admin.req("admin_delete_channel", { token, channelId: s.ch1 });
+  await admin.req("admin_delete_channel", { token, channelId: s.ch2 });
+  const [i1, i2] = (await admin.req("admin_snapshot", { token })).trash!;
+  fs.rmSync(path.join(dataDir, "trash", i1.id, `${s.ch1}.jsonl`));
+  assert.equal((await restore(admin, token, i1.id)).code, "trash_missing");
+  assert.equal((await restore(admin, token, i2.id)).ok, true);
+  assert.equal((await restore(admin, token, i2.id)).code, "trash_missing"); // 두 번째
+  assert.equal((await restore(admin, token, "../../etc")).code, "trash_bad_id");
+  const oid = "1759500000000-orphan-0000beef";
+  fs.mkdirSync(path.join(dataDir, "trash", oid));
+  fs.writeFileSync(path.join(dataDir, "trash", oid, "meta.json"), JSON.stringify({ v: 1, id: oid, kind: "orphan", state: "done", deletedAt: 1759500000000, deletedBy: "recovery", name: "servers/x.jsonl", files: [] }));
+  assert.equal((await restore(admin, token, oid)).code, "trash_not_restorable");
+  admin.close(); s.a.close(); s.b.close(); hub.stop();
+});
+
+test("계정 복원: 같은 uuid가 재로그인(접속 중)해 있으면 현재 이름 유지·DM만 붙고 연결 유지", async () => {
+  const { hub, port, token } = await startHub();
+  const s = await seed(port);
+  const admin = new Client(port); await admin.ready();
+  await admin.req("admin_delete_account", { token, uuid: s.A });
+  const again = new Client(port); await again.ready();
+  await again.req("login", { uuid: s.A, name: "A-새이름" });
+  const id = (await admin.req("admin_snapshot", { token })).trash![0].id;
+  const r = await restore(admin, token, id);
+  assert.equal(r.ok, true);
+  assert.equal(r.restored!.dmsRestored, 1);
+  assert.equal((await again.req("whoami")).name, "A-새이름");
+  const dms = (await again.req("list_dms")).dms!;
+  assert.deepEqual(dms.map((d) => d.channelId), [s.dm]);
+  assert.deepEqual((await again.req("read", { channelId: s.dm })).messages!.map((m) => m.text), ["DM 메시지"]);
+  admin.close(); again.close(); s.a.close(); s.b.close(); hub.stop();
+});
+
+test("계정 복원: 상대가 없는 DM은 항목에 남고(dmLeftover), 상대 복원 뒤 다시 복원하면 붙는다", async () => {
+  const { hub, port, token } = await startHub();
+  const s = await seed(port);
+  const admin = new Client(port); await admin.ready();
+  await admin.req("admin_delete_account", { token, uuid: s.A }); // DM A-B는 A 항목으로
+  await admin.req("admin_delete_account", { token, uuid: s.B });
+  let [aItem, bItem] = (await admin.req("admin_snapshot", { token })).trash!;
+  const r1 = await restore(admin, token, aItem.id);
+  assert.equal(r1.restored!.dmsLeft, 1);
+  assert.equal(r1.restored!.itemRemoved, false);
+  aItem = (await admin.req("admin_snapshot", { token })).trash!.find((i) => i.id === aItem.id)!;
+  assert.equal(aItem.dmLeftover, 1);
+  await restore(admin, token, bItem.id);
+  const r3 = await restore(admin, token, aItem.id);
+  assert.equal(r3.restored!.dmsRestored, 1);
+  assert.equal(r3.restored!.itemRemoved, true);
+  admin.close(); s.a.close(); s.b.close(); hub.stop();
+});
+
+test("admin_empty_trash는 완료 항목을 영구 삭제하고 개수를 준다", async () => {
+  const { hub, port, token } = await startHub();
+  const s = await seed(port);
+  const admin = new Client(port); await admin.ready();
+  await admin.req("admin_delete_channel", { token, channelId: s.ch1 });
+  await admin.req("admin_delete_channel", { token, channelId: s.ch2 });
+  assert.equal((await admin.req("admin_empty_trash", { token })).removed, 2);
+  assert.deepEqual((await admin.req("admin_snapshot", { token })).trash, []);
+  admin.close(); s.a.close(); s.b.close(); hub.stop();
+});
+
+test("시작 복구: state=restoring 항목은 재기동 시 plan대로 마저 복원된다", async () => {
+  const dataDir = tmp();
+  let ch1 = ""; let srv = "";
+  {
+    const { hub, port, token } = await startHub(dataDir);
+    const s = await seed(port); ch1 = s.ch1; srv = s.srv;
+    const admin = new Client(port); await admin.ready();
+    await admin.req("admin_delete_channel", { token, channelId: s.ch1 });
+    admin.close(); s.a.close(); s.b.close(); hub.stop();
+    const id = fs.readdirSync(path.join(dataDir, "trash"))[0];
+    const mf = path.join(dataDir, "trash", id, "meta.json");
+    const m = JSON.parse(fs.readFileSync(mf, "utf8"));
+    m.state = "restoring"; m.plan = { serverName: "Main", channelNames: { [s.ch1]: "일반" } };
+    fs.writeFileSync(mf, JSON.stringify(m));
+  }
+  const { hub, port } = await startHub(dataDir);
+  const c = new Client(port); await c.ready(); await c.req("login", { uuid: "aaaaaaaa-0000-4000-8000-000000000001" });
+  assert.deepEqual((await c.req("list_channels", { serverId: srv })).channels!.map((x) => x.channelId).includes(ch1), true);
+  assert.deepEqual(fs.readdirSync(path.join(dataDir, "trash")), []);
+  c.close(); hub.stop();
+});
