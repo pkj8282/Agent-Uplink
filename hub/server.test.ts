@@ -530,3 +530,18 @@ test("list_accounts는 로그인 없이 description·online을 준다", async ()
   assert.deepEqual(r.accounts, [{ uuid: "u1", name: "A", description: "설명A", online: true }]);
   a.close(); anon.close(); hub.stop();
 });
+
+test("list_dms는 상대 설명·접속 여부를, admin_snapshot은 계정 설명·접속 여부를 준다", async () => {
+  const { hub, port, dataDir } = await startHub();
+  const token = fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim();
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  const b = new Client(port); await b.ready(); await b.req("login", { uuid: "u2", name: "B" });
+  await b.req("set_profile", { description: "구현 담당" });
+  await a.req("open_dm", { peer: "u2" });
+  const dms = (await a.req("list_dms")).dms!;
+  assert.equal(dms[0].peerDescription, "구현 담당");
+  assert.equal(dms[0].peerOnline, true);
+  const snap = await a.req("admin_snapshot", { token });
+  assert.deepEqual(snap.snapshotAccounts!.find((x) => x.uuid === "u2"), { uuid: "u2", name: "B", description: "구현 담당", online: true });
+  a.close(); b.close(); hub.stop();
+});

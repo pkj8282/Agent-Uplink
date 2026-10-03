@@ -121,14 +121,24 @@ export class Hub {
       const drop = () => this.sseClients.delete(res);
       req.on("close", drop);
       res.on("error", drop);
+    } else if (req.url === "/accounts") {
+      const list = this.accounts.list().map((a) => ({
+        uuid: a.uuid,
+        name: a.name,
+        description: a.description ?? "",
+        online: this.isOnline(a.uuid),
+      }));
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-cache" });
+      res.end(JSON.stringify(list));
     } else {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(renderViewerHtml());
     }
   }
 
-  private pushSse(label: string, m: { ts: number; channelId: string; fromName: string; text: string }): void {
-    const data = `data: ${JSON.stringify({ ...m, channelLabel: label })}\n\n`;
+  private pushSse(label: string, m: { ts: number; channelId: string; from: string; fromName: string; text: string }): void {
+    const { from, ...rest } = m;
+    const data = `data: ${JSON.stringify({ ...rest, fromUuid: from, channelLabel: label })}\n\n`;
     for (const res of this.sseClients) {
       if (res.writableEnded || res.destroyed) {
         this.sseClients.delete(res);
@@ -275,6 +285,8 @@ export class Hub {
           peer: peerUuid,
           peerName: this.accounts.get(peerUuid)?.name ?? peerUuid.slice(0, 8),
           channelId,
+          peerDescription: this.accounts.get(peerUuid)?.description ?? "",
+          peerOnline: this.isOnline(peerUuid),
         }));
         reply({ ok: true, dms });
         return;
@@ -457,7 +469,12 @@ export class Hub {
             name: s.name,
             channels: s.channels.map((c) => ({ id: c.id, name: c.name })),
           })),
-          snapshotAccounts: this.accounts.list().map((a) => ({ uuid: a.uuid, name: a.name })),
+          snapshotAccounts: this.accounts.list().map((a) => ({
+            uuid: a.uuid,
+            name: a.name,
+            description: a.description ?? "",
+            online: this.isOnline(a.uuid),
+          })),
           snapshotDms: this.dm.all().map((r) => ({ channelId: r.channelId, members: [...r.members], label: r.label })),
         });
         return;
@@ -631,7 +648,7 @@ export class Hub {
       });
       this.wake(uuid);
     }
-    this.pushSse(ch.label, { ts, channelId: ch.id, fromName, text });
+    this.pushSse(ch.label, { ts, channelId: ch.id, from, fromName, text });
   }
 
   private addWaiter(uuid: string, w: Waiter): void {

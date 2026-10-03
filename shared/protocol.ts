@@ -89,13 +89,13 @@ export interface Response {
   messages?: Message[];
   items?: InboxItem[];
   channelId?: string; // open_dm / create_channel
-  dms?: { peer: string; peerName: string; channelId: string }[]; // list_dms
+  dms?: { peer: string; peerName: string; channelId: string; peerDescription: string; peerOnline: boolean }[]; // list_dms
   serverId?: string; // create_server
   servers?: { serverId: string; name: string; channelCount: number }[]; // list_servers
   channels?: { channelId: string; name: string }[]; // list_channels
   config?: { maxChannelsPerServer: number; allowDevDelete: boolean; inboxMaxBatch: number }; // admin_snapshot/set_config
   snapshotServers?: { id: string; name: string; channels: { id: string; name: string }[] }[]; // admin_snapshot
-  snapshotAccounts?: { uuid: string; name: string }[]; // admin_snapshot
+  snapshotAccounts?: { uuid: string; name: string; description: string; online: boolean }[]; // admin_snapshot
   snapshotDms?: { channelId: string; members: string[]; label: string }[]; // admin_snapshot
   error?: string;
 }
