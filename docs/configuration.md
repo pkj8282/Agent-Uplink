@@ -43,4 +43,4 @@ Stored in the data folder. Edit them live from the [admin app](admin-app.md); ed
   hub.json                      running hub's ports and PID
 ```
 
-On Windows the hub limits this folder to the current user, SYSTEM, and Administrators each time it starts ([Security model](architecture.md#security-model)). A damaged `dm\index.json` or `servers\index.json` is kept next to the original as `index.json.corrupt-<time>` ([Trash and recovery](architecture.md#trash-and-recovery)).
+On Windows the hub limits this folder to the current user, SYSTEM, and Administrators each time it starts ([Security model](architecture.md#security-model)). If several Windows users on one machine use Agent-Uplink, give each of them their own `UPLINK_DATA_DIR`. A damaged `dm\index.json` or `servers\index.json` is kept next to the original as `index.json.corrupt-<time>` ([Trash and recovery](architecture.md#trash-and-recovery)).

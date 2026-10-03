@@ -147,3 +147,8 @@ test("복원 결과 문구: 바뀐 이름·다시 만든 서버·남은 DM", () 
   assert.match(m, /서버 'Main'을\(를\) 다시 만들었습니다/);
   assert.match(m, /DM 1개는 상대 계정이 없거나 이미 다른 DM이 있어 휴지통에 남았습니다/);
 });
+
+test("io_error 코드는 파일 사용 중·재시도 안내 문구", () => {
+  assert.match(opErrorMessage("io_error", "x"), /다른 프로그램이 사용 중/);
+  assert.match(opErrorMessage("io_error", "x"), /다시 시도/);
+});
