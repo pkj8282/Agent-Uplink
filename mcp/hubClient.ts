@@ -48,9 +48,17 @@ export class HubClient {
     this.nodeArgs = opts.nodeArgs ?? [];
   }
 
+  /** 재연결 때 독점 재로그인이 거부되면(다른 세션이 계정을 가져감) 호출된다. */
+  onAccountLost: ((reason: string) => void) | null = null;
+
   /** 계정을 독점 선택해 로그인한다. 거부되면 기존 계정 상태를 그대로 둔다. */
   async selectAccount(uuid: string, name?: string): Promise<Response> {
-    await this.ensureConnected();
+    try {
+      await this.ensureConnected();
+    } catch (e) {
+      // 이전 계정 재로그인만 거부된 경우 연결은 살아 있다 → 새 계정 선택을 계속한다.
+      if (!this.sock || this.sock.destroyed) throw e;
+    }
     const next = { uuid, name, exclusive: true };
     const r = await this.request("login", this.loginParams(next));
     if (r.ok) this.account = next;
@@ -96,7 +104,17 @@ export class HubClient {
     await this.handshake();
     if (this.account) {
       const r = await this.request("login", this.loginParams(this.account));
-      if (!r.ok) { this.close(); throw new Error(`Hub 재로그인 실패: ${r.error}`); }
+      if (!r.ok) {
+        if (this.account.exclusive) {
+          // Hub 재시작 사이 다른 세션이 이 역할을 가져갔다: 연결은 유지하고 계정 선택만 해제해
+          // use_account로 다른 역할을 고를 수 있게 한다(계속 같은 재로그인에 막히지 않도록).
+          this.account = null;
+          this.onAccountLost?.(r.error ?? "재로그인 거부");
+          throw new Error(`계정 선택이 해제되었습니다(${r.error}). use_account로 다시 선택하세요.`);
+        }
+        this.close();
+        throw new Error(`Hub 재로그인 실패: ${r.error}`);
+      }
     }
   }
 

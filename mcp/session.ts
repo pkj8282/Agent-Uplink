@@ -10,9 +10,16 @@ export interface Selection {
 
 export class AccountSession {
   private sel: Selection | null;
+  /** 선택이 외부 요인(역할을 다른 세션이 가져감)으로 해제됐을 때 다음 안내에 한 번 붙일 문구. */
+  private lostNotice: string | null = null;
 
   constructor(private readonly client: HubClient, private readonly roles: RoleStore | null, pinnedUuid?: string) {
     this.sel = pinnedUuid ? { uuid: pinnedUuid, role: null } : null;
+    client.onAccountLost = (reason) => {
+      const role = this.sel?.role;
+      this.sel = null;
+      this.lostNotice = `역할 '${role ?? "?"}' 선택이 해제되었습니다(${reason}).`;
+    };
   }
 
   get selection(): Selection | null { return this.sel; }
@@ -21,7 +28,9 @@ export class AccountSession {
   /** 계정이 필요한 툴의 관문. 선택 전이면 안내 문구, 선택됐으면 null. */
   async guard(): Promise<string | null> {
     if (this.sel) return null;
-    return `먼저 계정을 선택하세요: use_account(role) — 처음이면 description으로 역할 설명을 남기세요.\n\n${await this.listText()}`;
+    const notice = this.lostNotice ? `${this.lostNotice}\n` : "";
+    this.lostNotice = null;
+    return `${notice}먼저 계정을 선택하세요: use_account(role) — 처음이면 description으로 역할 설명을 남기세요.\n\n${await this.listText()}`;
   }
 
   /** 이 폴더의 역할 목록(설명·사용 상태 포함). */
@@ -61,6 +70,7 @@ export class AccountSession {
     const r = await this.client.selectAccount(res.uuid, v.role);
     if (!r.ok) return { ok: false, text: `${r.error}\n\n${await this.listText()}` };
     this.sel = { uuid: res.uuid, role: v.role };
+    this.lostNotice = null;
     const lines = [`역할 '${v.role}' 선택됨`, `계정 UUID: ${res.uuid}`];
     if (description !== undefined) {
       const p = await this.client.setProfile(description);

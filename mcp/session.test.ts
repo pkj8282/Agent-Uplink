@@ -121,3 +121,33 @@ test("Hub 재시작 후 다음 호출에서 같은 역할 계정으로 재로그
   await until(async () => { try { return (await client.whoami()).uuid === uuid; } catch { return false; } });
   client.close(); second.hub.stop();
 });
+
+/** P1이 기획을 쓰던 중 Hub가 재시작되고, 그 사이 P2가 기획을 가져간 상황. */
+async function takeover() {
+  const first = await startHub();
+  const roleDir = tmp();
+  const p1 = session(first.port, roleDir);
+  await p1.s.use("기획");
+  first.hub.stop();
+  const second = await startHub(first.port, first.dataDir);
+  const p2 = session(first.port, roleDir);
+  await until(async () => (await p2.s.use("기획")).ok);
+  return { p1, p2, hub: second.hub };
+}
+
+test("Hub 재시작 사이 역할을 빼앗기면 다음 호출에서 선택이 해제되고 안내 후 다른 역할을 고를 수 있다", async () => {
+  const { p1, p2, hub } = await takeover();
+  await assert.rejects(p1.client.check(), /선택이 해제/);
+  assert.equal(p1.s.selection, null);
+  assert.match((await p1.s.guard())!, /'기획' 선택이 해제/);
+  assert.equal((await p1.s.use("구현")).ok, true);
+  p1.client.close(); p2.client.close(); hub.stop();
+});
+
+test("Hub 재시작 사이 역할을 빼앗겨도 곧바로 다른 역할을 고르는 use_account는 막히지 않는다", async () => {
+  const { p1, p2, hub } = await takeover();
+  const r = await p1.s.use("구현");
+  assert.equal(r.ok, true);
+  assert.equal((await p1.client.whoami()).name, "구현");
+  p1.client.close(); p2.client.close(); hub.stop();
+});

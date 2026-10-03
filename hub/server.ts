@@ -230,6 +230,14 @@ export class Hub {
           }
         }
         const acc = this.accounts.getOrCreate(req.uuid, req.name);
+        // 다른 계정으로 전환: 이전 계정으로 걸어 둔 wait를 빈 결과로 끝낸다.
+        // (남겨 두면 이전 계정 앞 메시지가 이 연결로 새거나, 새 주인이 받지 못하고 유실된다.)
+        if (state.uuid && state.uuid !== acc.uuid && state.waiter) {
+          const old = state.waiter;
+          this.removeWaiter(state.uuid, old);
+          state.waiter = null;
+          old.resolve([]);
+        }
         state.uuid = acc.uuid;
         state.sessionToken = token;
         reply({ ok: true, uuid: acc.uuid, name: acc.name });

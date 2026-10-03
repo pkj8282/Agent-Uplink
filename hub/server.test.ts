@@ -545,3 +545,21 @@ test("list_dms는 상대 설명·접속 여부를, admin_snapshot은 계정 설�
   assert.deepEqual(snap.snapshotAccounts!.find((x) => x.uuid === "u2"), { uuid: "u2", name: "B", description: "구현 담당", online: true });
   a.close(); b.close(); hub.stop();
 });
+
+test("wait 중 다른 계정으로 login하면 이전 대기는 빈 결과로 끝나고, 이전 계정의 메시지는 새 주인이 받는다", async () => {
+  const { hub, port } = await startHub();
+  const a = new Client(port); await a.ready();
+  await a.req("login", { uuid: "plan", exclusive: true, sessionToken: "A" });
+  const pendingWait = a.req("wait", { timeoutMs: 5000 }); // 응답을 기다리지 않고 대기 등록
+  await new Promise((r) => setTimeout(r, 50));
+  await a.req("login", { uuid: "impl", exclusive: true, sessionToken: "A" }); // 역할 전환
+  const c = new Client(port); await c.ready();
+  await c.req("login", { uuid: "plan", exclusive: true, sessionToken: "C" }); // 다른 세션이 기획을 가져감
+  const b = new Client(port); await b.ready(); await b.req("login", { uuid: "b", name: "B" });
+  const dm = await b.req("open_dm", { peer: "plan" });
+  await b.req("send", { channelId: dm.channelId, text: "기획에게만" });
+  assert.deepEqual((await c.req("check")).items!.map((i) => i.text), ["기획에게만"]); // 새 주인이 받음
+  assert.deepEqual((await pendingWait).items, []); // 전환 시 이전 대기는 빈 결과로 끝남(기획 DM이 새지 않음)
+  assert.deepEqual((await a.req("check")).items, []); // 구현(A)에게 새지 않음
+  a.close(); b.close(); c.close(); hub.stop();
+});
