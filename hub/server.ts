@@ -7,6 +7,7 @@ import { ChannelStore } from "./channels.js";
 import { AccountStore } from "./accounts.js";
 import { InboxStore } from "./inbox.js";
 import { DmStore } from "./dm.js";
+import { ServerStore } from "./servers.js";
 import {
   MAGIC,
   PROTOCOL_VERSION,
@@ -39,6 +40,7 @@ export class Hub {
   protected accounts: AccountStore;
   protected inbox: InboxStore;
   protected dm: DmStore;
+  protected servers: ServerStore;
   private tcp: net.Server;
   private http: http.Server;
   private sseClients = new Set<http.ServerResponse>();
@@ -62,6 +64,11 @@ export class Hub {
       this.channels.register({ id: rec.channelId, kind: "dm", label: rec.label, members: [a, b] });
       this.accounts.setDm(a, b, rec.channelId);
       this.accounts.setDm(b, a, rec.channelId);
+    }
+    // 서버 채널 복원(전체 공개)
+    this.servers = new ServerStore({ dir: opts.dataDir });
+    for (const c of this.servers.allChannels()) {
+      this.channels.register({ id: c.channelId, kind: "server", label: `${c.serverName}/${c.channelName}`, members: null });
     }
     this.tcp = net.createServer((sock) => this.onConnection(sock));
     this.http = http.createServer((req, res) => this.onHttp(req, res));
@@ -232,6 +239,97 @@ export class Hub {
           channelId,
         }));
         reply({ ok: true, dms });
+        return;
+      }
+
+      case "create_server": {
+        const uuid = needLogin();
+        if (!uuid) return;
+        if (typeof req.name !== "string" || req.name.length === 0) {
+          reply({ ok: false, error: "name이 필요합니다." });
+          return;
+        }
+        const srv = this.servers.createServer(req.name);
+        reply({ ok: true, serverId: srv.id });
+        return;
+      }
+
+      case "list_servers": {
+        if (!needLogin()) return;
+        reply({
+          ok: true,
+          servers: this.servers
+            .listServers()
+            .map((s) => ({ serverId: s.id, name: s.name, channelCount: s.channels.length })),
+        });
+        return;
+      }
+
+      case "create_channel": {
+        const uuid = needLogin();
+        if (!uuid) return;
+        const srv = this.servers.getServer(req.serverId);
+        if (!srv) {
+          reply({ ok: false, error: `서버가 없습니다: ${req.serverId}` });
+          return;
+        }
+        if (typeof req.name !== "string" || req.name.length === 0) {
+          reply({ ok: false, error: "name이 필요합니다." });
+          return;
+        }
+        if (srv.channels.length >= this.config.maxChannelsPerServer) {
+          reply({ ok: false, error: `채널 수 한계(${this.config.maxChannelsPerServer})를 초과했습니다.` });
+          return;
+        }
+        const ch = this.servers.addChannel(srv.id, req.name);
+        this.channels.register({ id: ch.id, kind: "server", label: `${srv.name}/${ch.name}`, members: null });
+        reply({ ok: true, channelId: ch.id });
+        return;
+      }
+
+      case "list_channels": {
+        if (!needLogin()) return;
+        const srv = this.servers.getServer(req.serverId);
+        if (!srv) {
+          reply({ ok: false, error: `서버가 없습니다: ${req.serverId}` });
+          return;
+        }
+        reply({ ok: true, channels: srv.channels.map((c) => ({ channelId: c.id, name: c.name })) });
+        return;
+      }
+
+      case "delete_channel": {
+        const uuid = needLogin();
+        if (!uuid) return;
+        if (!this.config.allowDevDelete) {
+          reply({ ok: false, error: "MCP 삭제가 허용되지 않습니다(allowDevDelete=false)." });
+          return;
+        }
+        if (!this.servers.findChannel(req.channelId)) {
+          reply({ ok: false, error: `채널이 없습니다: ${req.channelId}` });
+          return;
+        }
+        this.servers.removeChannel(req.channelId);
+        this.channels.unregister(req.channelId);
+        reply({ ok: true });
+        return;
+      }
+
+      case "delete_server": {
+        const uuid = needLogin();
+        if (!uuid) return;
+        if (!this.config.allowDevDelete) {
+          reply({ ok: false, error: "MCP 삭제가 허용되지 않습니다(allowDevDelete=false)." });
+          return;
+        }
+        const srv = this.servers.getServer(req.serverId);
+        if (!srv) {
+          reply({ ok: false, error: `서버가 없습니다: ${req.serverId}` });
+          return;
+        }
+        for (const ch of srv.channels) this.channels.unregister(ch.id);
+        this.servers.removeServer(req.serverId);
+        reply({ ok: true });
         return;
       }
 

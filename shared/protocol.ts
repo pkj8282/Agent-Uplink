@@ -50,7 +50,13 @@ export type Request =
   | { op: "check"; id: number }
   | { op: "wait"; id: number; timeoutMs?: number }
   | { op: "open_dm"; id: number; peer: string }
-  | { op: "list_dms"; id: number };
+  | { op: "list_dms"; id: number }
+  | { op: "create_server"; id: number; name: string }
+  | { op: "list_servers"; id: number }
+  | { op: "create_channel"; id: number; serverId: string; name: string }
+  | { op: "list_channels"; id: number; serverId: string }
+  | { op: "delete_channel"; id: number; channelId: string }
+  | { op: "delete_server"; id: number; serverId: string };
 
 export interface Response {
   ok: boolean;
@@ -63,7 +69,10 @@ export interface Response {
   seq?: number;
   messages?: Message[];
   items?: InboxItem[];
-  channelId?: string; // open_dm
+  channelId?: string; // open_dm / create_channel
   dms?: { peer: string; peerName: string; channelId: string }[]; // list_dms
+  serverId?: string; // create_server
+  servers?: { serverId: string; name: string; channelCount: number }[]; // list_servers
+  channels?: { channelId: string; name: string }[]; // list_channels
   error?: string;
 }

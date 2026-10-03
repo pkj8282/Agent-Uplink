@@ -44,3 +44,12 @@ test("없는 채널에 append하면 예외를 던진다", () => {
   const s = new ChannelStore({ dir: tmp() });
   assert.throws(() => s.append("nope", "u1", "A", "x"), /채널/);
 });
+
+test("unregister한 채널은 getChannel에서 사라지고 append가 거부된다", () => {
+  const s = new ChannelStore({ dir: tmp() });
+  s.register({ id: "c1", kind: "server", label: "A/c", members: null });
+  s.append("c1", "u1", "A", "x");
+  assert.equal(s.unregister("c1"), true);
+  assert.equal(s.getChannel("c1"), undefined);
+  assert.throws(() => s.append("c1", "u1", "A", "y"), /채널/);
+});

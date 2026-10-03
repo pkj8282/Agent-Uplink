@@ -235,3 +235,91 @@ test("재시작 시 끊긴 DM 역색인을 dm/index.json 기준으로 복구한�
   assert.equal(dms.find((d) => d.peer === "u1")!.channelId, dm.channelId);
   b2.close(); h2.hub.stop();
 });
+
+test("create_server/create_channel/list_*가 동작하고 서버 채널은 전체 공개로 fan-out된다", async () => {
+  const { hub, port } = await startHub();
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  const b = new Client(port); await b.ready(); await b.req("login", { uuid: "u2", name: "B" });
+  const srv = await a.req("create_server", { name: "A서버" });
+  assert.equal(srv.ok, true);
+  assert.equal((await b.req("list_servers")).servers!.find((s) => s.serverId === srv.serverId)!.name, "A서버");
+  const ch = await a.req("create_channel", { serverId: srv.serverId, name: "논의방" });
+  assert.equal(ch.ok, true);
+  assert.equal((await b.req("list_channels", { serverId: srv.serverId })).channels![0].channelId, ch.channelId);
+  await a.req("send", { channelId: ch.channelId, text: "서버채널 글" });
+  assert.deepEqual((await b.req("check")).items!.map((i) => i.text), ["서버채널 글"]);
+  a.close(); b.close(); hub.stop();
+});
+
+test("create_channel은 maxChannelsPerServer 상한을 넘으면 거부한다", async () => {
+  const dataDir = tmp();
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(path.join(dataDir, "config.json"), JSON.stringify({ maxChannelsPerServer: 2 }));
+  const { hub, port } = await startHub(dataDir);
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  const srv = await a.req("create_server", { name: "A" });
+  assert.equal((await a.req("create_channel", { serverId: srv.serverId, name: "c1" })).ok, true);
+  assert.equal((await a.req("create_channel", { serverId: srv.serverId, name: "c2" })).ok, true);
+  const third = await a.req("create_channel", { serverId: srv.serverId, name: "c3" });
+  assert.equal(third.ok, false);
+  assert.match(third.error!, /한계|상한|30|2/);
+  a.close(); hub.stop();
+});
+
+test("삭제는 allowDevDelete가 true일 때만, 삭제 후 채널 라우팅이 사라진다", async () => {
+  const dataDir = tmp();
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(path.join(dataDir, "config.json"), JSON.stringify({ allowDevDelete: true }));
+  const { hub, port } = await startHub(dataDir);
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  const srv = await a.req("create_server", { name: "A" });
+  const ch = await a.req("create_channel", { serverId: srv.serverId, name: "c1" });
+  assert.equal((await a.req("delete_channel", { channelId: ch.channelId })).ok, true);
+  assert.equal((await a.req("send", { channelId: ch.channelId, text: "x" })).ok, false);
+  assert.equal((await a.req("delete_server", { serverId: srv.serverId })).ok, true);
+  assert.equal((await a.req("list_servers")).servers!.length, 0);
+  a.close(); hub.stop();
+});
+
+test("allowDevDelete가 false면 삭제는 거부된다", async () => {
+  const dataDir = tmp();
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(path.join(dataDir, "config.json"), JSON.stringify({ allowDevDelete: false }));
+  const { hub, port } = await startHub(dataDir);
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  const srv = await a.req("create_server", { name: "A" });
+  const ch = await a.req("create_channel", { serverId: srv.serverId, name: "c1" });
+  const del = await a.req("delete_channel", { channelId: ch.channelId });
+  assert.equal(del.ok, false);
+  assert.match(del.error!, /삭제|허용|불가/);
+  assert.equal((await a.req("delete_server", { serverId: srv.serverId })).ok, false);
+  a.close(); hub.stop();
+});
+
+test("없는 서버/채널 대상 op는 크래시 없이 거부", async () => {
+  const dataDir = tmp();
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(path.join(dataDir, "config.json"), JSON.stringify({ allowDevDelete: true }));
+  const { hub, port } = await startHub(dataDir);
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  assert.equal((await a.req("create_channel", { serverId: "nope", name: "c" })).ok, false);
+  assert.equal((await a.req("list_channels", { serverId: "nope" })).ok, false);
+  assert.equal((await a.req("delete_channel", { channelId: "nope" })).ok, false);
+  assert.equal((await a.req("delete_server", { serverId: "nope" })).ok, false);
+  a.close(); hub.stop();
+});
+
+test("재시작 후에도 기존 서버 채널로 send/read가 동작한다", async () => {
+  const dataDir = tmp();
+  const h1 = await startHub(dataDir);
+  const a1 = new Client(h1.port); await a1.ready(); await a1.req("login", { uuid: "u1", name: "A" });
+  const srv = await a1.req("create_server", { name: "A서버" });
+  const ch = await a1.req("create_channel", { serverId: srv.serverId, name: "논의방" });
+  await a1.req("send", { channelId: ch.channelId, text: "재시작전" });
+  a1.close(); h1.hub.stop();
+  const h2 = await startHub(dataDir);
+  const a2 = new Client(h2.port); await a2.ready(); await a2.req("login", { uuid: "u1", name: "A" });
+  assert.deepEqual((await a2.req("read", { channelId: ch.channelId })).messages!.map((m) => m.text), ["재시작전"]);
+  assert.equal((await a2.req("send", { channelId: ch.channelId, text: "재시작후" })).ok, true);
+  a2.close(); h2.hub.stop();
+});

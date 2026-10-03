@@ -71,4 +71,9 @@ export class ChannelStore {
     if (!e) return [];
     return e.ring.slice(-limit);
   }
+
+  /** 채널 메타·인메모리 로그를 제거한다(라우팅 불가). 로그 파일은 남겨둔다. */
+  unregister(channelId: string): boolean {
+    return this.entries.delete(channelId);
+  }
 }
