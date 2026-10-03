@@ -47,6 +47,12 @@ export class HubClient {
   async listAccounts(): Promise<Response> { await this.ensureConnected(); return this.request("list_accounts", {}); }
   async openDm(peer: string): Promise<Response> { await this.ensureConnected(); return this.request("open_dm", { peer }); }
   async listDms(): Promise<Response> { await this.ensureConnected(); return this.request("list_dms", {}); }
+  async createServer(name: string): Promise<Response> { await this.ensureConnected(); return this.request("create_server", { name }); }
+  async listServers(): Promise<Response> { await this.ensureConnected(); return this.request("list_servers", {}); }
+  async createChannel(serverId: string, name: string): Promise<Response> { await this.ensureConnected(); return this.request("create_channel", { serverId, name }); }
+  async listChannels(serverId: string): Promise<Response> { await this.ensureConnected(); return this.request("list_channels", { serverId }); }
+  async deleteChannel(channelId: string): Promise<Response> { await this.ensureConnected(); return this.request("delete_channel", { channelId }); }
+  async deleteServer(serverId: string): Promise<Response> { await this.ensureConnected(); return this.request("delete_server", { serverId }); }
   async send(channelId: string, text: string): Promise<Response> { await this.ensureConnected(); return this.request("send", { channelId, text }); }
   async read(channelId: string, limit?: number): Promise<Response> { await this.ensureConnected(); return this.request("read", { channelId, limit }); }
   async check(): Promise<Response> { await this.ensureConnected(); return this.request("check", {}); }
