@@ -1,0 +1,80 @@
+import fs from "node:fs";
+import path from "node:path";
+import { AccountInfo } from "../shared/protocol.js";
+
+export interface Account {
+  uuid: string;
+  name: string;
+  createdAt: number;
+  dm: Record<string, string>;
+  inboxCursor: number;
+}
+
+export class AccountStore {
+  private readonly dir: string;
+  private accounts = new Map<string, Account>();
+
+  constructor(opts: { dir: string }) {
+    this.dir = path.join(opts.dir, "accounts");
+    fs.mkdirSync(this.dir, { recursive: true });
+    for (const f of fs.readdirSync(this.dir)) {
+      if (!f.endsWith(".json")) continue;
+      try {
+        const a = JSON.parse(fs.readFileSync(path.join(this.dir, f), "utf8")) as Account;
+        a.dm ??= {};
+        a.inboxCursor ??= 0;
+        this.accounts.set(a.uuid, a);
+      } catch {
+        // 손상 파일 무시
+      }
+    }
+  }
+
+  private save(a: Account): void {
+    try {
+      fs.writeFileSync(path.join(this.dir, `${a.uuid}.json`), JSON.stringify(a, null, 2));
+    } catch {
+      // 쓰기 실패해도 메모리 유지
+    }
+  }
+
+  getOrCreate(uuid: string, name?: string): Account {
+    const found = this.accounts.get(uuid);
+    if (found) return found;
+    const a: Account = { uuid, name: name ?? uuid.slice(0, 8), createdAt: Date.now(), dm: {}, inboxCursor: 0 };
+    this.accounts.set(uuid, a);
+    this.save(a);
+    return a;
+  }
+
+  get(uuid: string): Account | undefined {
+    return this.accounts.get(uuid);
+  }
+
+  setName(uuid: string, name: string): string {
+    const a = this.getOrCreate(uuid);
+    a.name = name;
+    this.save(a);
+    return a.name;
+  }
+
+  list(): AccountInfo[] {
+    return [...this.accounts.values()].map((a) => ({ uuid: a.uuid, name: a.name }));
+  }
+
+  allUuids(): string[] {
+    return [...this.accounts.keys()];
+  }
+
+  setInboxCursor(uuid: string, cursor: number): void {
+    const a = this.getOrCreate(uuid);
+    a.inboxCursor = cursor;
+    this.save(a);
+  }
+
+  setDm(uuid: string, peerUuid: string, channelId: string): void {
+    const a = this.getOrCreate(uuid);
+    a.dm[peerUuid] = channelId;
+    this.save(a);
+  }
+}
