@@ -2,14 +2,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import { isUnsafeChar } from "./text.js";
 
 export const ROLE_NAME_MAX = 40;
 
-/** '=', ';', C0 제어문자(줄바꿈 포함), DEL — env 형식을 깨거나 표시를 위장할 수 있는 문자. */
+/** '=', ';'(env 형식을 깸)와 표시를 위장할 수 있는 문자(제어·줄 구분·방향 제어·폭 0). */
 function hasForbidden(s: string): boolean {
   for (const ch of s) {
-    const c = ch.codePointAt(0)!;
-    if (ch === "=" || ch === ";" || c < 0x20 || c === 0x7f) return true;
+    if (ch === "=" || ch === ";" || isUnsafeChar(ch.codePointAt(0)!)) return true;
   }
   return false;
 }
@@ -107,6 +107,8 @@ export class RoleStore {
     const existing = this.read(file);
     if (existing) return { uuid: existing.uuid, source: "local", persisted: true };
     const uuid = randomUUID();
+    const body = JSON.stringify({ role, uuid });
+    const tmp = `${file}.${uuid}.tmp`;
     try {
       fs.mkdirSync(this.dir, { recursive: true });
       try {
@@ -114,15 +116,28 @@ export class RoleStore {
       } catch {
         // 이미 있음
       }
-      // 없을 때만 생성 — 두 세션이 동시에 만들면 한쪽만 성공하고 다른 쪽은 그 UUID를 읽는다.
-      fs.writeFileSync(file, JSON.stringify({ role, uuid }), { flag: "wx" });
-      return { uuid, source: "new", persisted: true };
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "EEXIST") {
+      // 내용을 다 쓴 임시 파일을 링크로 붙인다 — 생성이 원자적이라 반쯤 쓰인 파일이 보이지 않고,
+      // 두 세션이 동시에 만들면 한쪽만 성공(EEXIST)하고 다른 쪽은 완성된 그 UUID를 읽는다.
+      fs.writeFileSync(tmp, body);
+      try {
+        fs.linkSync(tmp, file);
+        return { uuid, source: "new", persisted: true };
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
         const won = this.read(file);
         if (won) return { uuid: won.uuid, source: "local", persisted: true };
+        // 기존 파일이 손상됐다(복구 불가) → 새 UUID로 원자 교체해 다음 실행부터 같은 계정이 되게 한다.
+        fs.renameSync(tmp, file);
+        return { uuid, source: "new", persisted: true };
       }
+    } catch {
       return { uuid, source: "new", persisted: false };
+    } finally {
+      try {
+        fs.rmSync(tmp, { force: true });
+      } catch {
+        // 정리 실패 무시
+      }
     }
   }
 

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { RoleStore, folderKey, parseAccountsEnv, validateRoleName } from "./roles.js";
 
 function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-roles-")); }
@@ -81,4 +82,29 @@ test("RoleStore: 손상된 역할 파일은 목록에서 건너뛴다", () => {
   const dir = path.join(dataDir, "state", "roles", folderKey("C:\\P"));
   fs.writeFileSync(path.join(dir, "deadbeefdeadbeefdeadbeefdeadbeef.json"), "{not json");
   assert.deepEqual(s.list().map((e) => e.role), ["기획"]);
+});
+
+test("validateRoleName은 C1·줄 구분자·방향 제어·폭 0 문자도 거부한다", () => {
+  for (const cp of [0x85, 0x2028, 0x202e, 0x2066, 0x200b, 0x200f, 0xfeff]) {
+    assert.equal(validateRoleName(`기${String.fromCodePoint(cp)}획`).ok, false, cp.toString(16));
+  }
+});
+
+test("RoleStore: 손상된 역할 파일은 임의 UUID로 떨어지지 않고 복구되어 다음 실행에서도 같은 UUID", () => {
+  const dataDir = tmp();
+  const dir = path.join(dataDir, "state", "roles", folderKey("C:\P"));
+  fs.mkdirSync(dir, { recursive: true });
+  const name = createHash("sha256").update("기획", "utf8").digest("hex").slice(0, 32);
+  fs.writeFileSync(path.join(dir, `${name}.json`), ""); // 반쯤 쓰인/손상된 파일
+  const first = new RoleStore({ dataDir, cwd: "C:\P" }).resolve("기획");
+  assert.equal(first.persisted, true);
+  const again = new RoleStore({ dataDir, cwd: "C:\P" }).resolve("기획");
+  assert.equal(again.uuid, first.uuid);
+});
+
+test("RoleStore: 생성 후 임시 파일을 남기지 않는다", () => {
+  const dataDir = tmp();
+  new RoleStore({ dataDir, cwd: "C:\P" }).resolve("기획");
+  const dir = path.join(dataDir, "state", "roles", folderKey("C:\P"));
+  assert.deepEqual(fs.readdirSync(dir).filter((f) => f.endsWith(".tmp")), []);
 });
