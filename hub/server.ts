@@ -12,6 +12,7 @@ import { ServerStore } from "./servers.js";
 import { nameKey } from "./names.js";
 import { TrashStore } from "./trash.js";
 import { TrashOps } from "./trashOps.js";
+import { rebuildDmIndex } from "./recovery.js";
 import {
   MAGIC,
   PROTOCOL_VERSION,
@@ -79,6 +80,7 @@ export class Hub {
     });
     // 크래시로 중단된 삭제·복원을 먼저 마무리한다 — 이후 DM 재조정이 삭제 중이던 계정을 되살리지 않도록.
     this.trashOps.recoverPending();
+    if (this.dm.corrupt) rebuildDmIndex(this.accounts, this.dm, this.channels);
     // 1단계 검증용 lobby 채널(전체 공개)
     this.channels.register({ id: LOBBY_CHANNEL_ID, kind: "server", label: "main/lobby", members: null });
     // 재시작 시 기존 DM 채널을 복원(라우팅)하고, dm/index.json을 권위로 삼아
@@ -93,6 +95,8 @@ export class Hub {
     for (const c of this.servers.allChannels()) {
       this.channels.register({ id: c.channelId, kind: "server", label: `${c.serverName}/${c.channelName}`, members: null });
     }
+    // 이전 버전 삭제·크래시로 남은 로그를 휴지통으로(손상된 서버 인덱스면 서버 쪽은 건너뜀 — 손으로 되살릴 여지)
+    this.trashOps.sweepOrphans({ servers: !this.servers.corrupt, dm: true });
     this.adminKey = loadOrCreateAdminKey(opts.dataDir);
     this.tcp = net.createServer((sock) => this.onConnection(sock));
     this.http = http.createServer((req, res) => this.onHttp(req, res));

@@ -1,12 +1,13 @@
 // 삭제·복원·고아 정리: 스토어들을 휴지통 저널(meta.state)로 묶는다. 모든 단계는 멱등이라
 // 크래시 후 recoverPending()이 같은 함수를 다시 실행해 마무리한다.
+import fs from "node:fs";
 import path from "node:path";
 import { ChannelStore } from "./channels.js";
 import { ServerStore } from "./servers.js";
 import { DmStore } from "./dm.js";
 import { AccountStore } from "./accounts.js";
 import { InboxStore } from "./inbox.js";
-import { TrashStore, TrashMeta, isTrashId } from "./trash.js";
+import { TrashStore, TrashMeta, isTrashId, isUuidLogName } from "./trash.js";
 import { uniqueName } from "./names.js";
 import { NameConflict, RestoreReport } from "../shared/protocol.js";
 
@@ -78,6 +79,31 @@ export class TrashOps {
       if (m.state === "deleting") this.finishDelete(m);
       else if (m.state === "restoring") this.finishRestore(m);
     }
+  }
+
+  /** 인덱스에 없는 uuid 형식 로그를 orphan 항목으로 옮긴다. 손상된 인덱스 쪽은 opts로 건너뛴다. */
+  sweepOrphans(opts: { servers: boolean; dm: boolean }): number {
+    const known = {
+      servers: new Set(this.d.servers.allChannels().map((c) => c.channelId)),
+      dm: new Set(this.d.dm.all().map((r) => r.channelId)),
+    };
+    let n = 0;
+    for (const sub of ["servers", "dm"] as const) {
+      if (!opts[sub]) continue;
+      let files: string[] = [];
+      try {
+        files = fs.readdirSync(path.join(this.d.dataDir, sub));
+      } catch {
+        continue;
+      }
+      for (const f of files) {
+        if (!isUuidLogName(f) || known[sub].has(f.slice(0, -".jsonl".length))) continue;
+        const meta = this.d.trash.create("orphan", { deletedBy: "recovery", name: `${sub}/${f}` });
+        this.finishDelete(meta);
+        n++;
+      }
+    }
+    return n;
   }
 
   private moveLogIn(meta: TrashMeta, kind: "server" | "dm", id: string): void {
