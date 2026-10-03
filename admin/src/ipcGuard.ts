@@ -1,15 +1,21 @@
-/** URL을 비교용으로 정규화: 쿼리·해시 제거, 경로의 퍼센트 인코딩 해제(~ 와 %7E 등은 같은 파일). */
-function canonical(raw: string): string {
-  const u = new URL(raw);
-  return `${u.protocol}//${u.host}${decodeURIComponent(u.pathname)}`;
+export interface FrameLike {
+  url: string;
 }
 
-/** IPC를 보낸 프레임이 우리 렌더러(index.html)인지 확인한다. */
-export function isTrustedSender(senderUrl: string | undefined, indexUrl: string): boolean {
-  if (!senderUrl) return false;
-  try {
-    return canonical(senderUrl) === canonical(indexUrl);
-  } catch {
-    return false;
-  }
+/**
+ * IPC를 보낸 프레임이 우리 창의 주 프레임인지 확인한다.
+ * URL 문자열은 Node·Chromium 정규화가 달라(드라이브 대소문자, ~/%7E, % 등) 비교하지 않고 객체 동일성으로 본다.
+ * 창은 탐색·새 창이 차단돼 있으므로 주 프레임은 항상 우리 index.html이다.
+ */
+export function isTrustedFrame(
+  sender: unknown,
+  senderFrame: FrameLike | null | undefined,
+  expected: { webContents: unknown; mainFrame: unknown },
+): boolean {
+  return (
+    sender === expected.webContents &&
+    !!senderFrame &&
+    senderFrame === expected.mainFrame &&
+    senderFrame.url.startsWith("file:")
+  );
 }

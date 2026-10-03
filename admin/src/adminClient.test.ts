@@ -246,8 +246,9 @@ test("응답 프레임이 JSON null이어도 크래시 없이 처리", async () 
 
 test("연결 단계가 멈춰도 무한 대기하지 않는다", async () => {
   // 라우팅 불가 주소로 SYN이 버려지는 상황을 흉내 낸다(실제 Hub 포트는 쓰지 않는다).
+  // 환경에 따라 시간 초과(대부분) 대신 즉시 실패(ENETUNREACH·RST)할 수 있다 — 핵심은 "멈추지 않음".
   const c = new AdminClient({ port: await closedPort(), host: "10.255.255.1", connectTimeoutMs: 300, keyPath: keyFile(), timeoutMs: 300 });
   const t0 = Date.now();
-  await assert.rejects(c.snapshot(), /연결 시간이 초과/);
+  await assert.rejects(c.snapshot(), /연결 시간이 초과|Hub 연결 실패|Hub가 실행 중이 아닙니다/);
   assert.ok(Date.now() - t0 < 1500, `${Date.now() - t0}ms`);
 });

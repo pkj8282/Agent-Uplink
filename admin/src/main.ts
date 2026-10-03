@@ -1,28 +1,29 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { AdminClient, resolveAdminTarget, toResult } from "./adminClient.js";
-import { isTrustedSender } from "./ipcGuard.js";
+import { isTrustedFrame } from "./ipcGuard.js";
 import type { ConfigPatch, IpcResult } from "./types.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const indexFile = path.join(here, "renderer", "index.html");
-const indexUrl = pathToFileURL(indexFile).href;
 const client = new AdminClient(resolveAdminTarget(process.env));
+let mainWindow: BrowserWindow | null = null;
 
 function asId(v: unknown): string {
   if (typeof v !== "string" || v.length === 0) throw new Error("잘못된 대상 ID입니다.");
   return v;
 }
 
-/** 우리 렌더러(index.html)에서 온 호출만 처리한다. */
+/** 우리 창의 주 프레임(index.html)에서 온 호출만 처리한다. */
 function handle(channel: string, fn: (arg: unknown) => Promise<IpcResult<unknown>>): void {
-  ipcMain.handle(channel, (e, arg: unknown) =>
-    isTrustedSender(e.senderFrame?.url, indexUrl)
+  ipcMain.handle(channel, (e, arg: unknown) => {
+    const wc = mainWindow?.webContents;
+    return wc && isTrustedFrame(e.sender, e.senderFrame, { webContents: wc, mainFrame: wc.mainFrame })
       ? fn(arg)
-      : { ok: false, error: "허용되지 않은 호출입니다.", hubDown: false },
-  );
+      : { ok: false, error: "허용되지 않은 호출입니다.", hubDown: false };
+  });
 }
 
 // Hub가 값을 재검증하므로 patch는 그대로 전달한다.
@@ -46,6 +47,8 @@ function createWindow(): BrowserWindow {
       sandbox: true,
     },
   });
+  mainWindow = win; // loadFile 전에 지정해야 첫 로드의 IPC도 신뢰된다
+  win.on("closed", () => { mainWindow = null; });
   win.removeMenu();
   // 로컬 관리 UI 전용: 새 창·외부 탐색 차단
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));

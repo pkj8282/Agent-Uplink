@@ -1,23 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isTrustedSender } from "./ipcGuard.js";
+import { isTrustedFrame } from "./ipcGuard.js";
 
-const INDEX = "file:///C:/App/resources/app.asar/dist/renderer/index.html";
+// Electron 객체 대신 동일성만 보는 가짜 객체(URL 문자열 정규화에 의존하지 않는다).
+const webContents = {};
+const mainFrame = { url: "file:///c:/research/100%done/renderer/index.html" };
 
-test("isTrustedSender는 우리 index.html(쿼리·해시 무시)만 신뢰한다", () => {
-  assert.equal(isTrustedSender(INDEX, INDEX), true);
-  assert.equal(isTrustedSender(`${INDEX}#tab`, INDEX), true);
-  assert.equal(isTrustedSender(`${INDEX}?a=1`, INDEX), true);
-  assert.equal(isTrustedSender("file:///C:/App/resources/app.asar/dist/renderer/other.html", INDEX), false);
-  assert.equal(isTrustedSender("https://evil.example/index.html", INDEX), false);
-  assert.equal(isTrustedSender(undefined, INDEX), false);
-  assert.equal(isTrustedSender("not a url", INDEX), false);
+test("isTrustedFrame은 우리 창의 주 프레임에서 온 호출만 신뢰한다(경로 표기와 무관)", () => {
+  assert.equal(isTrustedFrame(webContents, mainFrame, { webContents, mainFrame }), true);
+  // 드라이브 대소문자·% 포함 경로·8.3 이름이어도 같은 프레임이면 신뢰(문자열 비교 안 함)
+  const odd = { url: "file:///C:/Users/USERNA~1/x/index.html" };
+  assert.equal(isTrustedFrame(webContents, odd, { webContents, mainFrame: odd }), true);
 });
 
-test("isTrustedSender는 같은 경로의 퍼센트 인코딩 차이(~ vs %7E)를 같은 파일로 본다", () => {
-  // portable exe가 8.3 경로(DEVELO~1)에 풀릴 때: Node pathToFileURL은 %7E, Chromium은 ~ 그대로
-  const node = "file:///C:/Users/DEVELO%7E1/AppData/Local/Temp/x/resources/app.asar/dist/renderer/index.html";
-  const chromium = "file:///C:/Users/DEVELO~1/AppData/Local/Temp/x/resources/app.asar/dist/renderer/index.html";
-  assert.equal(isTrustedSender(chromium, node), true);
-  assert.equal(isTrustedSender(chromium.replace("index.html", "other.html"), node), false);
+test("isTrustedFrame은 다른 창·하위 프레임·프레임 없음·비 file URL을 거부한다", () => {
+  assert.equal(isTrustedFrame({}, mainFrame, { webContents, mainFrame }), false); // 다른 webContents
+  assert.equal(isTrustedFrame(webContents, { url: mainFrame.url }, { webContents, mainFrame }), false); // 다른 프레임 객체
+  assert.equal(isTrustedFrame(webContents, null, { webContents, mainFrame }), false);
+  assert.equal(isTrustedFrame(webContents, undefined, { webContents, mainFrame }), false);
+  const remote = { url: "https://evil.example/index.html" };
+  assert.equal(isTrustedFrame(webContents, remote, { webContents, mainFrame: remote }), false);
 });
