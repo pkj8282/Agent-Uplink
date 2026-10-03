@@ -91,3 +91,12 @@ test("SSE 실시간 메시지에 보낸 사람 uuid(fromUuid)가 포함된다", 
   assert.equal(JSON.parse(line.slice(5)).fromUuid, "sender-1");
   sock.destroy(); hub.stop();
 });
+
+test("뷰어는 /accounts로 참여자 목록을 그리고 발신자에 설명 툴팁을 단다", () => {
+  const html = renderViewerHtml();
+  assert.match(html, /id="people"/);
+  assert.match(html, /fetch\("\/accounts"\)/);
+  assert.match(html, /fromUuid/);
+  assert.match(html, /\.title = /);
+  assert.doesNotMatch(html, /innerHTML/);
+});

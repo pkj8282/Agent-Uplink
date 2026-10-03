@@ -9,7 +9,7 @@ export interface AdminConfig {
 export type ConfigPatch = Partial<AdminConfig>;
 
 export interface SnapshotServer { id: string; name: string; channels: { id: string; name: string }[]; }
-export interface SnapshotAccount { uuid: string; name: string; }
+export interface SnapshotAccount { uuid: string; name: string; description?: string; online?: boolean; }
 export interface SnapshotDm { channelId: string; members: string[]; label: string; }
 
 export interface Snapshot {

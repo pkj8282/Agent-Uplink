@@ -42,3 +42,5 @@ body:not([data-state="ready"]) main { opacity: .45; } /* 조작 차단은 main.i
 .row .id, .row .meta { color: var(--muted); font-size: 12px; font-family: Consolas, monospace; }
 .row button { margin-left: auto; }
 .empty { color: var(--muted); padding: 8px 0; }
+.row .desc { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.row .meta.online { color: var(--ok); }

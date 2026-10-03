@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ConfigFormState, LatestOnly, deleteConfirmMessage, displayName, dmCountOf, memberNames, parseConfigForm } from "./view.js";
+import { ConfigFormState, LatestOnly, accountMeta, deleteConfirmMessage, displayName, dmCountOf, memberNames, parseConfigForm } from "./view.js";
 
 test("ConfigFormState: 저장 안 된 수정은 '저장됨'을 지우고 새로고침 덮어쓰기를 막는다", () => {
   const f = new ConfigFormState();
@@ -89,4 +89,10 @@ test("LatestOnly는 마지막에 시작한 요청만 최신으로 본다", () =>
   const b = seq.begin();
   assert.equal(seq.isLatest(a), false);
   assert.equal(seq.isLatest(b), true);
+});
+
+test("accountMeta는 접속 여부와 DM 수를 보여준다", () => {
+  assert.equal(accountMeta(true, 2), "접속 중 · DM 2");
+  assert.equal(accountMeta(false, 0), "DM 0");
+  assert.equal(accountMeta(undefined, 1), "DM 1"); // 구버전 Hub
 });

@@ -83,6 +83,7 @@ function runSmoke(win: BrowserWindow, outFile: string): void {
         servers: document.querySelectorAll("[data-kind=server]").length,
         channels: document.querySelectorAll("[data-kind=channel]").length,
         accounts: [...document.querySelectorAll("[data-kind=account] .name")].map((e) => e.textContent),
+        descriptions: [...document.querySelectorAll("[data-kind=account] .desc")].map((e) => e.textContent),
         dms: document.querySelectorAll("[data-kind=dm]").length,
         injected: document.querySelectorAll("main img, main script, main iframe").length,
       })`);

@@ -17,6 +17,9 @@ export function renderViewerHtml(): string {
   .row.hidden { display: none; }
   .ch { color: #0a8; margin-right: 6px; }
   .meta { opacity: 0.6; margin-right: 6px; }
+  #people { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .person { padding: 2px 8px; border-radius: 10px; background: rgba(127,127,127,0.12); }
+  .person.on::before { content: "● "; color: #0a8; }
 </style>
 </head>
 <body>
@@ -24,12 +27,40 @@ export function renderViewerHtml(): string {
   <h1>Agent-Uplink 로그 (127.0.0.1)</h1>
   <select id="chan"><option value="">전체 채널</option></select>
 </header>
+<div id="people"></div>
 <div id="log"></div>
 <script>
   const log = document.getElementById("log");
   const chan = document.getElementById("chan");
+  const people = document.getElementById("people");
   const seen = new Set();
   let filter = "";
+  let byUuid = new Map();
+
+  // 발신자 이름에 마우스를 올리면 그 계정의 프로필 설명을 보여준다.
+  function applyTitles() {
+    for (const el of log.querySelectorAll(".meta[data-uuid]")) {
+      const p = byUuid.get(el.dataset.uuid);
+      el.title = p && p.description ? p.description : "";
+    }
+  }
+
+  async function loadPeople() {
+    try {
+      const list = await (await fetch("/accounts")).json();
+      byUuid = new Map(list.map((p) => [p.uuid, p]));
+      people.replaceChildren(...list.map((p) => {
+        const s = document.createElement("span");
+        s.className = p.online ? "person on" : "person";
+        s.textContent = p.name;
+        s.title = p.description || "";
+        return s;
+      }));
+      applyTitles();
+    } catch { /* Hub 재시작 중 등 — 다음 주기에 재시도 */ }
+  }
+  loadPeople();
+  setInterval(loadPeople, 5000);
 
   function applyFilter(row) {
     row.classList.toggle("hidden", filter !== "" && row.dataset.ch !== filter);
@@ -54,6 +85,12 @@ export function renderViewerHtml(): string {
     ch.className = "ch"; ch.textContent = "#" + label;
     const meta = document.createElement("span");
     meta.className = "meta"; meta.textContent = "[" + t + " " + m.fromName + "]";
+    const uuid = m.fromUuid || m.from;
+    if (uuid) {
+      meta.dataset.uuid = uuid;
+      const p = byUuid.get(uuid);
+      meta.title = p && p.description ? p.description : "";
+    }
     row.appendChild(ch); row.appendChild(meta);
     row.appendChild(document.createTextNode(" " + m.text));
     applyFilter(row);

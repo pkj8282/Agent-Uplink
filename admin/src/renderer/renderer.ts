@@ -1,5 +1,7 @@
 import type { AdminApi, AdminConfig, IpcResult, Snapshot } from "../types.js";
-import { ConfigFormState, LatestOnly, deleteConfirmMessage, dmCountOf, memberNames, parseConfigForm } from "./view.js";
+import {
+  ConfigFormState, LatestOnly, accountMeta, deleteConfirmMessage, displayName, dmCountOf, memberNames, parseConfigForm,
+} from "./view.js";
 import type { FormMessage } from "./view.js";
 
 const formState = new ConfigFormState();
@@ -116,7 +118,10 @@ function renderAccounts(s: Snapshot): void {
     li.append(
       el("span", a.name, "name"),
       el("span", a.uuid, "id"),
-      el("span", `DM ${n}`, "meta"),
+      el("span", accountMeta(a.online, n), a.online ? "meta online" : "meta"),
+    );
+    if (a.description) li.append(el("span", displayName(a.description, 120), "desc"));
+    li.append(
       deleteButton("계정 삭제", deleteConfirmMessage({ kind: "account", name: a.name, uuid: a.uuid, dmCount: n }),
         () => window.admin.deleteAccount(a.uuid)),
     );

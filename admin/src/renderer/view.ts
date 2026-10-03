@@ -100,3 +100,8 @@ export function memberNames(dm: SnapshotDm, accounts: SnapshotAccount[]): string
   const byUuid = new Map(accounts.map((a) => [a.uuid, a.name]));
   return dm.members.map((u) => byUuid.get(u) ?? `(알 수 없음 ${u.slice(0, 8)})`).join(" ↔ ");
 }
+
+/** 계정 행의 보조 정보. online이 없으면(구버전 Hub) 접속 표시를 생략한다. */
+export function accountMeta(online: boolean | undefined, dmCount: number): string {
+  return online ? `접속 중 · DM ${dmCount}` : `DM ${dmCount}`;
+}
