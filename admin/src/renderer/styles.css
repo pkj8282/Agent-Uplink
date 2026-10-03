@@ -22,7 +22,8 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); padding: 8px 12px; }
 .tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
 main { padding: 16px 20px; }
-body:not([data-state="ready"]) main { opacity: .45; pointer-events: none; }
+body:not([data-state="ready"]) main { opacity: .45; } /* 조작 차단은 main.inert가 맡는다 */
+.status { margin-left: auto; margin-right: 12px; color: var(--muted); font-size: 13px; }
 .panel h2 { font-size: 14px; color: var(--muted); margin: 18px 0 8px; font-weight: 600; }
 .panel h2:first-child { margin-top: 0; }
 .form { display: grid; gap: 12px; max-width: 460px; }

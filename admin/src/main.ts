@@ -1,11 +1,14 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { AdminClient, resolveAdminTarget, toResult } from "./adminClient.js";
-import type { ConfigPatch } from "./types.js";
+import { isTrustedSender } from "./ipcGuard.js";
+import type { ConfigPatch, IpcResult } from "./types.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const indexFile = path.join(here, "renderer", "index.html");
+const indexUrl = pathToFileURL(indexFile).href;
 const client = new AdminClient(resolveAdminTarget(process.env));
 
 function asId(v: unknown): string {
@@ -13,12 +16,21 @@ function asId(v: unknown): string {
   return v;
 }
 
+/** 우리 렌더러(index.html)에서 온 호출만 처리한다. */
+function handle(channel: string, fn: (arg: unknown) => Promise<IpcResult<unknown>>): void {
+  ipcMain.handle(channel, (e, arg: unknown) =>
+    isTrustedSender(e.senderFrame?.url, indexUrl)
+      ? fn(arg)
+      : { ok: false, error: "허용되지 않은 호출입니다.", hubDown: false },
+  );
+}
+
 // Hub가 값을 재검증하므로 patch는 그대로 전달한다.
-ipcMain.handle("admin:snapshot", () => toResult(() => client.snapshot()));
-ipcMain.handle("admin:setConfig", (_e, patch: ConfigPatch) => toResult(() => client.setConfig(patch)));
-ipcMain.handle("admin:deleteChannel", (_e, id: unknown) => toResult(() => client.deleteChannel(asId(id))));
-ipcMain.handle("admin:deleteServer", (_e, id: unknown) => toResult(() => client.deleteServer(asId(id))));
-ipcMain.handle("admin:deleteAccount", (_e, uuid: unknown) => toResult(() => client.deleteAccount(asId(uuid))));
+handle("admin:snapshot", () => toResult(() => client.snapshot()));
+handle("admin:setConfig", (patch) => toResult(() => client.setConfig(patch as ConfigPatch)));
+handle("admin:deleteChannel", (id) => toResult(() => client.deleteChannel(asId(id))));
+handle("admin:deleteServer", (id) => toResult(() => client.deleteServer(asId(id))));
+handle("admin:deleteAccount", (uuid) => toResult(() => client.deleteAccount(asId(uuid))));
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -38,7 +50,7 @@ function createWindow(): BrowserWindow {
   // 로컬 관리 UI 전용: 새 창·외부 탐색 차단
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (e) => e.preventDefault());
-  void win.loadFile(path.join(here, "renderer", "index.html"));
+  void win.loadFile(indexFile);
   return win;
 }
 
@@ -52,21 +64,29 @@ function runSmoke(win: BrowserWindow, outFile: string): void {
     if (level === "error" || level === 3) consoleErrors.push(message);
   });
   win.webContents.once("did-finish-load", async () => {
-    const deadline = Date.now() + 15000;
-    while (Date.now() < deadline) {
-      const state = await win.webContents.executeJavaScript("document.body.dataset.state");
-      if (state !== "loading") break;
-      await new Promise((r) => setTimeout(r, 200));
+    let report: Record<string, unknown>;
+    try {
+      const deadline = Date.now() + 15000;
+      while (Date.now() < deadline) {
+        const state = await win.webContents.executeJavaScript("document.body.dataset.state");
+        if (state !== "loading") break;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      report = await win.webContents.executeJavaScript(`({
+        state: document.body.dataset.state,
+        banner: document.getElementById("banner").hidden ? "" : document.getElementById("banner").textContent,
+        status: document.getElementById("status").textContent,
+        mainInert: document.querySelector("main").inert,
+        servers: document.querySelectorAll("[data-kind=server]").length,
+        channels: document.querySelectorAll("[data-kind=channel]").length,
+        accounts: [...document.querySelectorAll("[data-kind=account] .name")].map((e) => e.textContent),
+        dms: document.querySelectorAll("[data-kind=dm]").length,
+        injected: document.querySelectorAll("main img, main script, main iframe").length,
+      })`);
+    } catch (e) {
+      report = { state: "smoke-error", error: (e as Error).message };
     }
-    const report = await win.webContents.executeJavaScript(`({
-      state: document.body.dataset.state,
-      banner: document.getElementById("banner").hidden ? "" : document.getElementById("banner").textContent,
-      servers: document.querySelectorAll("[data-kind=server]").length,
-      channels: document.querySelectorAll("[data-kind=channel]").length,
-      accounts: [...document.querySelectorAll("[data-kind=account] .name")].map((e) => e.textContent),
-      dms: document.querySelectorAll("[data-kind=dm]").length,
-      injected: document.querySelectorAll("main img, main script, main iframe").length,
-    })`);
+    // 스모크가 실패해도 결과를 남기고 반드시 종료한다(검증이 멈춘 채 대기하지 않도록).
     fs.writeFileSync(outFile, JSON.stringify({ ...report, consoleErrors }, null, 2));
     app.exit(0);
   });

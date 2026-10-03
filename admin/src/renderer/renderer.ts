@@ -1,8 +1,9 @@
 import type { AdminApi, AdminConfig, IpcResult, Snapshot } from "../types.js";
-import { ConfigFormState, deleteConfirmMessage, dmCountOf, memberNames, parseConfigForm } from "./view.js";
+import { ConfigFormState, LatestOnly, deleteConfirmMessage, dmCountOf, memberNames, parseConfigForm } from "./view.js";
 import type { FormMessage } from "./view.js";
 
 const formState = new ConfigFormState();
+const snapshotSeq = new LatestOnly();
 
 declare global {
   interface Window { admin: AdminApi }
@@ -26,14 +27,26 @@ function showBanner(text: string): void {
   b.hidden = text === "";
 }
 
+type ViewState = "loading" | "ready" | "hubdown" | "error";
+
+/** 화면 상태: ready가 아니면 본문을 inert로 막아 마우스·키보드 조작을 모두 차단한다. */
+function setState(state: ViewState): void {
+  document.body.dataset.state = state;
+  document.querySelector("main")!.inert = state !== "ready";
+  byId("status").textContent = state === "loading" ? "불러오는 중…" : "";
+}
+
 async function refresh(): Promise<void> {
+  const t = snapshotSeq.begin();
+  setState("loading");
   const r = await window.admin.snapshot();
+  if (!snapshotSeq.isLatest(t)) return; // 더 나중에 시작한 새로고침이 있으면 이 결과는 버린다
   if (!r.ok) {
-    document.body.dataset.state = r.hubDown ? "hubdown" : "error";
+    setState(r.hubDown ? "hubdown" : "error");
     showBanner(r.hubDown ? r.error : `불러오기 실패: ${r.error}`);
     return;
   }
-  document.body.dataset.state = "ready";
+  setState("ready");
   showBanner("");
   if (formState.acceptsRefresh()) renderConfig(r.data.config); // 저장 안 된 수정은 덮어쓰지 않는다
   renderServers(r.data);
@@ -131,10 +144,7 @@ for (const b of document.querySelectorAll<HTMLButtonElement>("[data-tab]")) {
   b.addEventListener("click", () => selectTab(b.dataset.tab!));
 }
 
-byId("refresh").addEventListener("click", () => {
-  document.body.dataset.state = "loading";
-  void refresh();
-});
+byId("refresh").addEventListener("click", () => void refresh());
 
 function showFormMessage(m: FormMessage): void {
   const msg = byId("config-msg");

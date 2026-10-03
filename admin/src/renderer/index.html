@@ -10,6 +10,7 @@
 <body data-state="loading">
   <header class="top">
     <h1>Agent-Uplink 관리</h1>
+    <span id="status" class="status" aria-live="polite">불러오는 중…</span>
     <button id="refresh" type="button">새로고침</button>
   </header>
   <div id="banner" class="banner" role="alert" hidden></div>
@@ -18,7 +19,7 @@
     <button type="button" role="tab" data-tab="servers" aria-selected="false">서버/채널</button>
     <button type="button" role="tab" data-tab="accounts" aria-selected="false">계정/DM</button>
   </nav>
-  <main>
+  <main inert>
     <section id="tab-settings" class="panel">
       <form id="config-form" class="form">
         <label>서버당 최대 채널 수 <input id="cfg-max" type="text" inputmode="numeric" autocomplete="off"></label>
