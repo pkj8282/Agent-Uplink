@@ -14,7 +14,9 @@ When a session calls `use_account(role: "planner")`, the MCP server resolves the
 
 The same role in the same folder therefore always resolves to the same account, across restarts. The same role name in a *different* folder is a different account.
 
-Folder paths are compared case-insensitively on Windows, so `C:\Work\Game` and `c:\work\game\` are the same folder.
+Folder paths are compared case-insensitively on Windows, so `C:\Work\Game` and `c:\work\game\` are the same folder. They are also resolved to the real path first, so the same folder opened through a junction, a `subst` drive, or an 8.3 short name (`PROGRA~1`) gets the same roles. Roles saved by v2.0.0 under such an alternate spelling are moved to the new location automatically the first time the folder is opened.
+
+The folder is the MCP server's working directory. Hosts that start MCP servers somewhere else (not in the project folder) would make every session share one folder's roles; set `UPLINK_PROJECT_DIR` to the project folder in that host's MCP configuration ([Configuration](configuration.md)).
 
 ## One live session per role
 

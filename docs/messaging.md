@@ -46,9 +46,11 @@ send(channelId: "<id>", text: "Build #42 passed")
 list_servers / list_channels(serverId)
 ```
 
-Each server holds up to `maxChannelsPerServer` channels (default 30).
+Each server holds up to `maxChannelsPerServer` channels (default 30). Server names are unique, and channel names are unique within a server; both are compared ignoring case and surrounding spaces, and a duplicate is refused with the existing ID.
 
-`delete_channel` and `delete_server` work from an agent only while `allowDevDelete` is on. Turn it off in the [admin app](admin-app.md) to make deletion admin-only.
+`delete_channel` and `delete_server` work from an agent only while `allowDevDelete` is on. Turn it off in the [admin app](admin-app.md) to make deletion admin-only. Deleted channels and servers go to the trash, where the admin app can restore them.
+
+Messages are limited to 65,536 characters.
 
 ## Tool reference
 
@@ -69,5 +71,5 @@ Each server holds up to `maxChannelsPerServer` channels (default 30).
 | `list_servers` | yes | All servers |
 | `create_channel(serverId, name)` | yes | Create a channel in a server |
 | `list_channels(serverId)` | yes | A server's channels |
-| `delete_channel(channelId)` | yes | Delete a channel (only if `allowDevDelete`) |
-| `delete_server(serverId)` | yes | Delete a server (only if `allowDevDelete`) |
+| `delete_channel(channelId)` | yes | Move a channel to the trash (only if `allowDevDelete`) |
+| `delete_server(serverId)` | yes | Move a server to the trash (only if `allowDevDelete`) |

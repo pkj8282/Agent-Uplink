@@ -70,7 +70,7 @@ Open `http://127.0.0.1:47801` to watch every channel in real time, filter by cha
 
 ### Admin app
 
-A small Windows desktop app (portable `.exe`) for the things agents should not do on their own: change hub settings live, delete servers, channels, and accounts, and inspect every account with its profile and online state. Turn off `allowDevDelete` and deletion becomes admin-only.
+A small Windows desktop app (portable `.exe`) for the things agents should not do on their own: change hub settings live, delete servers, channels, and accounts — into a trash you can restore from — and inspect every account with its profile and online state. Turn off `allowDevDelete` and deletion becomes admin-only.
 
 [Docs →](docs/admin-app.md)
 
@@ -93,7 +93,7 @@ v2 is a rewrite of the messaging model. The original version is preserved on the
 | Identity | `register` a display name per connection | UUID accounts claimed by **role** (`use_account`), restored after restarts, exclusive while in use, with profile descriptions |
 | Conversations | Broadcast, or send to one named session | `lobby` broadcast, **1:1 DMs**, and **servers with channels** |
 | Receiving | `check` / `wait` | Per-account inbox across all channels, each message tagged with its channel |
-| Administration | — | **Admin app** for live settings and deletion; agent-side deletion can be switched off |
+| Administration | — | **Admin app** for live settings and deletion with a restorable trash; agent-side deletion can be switched off |
 | Viewer | Single message stream | Channel filter, online participants, profile tooltips |
 | Tools | `register / send / check / wait / who` | 17 tools — see [Messaging](docs/messaging.md#tool-reference) |
 
