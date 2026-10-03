@@ -217,6 +217,54 @@ test("접속 직후 끊는 프로그램은 Hub가 아닐 수 있다고 안내", 
   f.close();
 });
 
+test("hello 단계 끊김 문구는 종료 중인 Hub 가능성과 새로고침을 안내한다", async () => {
+  const f = await fakeServer(() => {}, (s) => s.destroy());
+  const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 2000 });
+  await assert.rejects(c.snapshot(), /Hub가 종료 중이거나 Agent-Uplink Hub가 아닐 수 있습니다\. 잠시 후 새로고침하세요\./);
+  f.close();
+});
+
+test("op 단계 응답 시간 초과는 '이미 처리됐을 수 있음·새로고침' 안내를 붙인다", async () => {
+  const f = await fakeServer((req, s) => {
+    if (req.op === "hello") s.write(encodeFrame({ ok: true, id: req.id, ...HELLO_OK }));
+    // op에는 응답하지 않는다
+  });
+  const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 300 });
+  await assert.rejects(c.deleteChannel("x"), /이미 처리됐을 수 있습니다.*새로고침/);
+  f.close();
+});
+
+test("구버전 Hub(스냅샷에 trash 없음)면 snapshot.trash는 undefined", async () => {
+  const f = await fakeServer((req, s) => {
+    if (req.op === "hello") s.write(encodeFrame({ ok: true, id: req.id, ...HELLO_OK }));
+    else s.write(encodeFrame({ ok: true, id: req.id, config: { maxChannelsPerServer: 30, allowDevDelete: false, inboxMaxBatch: 200 }, snapshotServers: [], snapshotAccounts: [], snapshotDms: [] }));
+  });
+  const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 1000 });
+  assert.equal((await c.snapshot()).trash, undefined);
+  f.close();
+});
+
+test("휴지통: snapshot에 trash가 오고, restoreTrash의 name_conflict는 code·conflicts로 전달된다", async () => {
+  const { hub, port, client } = await startHub();
+  const a = new Raw(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  const srv = (await a.req("create_server", { name: "S" })).serverId;
+  const ch = (await a.req("create_channel", { serverId: srv, name: "c" })).channelId;
+  await client.deleteChannel(ch);
+  await a.req("create_channel", { serverId: srv, name: "c" });
+  const snap = await client.snapshot();
+  assert.equal(snap.trash!.length, 1);
+  const r = await toResult(() => client.restoreTrash(snap.trash![0].id, false));
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.equal(r.code, "name_conflict");
+    assert.deepEqual(r.conflicts, [{ kind: "channel", name: "c", to: "c (2)" }]);
+  }
+  const ok = await client.restoreTrash(snap.trash![0].id, true);
+  assert.deepEqual(ok.renamed, [{ kind: "channel", from: "c", to: "c (2)" }]);
+  assert.deepEqual(await client.emptyTrash(), { removed: 0 });
+  a.close(); hub.stop();
+});
+
 test("버전만 다른 Hub는 버전 불일치로 안내", async () => {
   const f = await fakeServer((req, s) => s.write(encodeFrame({ ok: true, id: req.id, magic: "agent-uplink", version: 3 })));
   const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 2000 });

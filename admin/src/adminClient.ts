@@ -2,7 +2,7 @@ import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 import { encodeFrame, FrameDecoder } from "./framing.js";
-import type { AdminConfig, ConfigPatch, IpcResult, Snapshot } from "./types.js";
+import type { AdminConfig, ConfigPatch, IpcResult, NameConflict, RestoreReport, Snapshot } from "./types.js";
 
 const HUB_MAGIC = "agent-uplink";
 const HUB_PROTOCOL_VERSION = 2;
@@ -40,12 +40,27 @@ type Reply = { ok: boolean; id: number; error?: string; [k: string]: any };
 /** 연결이 응답 전에 끊김(어느 단계인지는 호출자가 메시지로 구분한다). */
 class DisconnectedError extends Error {}
 
-/** 성공은 {ok,data}, 실패는 {ok:false,error,hubDown}으로 감싼다(IPC로 Error 객체를 넘기지 않기 위해). */
+/** 응답 대기 시간 초과(op 단계면 Hub에서 이미 처리됐을 수 있다). */
+class TimeoutError extends Error {}
+
+/** Hub가 op를 거부했다(code가 있으면 관리 앱이 문구로 바꾼다). */
+export class HubOpError extends Error {
+  constructor(message: string, readonly code?: string, readonly conflicts?: NameConflict[]) {
+    super(message);
+    this.name = "HubOpError";
+  }
+}
+
+/** 성공은 {ok,data}, 실패는 {ok:false,error,hubDown,code?}로 감싼다(IPC로 Error 객체를 넘기지 않기 위해). */
 export async function toResult<T>(fn: () => Promise<T>): Promise<IpcResult<T>> {
   try {
     return { ok: true, data: await fn() };
   } catch (e) {
-    return { ok: false, error: (e as Error).message, hubDown: e instanceof HubNotRunningError };
+    const base = { ok: false as const, error: (e as Error).message, hubDown: e instanceof HubNotRunningError };
+    if (e instanceof HubOpError) {
+      return { ...base, ...(e.code ? { code: e.code } : {}), ...(e.conflicts ? { conflicts: e.conflicts } : {}) };
+    }
+    return base;
   }
 }
 
@@ -72,7 +87,16 @@ export class AdminClient {
       servers: r.snapshotServers ?? [],
       accounts: r.snapshotAccounts ?? [],
       dms: r.snapshotDms ?? [],
+      trash: r.trash, // 없으면 undefined(구버전 Hub) — 빈 목록과 구분한다
     };
+  }
+
+  async restoreTrash(id: string, confirmRename: boolean): Promise<RestoreReport> {
+    return (await this.call("admin_restore_trash", { trashId: id, confirmRename })).restored;
+  }
+
+  async emptyTrash(): Promise<{ removed: number }> {
+    return { removed: (await this.call("admin_empty_trash", {})).removed };
   }
 
   async setConfig(patch: ConfigPatch): Promise<AdminConfig> {
@@ -87,22 +111,24 @@ export class AdminClient {
     const conn = await this.connect();
     try {
       const hello = await conn.request("hello", {}).catch((e: unknown) => {
-        throw e instanceof DisconnectedError
-          ? new Error(`포트 ${this.port}의 프로그램이 Hub 응답 없이 연결을 끊었습니다(Agent-Uplink Hub가 아닐 수 있음).`)
-          : e;
+        if (e instanceof DisconnectedError) {
+          throw new Error(`포트 ${this.port}의 프로그램이 Hub 응답 없이 연결을 끊었습니다. Hub가 종료 중이거나 Agent-Uplink Hub가 아닐 수 있습니다. 잠시 후 새로고침하세요.`);
+        }
+        if (e instanceof TimeoutError) throw new Error(`${e.message} 포트를 다른 프로그램이 쓰고 있을 수 있습니다.`);
+        throw e;
       });
       if (hello.magic !== HUB_MAGIC) throw new Error(`포트 ${this.port}의 프로그램은 Agent-Uplink Hub가 아닙니다.`);
       if (hello.version !== HUB_PROTOCOL_VERSION) {
         throw new Error(`포트 ${this.port}의 Agent-Uplink Hub 버전(v${hello.version})이 관리 도구(v${HUB_PROTOCOL_VERSION})와 맞지 않습니다.`);
       }
       const r = await conn.request(op, { token: this.readToken(), ...params }).catch((e: unknown) => {
-        throw e instanceof DisconnectedError
-          ? new Error("요청 도중 Hub 연결이 끊겼습니다. 작업이 적용됐는지 새로고침으로 확인하세요.")
-          : e;
+        if (e instanceof DisconnectedError) throw new Error("요청 도중 Hub 연결이 끊겼습니다. 작업이 적용됐는지 새로고침으로 확인하세요.");
+        if (e instanceof TimeoutError) throw new Error(`${e.message} 작업이 Hub에서 이미 처리됐을 수 있습니다. 새로고침으로 확인하세요.`);
+        throw e;
       });
       if (!r.ok) {
-        if (r.error === "알 수 없는 op") throw new Error("이 Hub에는 관리 기능이 없습니다(구버전). Hub를 재배포한 뒤 다시 시도하세요.");
-        throw new Error(r.error ?? `${op} 실패`);
+        if (r.error === "알 수 없는 op") throw new Error("이 Hub에는 이 관리 기능이 없습니다(구버전). Hub를 재배포한 뒤 다시 시도하세요.");
+        throw new HubOpError(r.error ?? `${op} 실패`, r.code, r.conflicts);
       }
       return r;
     } finally {
@@ -169,7 +195,7 @@ class Connection {
       const id = this.nextId++;
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Hub가 응답하지 않습니다(op=${op}, ${this.timeoutMs}ms). 포트를 다른 프로그램이 쓰고 있을 수 있습니다.`));
+        reject(new TimeoutError(`Hub가 응답하지 않습니다(op=${op}, ${this.timeoutMs}ms).`));
       }, this.timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       this.sock.write(encodeFrame({ op, id, ...params }));
