@@ -160,3 +160,78 @@ test("잘못된 프레임(null)을 받아도 Hub는 죽지 않는다", async () 
   assert.equal((await reply).ok, true);
   raw.destroy(); hub.stop();
 });
+
+test("open_dm은 멱등: 같은 상대엔 하나의 채널만, 양쪽 역색인에 기록된다", async () => {
+  const { hub, port } = await startHub();
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  const b = new Client(port); await b.ready(); await b.req("login", { uuid: "u2", name: "B" });
+  const first = await a.req("open_dm", { peer: "u2" });
+  assert.equal(first.ok, true);
+  const again = await a.req("open_dm", { peer: "u2" });
+  assert.equal(again.channelId, first.channelId); // 멱등
+  const fromB = await b.req("open_dm", { peer: "u1" });
+  assert.equal(fromB.channelId, first.channelId); // 반대쪽도 같은 채널
+  assert.equal((await a.req("list_dms")).dms!.find((d) => d.peer === "u2")!.channelId, first.channelId);
+  assert.equal((await b.req("list_dms")).dms!.find((d) => d.peer === "u1")!.channelId, first.channelId);
+  a.close(); b.close(); hub.stop();
+});
+
+test("open_dm은 이름으로도 되지만 모호하면 거부, 없으면 거부, 자기자신 거부", async () => {
+  const { hub, port } = await startHub();
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  const b = new Client(port); await b.ready(); await b.req("login", { uuid: "u2", name: "B" });
+  const c = new Client(port); await c.ready(); await c.req("login", { uuid: "u3", name: "B" }); // 이름 중복 B
+  assert.equal((await a.req("open_dm", { peer: "없는계정" })).ok, false);
+  assert.equal((await a.req("open_dm", { peer: "B" })).ok, false); // 모호(u2,u3)
+  assert.equal((await a.req("open_dm", { peer: "u1" })).ok, false); // 자기 자신
+  assert.equal((await a.req("open_dm", { peer: "u2" })).ok, true); // 유일 uuid OK
+  a.close(); b.close(); c.close(); hub.stop();
+});
+
+test("DM 메시지는 쌍의 두 계정에만 가고 제3자에겐 안 간다", async () => {
+  const { hub, port } = await startHub();
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  const b = new Client(port); await b.ready(); await b.req("login", { uuid: "u2", name: "B" });
+  const c = new Client(port); await c.ready(); await c.req("login", { uuid: "u3", name: "C" });
+  const dm = await a.req("open_dm", { peer: "u2" });
+  await a.req("send", { channelId: dm.channelId, text: "B에게만" });
+  assert.deepEqual((await b.req("check")).items!.map((i) => i.text), ["B에게만"]);
+  assert.deepEqual((await c.req("check")).items, []); // 제3자 제외
+  a.close(); b.close(); c.close(); hub.stop();
+});
+
+test("재시작 후에도 기존 DM 채널로 send/read가 동작한다", async () => {
+  const dataDir = tmp();
+  const h1 = await startHub(dataDir);
+  const a1 = new Client(h1.port); await a1.ready(); await a1.req("login", { uuid: "u1", name: "A" });
+  const b1 = new Client(h1.port); await b1.ready(); await b1.req("login", { uuid: "u2", name: "B" });
+  const dm = await a1.req("open_dm", { peer: "u2" });
+  await a1.req("send", { channelId: dm.channelId, text: "재시작전" });
+  a1.close(); b1.close(); h1.hub.stop();
+  const h2 = await startHub(dataDir);
+  const a2 = new Client(h2.port); await a2.ready(); await a2.req("login", { uuid: "u1", name: "A" });
+  const read = await a2.req("read", { channelId: dm.channelId });
+  assert.deepEqual(read.messages!.map((m) => m.text), ["재시작전"]);
+  assert.equal((await a2.req("send", { channelId: dm.channelId, text: "재시작후" })).ok, true);
+  a2.close(); h2.hub.stop();
+});
+
+test("재시작 시 끊긴 DM 역색인을 dm/index.json 기준으로 복구한다", async () => {
+  const dataDir = tmp();
+  const h1 = await startHub(dataDir);
+  const a1 = new Client(h1.port); await a1.ready(); await a1.req("login", { uuid: "u1", name: "A" });
+  const b1 = new Client(h1.port); await b1.ready(); await b1.req("login", { uuid: "u2", name: "B" });
+  const dm = await a1.req("open_dm", { peer: "u2" });
+  a1.close(); b1.close(); h1.hub.stop();
+  // 크래시로 B의 역색인이 빠진 상황을 흉내: accounts/u2.json의 dm을 비운다
+  const bFile = path.join(dataDir, "accounts", "u2.json");
+  const bAcc = JSON.parse(fs.readFileSync(bFile, "utf8"));
+  bAcc.dm = {};
+  fs.writeFileSync(bFile, JSON.stringify(bAcc));
+  // 재시작 → 시작 시 dm/index.json 기준으로 역색인 복구
+  const h2 = await startHub(dataDir);
+  const b2 = new Client(h2.port); await b2.ready(); await b2.req("login", { uuid: "u2", name: "B" });
+  const dms = (await b2.req("list_dms")).dms!;
+  assert.equal(dms.find((d) => d.peer === "u1")!.channelId, dm.channelId);
+  b2.close(); h2.hub.stop();
+});

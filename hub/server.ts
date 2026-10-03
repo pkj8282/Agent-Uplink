@@ -55,9 +55,13 @@ export class Hub {
     this.dm = new DmStore({ dir: opts.dataDir });
     // 1단계 검증용 lobby 채널(전체 공개)
     this.channels.register({ id: LOBBY_CHANNEL_ID, kind: "server", label: "main/lobby", members: null });
-    // 재시작 시 기존 DM 채널을 복원(라우팅 가능하도록 등록)
+    // 재시작 시 기존 DM 채널을 복원(라우팅)하고, dm/index.json을 권위로 삼아
+    // 양쪽 계정의 역색인을 재조정한다(크래시로 한쪽이 누락됐어도 복구).
     for (const rec of this.dm.all()) {
-      this.channels.register({ id: rec.channelId, kind: "dm", label: rec.label, members: [...rec.members] });
+      const [a, b] = rec.members;
+      this.channels.register({ id: rec.channelId, kind: "dm", label: rec.label, members: [a, b] });
+      this.accounts.setDm(a, b, rec.channelId);
+      this.accounts.setDm(b, a, rec.channelId);
     }
     this.tcp = net.createServer((sock) => this.onConnection(sock));
     this.http = http.createServer((req, res) => this.onHttp(req, res));
@@ -340,14 +344,17 @@ export class Hub {
     return { uuid: matches[0].uuid };
   }
 
-  /** 기존 DM이 있으면 그 channelId, 없으면 생성 후 양쪽 역색인·채널 등록. */
+  /** 기존 DM이면 그 channelId, 없으면 생성. 신규/기존 무관하게 양쪽 역색인을 항상 보장한다. */
   private ensureDm(a: string, b: string): string {
-    const existing = this.dm.findByPair(a, b);
-    if (existing) return existing.channelId;
-    const aName = this.accounts.get(a)!.name;
-    const bName = this.accounts.getOrCreate(b).name;
-    const rec = this.dm.create(a, b, `${aName}-${bName}`);
-    this.channels.register({ id: rec.channelId, kind: "dm", label: rec.label, members: [a, b] });
+    let rec = this.dm.findByPair(a, b);
+    if (!rec) {
+      // b는 resolvePeer가 보장한 기존 계정이다(유령 계정 생성 방지 위해 get 사용).
+      const aName = this.accounts.get(a)!.name;
+      const bName = this.accounts.get(b)!.name;
+      rec = this.dm.create(a, b, `${aName}-${bName}`);
+      this.channels.register({ id: rec.channelId, kind: "dm", label: rec.label, members: [a, b] });
+    }
+    // 기존이든 신규든 양쪽 역색인을 다시 쓴다 → 이전 크래시로 한쪽이 빠졌으면 자가 복구.
     this.accounts.setDm(a, b, rec.channelId);
     this.accounts.setDm(b, a, rec.channelId);
     return rec.channelId;
