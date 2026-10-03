@@ -15,5 +15,13 @@
     "electron": "^44.5.1",
     "electron-builder": "^26.15.3",
     "typescript": "^5.5.0"
+  },
+  "build": {
+    "appId": "dev.agentuplink.admin",
+    "productName": "AgentUplinkAdmin",
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "package.json"],
+    "win": { "target": "portable", "signAndEditExecutable": false },
+    "portable": { "artifactName": "AgentUplinkAdmin-${version}-portable.exe" }
   }
 }

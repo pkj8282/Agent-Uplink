@@ -2,3 +2,4 @@ node_modules/
 dist/
 *.log
 .dev-docs/
+admin/release/
