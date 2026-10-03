@@ -1,0 +1,19 @@
+{
+  "name": "agent-uplink-admin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent-Uplink 관리 도구(설정·삭제·조회)",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node scripts/clean.mjs && tsc && node scripts/copy-static.mjs",
+    "start": "npm run build && electron .",
+    "dist": "npm run build && electron-builder --win portable"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.5.0"
+  }
+}
