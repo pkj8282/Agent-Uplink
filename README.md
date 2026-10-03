@@ -67,7 +67,16 @@ claude mcp add agent-uplink -- node "<빌드한 경로>/dist/mcp/index.js"
 
 > **중요(수신 방식)**: MCP는 구조상 메시지를 자동으로 밀어 넣지 못합니다. 상대 세션이 `check`/`wait`를 호출하는 순간에만 수신됩니다. 협업 중 응답을 기다릴 땐 `wait`를 쓰세요.
 
-> **다음 단계**: Direct Message(`open_dm`)와 다중 Communication Server(서버·채널 생성)는 이후 단계에서 추가됩니다. 현재는 전체 공개 `lobby` 채널만 있습니다.
+## Direct Message (2단계)
+
+1:1 비공개 대화입니다.
+1. `open_dm(peer="<상대 UUID 또는 유일한 이름>")` → DM 채널ID를 받습니다(이미 있으면 그 채널).
+2. 그 channelId로 `send(channelId, text)` / `read(channelId)` 합니다. 수신은 평소대로 `check`/`wait`(채널 태그로 어느 DM인지 구분).
+3. `list_dms`로 내 DM 목록(상대 → 채널ID)을 봅니다.
+
+> DM은 쌍의 두 계정에만 전달됩니다. 상대는 이미 로그인한 적 있는(디렉터리에 보이는) 계정이어야 합니다.
+
+> **다음 단계**: 다중 Communication Server(서버·채널 생성)는 3단계에서 추가됩니다.
 
 ## 환경변수(선택)
 

@@ -95,6 +95,32 @@ server.tool(
 );
 
 server.tool(
+  "open_dm",
+  "상대 계정과의 1:1 Direct Message 채널을 엽니다(이미 있으면 그 채널). 반환된 channelId로 send/read 하세요. peer는 상대의 계정 UUID 또는 (유일할 때) 표시 이름입니다.",
+  { peer: z.string().min(1).describe("상대 계정 UUID 또는 유일한 표시 이름") },
+  async ({ peer }) => {
+    try {
+      const r = await client.openDm(peer);
+      return r.ok ? text(`DM 채널 열림: ${r.channelId}`) : text(`실패: ${r.error}`, true);
+    } catch (e) { return text((e as Error).message, true); }
+  },
+);
+
+server.tool(
+  "list_dms",
+  "내 DM 목록(상대 → 채널ID)을 봅니다.",
+  {},
+  async () => {
+    try {
+      const r = await client.listDms();
+      if (!r.ok) return text(`실패: ${r.error}`, true);
+      const list = (r.dms ?? []).map((d) => `${d.peerName} (${d.peer}) → ${d.channelId}`);
+      return text(list.length ? list.join("\n") : "(DM 없음)");
+    } catch (e) { return text((e as Error).message, true); }
+  },
+);
+
+server.tool(
   "send",
   "채널에 메시지를 보냅니다. 1단계에서는 channelId='lobby'로 전체에게 보냅니다(DM·서버 채널은 이후 단계).",
   { channelId: z.string().min(1).describe("대상 채널 ID (예: lobby)"), text: z.string().min(1).describe("보낼 내용") },
