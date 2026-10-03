@@ -48,7 +48,9 @@ export type Request =
   | { op: "send"; id: number; channelId: string; text: string }
   | { op: "read"; id: number; channelId: string; limit?: number }
   | { op: "check"; id: number }
-  | { op: "wait"; id: number; timeoutMs?: number };
+  | { op: "wait"; id: number; timeoutMs?: number }
+  | { op: "open_dm"; id: number; peer: string }
+  | { op: "list_dms"; id: number };
 
 export interface Response {
   ok: boolean;
@@ -61,5 +63,7 @@ export interface Response {
   seq?: number;
   messages?: Message[];
   items?: InboxItem[];
+  channelId?: string; // open_dm
+  dms?: { peer: string; peerName: string; channelId: string }[]; // list_dms
   error?: string;
 }

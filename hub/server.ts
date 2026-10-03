@@ -6,6 +6,7 @@ import { loadConfig, Config } from "./config.js";
 import { ChannelStore } from "./channels.js";
 import { AccountStore } from "./accounts.js";
 import { InboxStore } from "./inbox.js";
+import { DmStore } from "./dm.js";
 import {
   MAGIC,
   PROTOCOL_VERSION,
@@ -37,6 +38,7 @@ export class Hub {
   protected channels: ChannelStore;
   protected accounts: AccountStore;
   protected inbox: InboxStore;
+  protected dm: DmStore;
   private tcp: net.Server;
   private http: http.Server;
   private sseClients = new Set<http.ServerResponse>();
@@ -50,8 +52,13 @@ export class Hub {
     this.channels = new ChannelStore({ dir: opts.dataDir });
     this.accounts = new AccountStore({ dir: opts.dataDir });
     this.inbox = new InboxStore({ dir: opts.dataDir });
+    this.dm = new DmStore({ dir: opts.dataDir });
     // 1단계 검증용 lobby 채널(전체 공개)
     this.channels.register({ id: LOBBY_CHANNEL_ID, kind: "server", label: "main/lobby", members: null });
+    // 재시작 시 기존 DM 채널을 복원(라우팅 가능하도록 등록)
+    for (const rec of this.dm.all()) {
+      this.channels.register({ id: rec.channelId, kind: "dm", label: rec.label, members: [...rec.members] });
+    }
     this.tcp = net.createServer((sock) => this.onConnection(sock));
     this.http = http.createServer((req, res) => this.onHttp(req, res));
   }
@@ -195,6 +202,35 @@ export class Hub {
         return;
       }
 
+      case "open_dm": {
+        const uuid = needLogin();
+        if (!uuid) return;
+        if (typeof req.peer !== "string" || req.peer.length === 0) {
+          reply({ ok: false, error: "peer가 필요합니다." });
+          return;
+        }
+        const peer = this.resolvePeer(req.peer, uuid);
+        if ("error" in peer) {
+          reply({ ok: false, error: peer.error });
+          return;
+        }
+        reply({ ok: true, channelId: this.ensureDm(uuid, peer.uuid) });
+        return;
+      }
+
+      case "list_dms": {
+        const uuid = needLogin();
+        if (!uuid) return;
+        const me = this.accounts.get(uuid)!;
+        const dms = Object.entries(me.dm).map(([peerUuid, channelId]) => ({
+          peer: peerUuid,
+          peerName: this.accounts.get(peerUuid)?.name ?? peerUuid.slice(0, 8),
+          channelId,
+        }));
+        reply({ ok: true, dms });
+        return;
+      }
+
       case "send": {
         const uuid = needLogin();
         if (!uuid) return;
@@ -288,6 +324,33 @@ export class Hub {
       if (this.inbox.size(uuid) > INBOX_COMPACT_THRESHOLD) this.inbox.compact(uuid, last);
     }
     return items;
+  }
+
+  /** peer를 UUID(우선) 또는 유일한 이름으로 해석한다. */
+  private resolvePeer(peer: string, me: string): { uuid: string } | { error: string } {
+    const byId = this.accounts.get(peer);
+    if (byId) {
+      if (byId.uuid === me) return { error: "자기 자신과는 DM할 수 없습니다." };
+      return { uuid: byId.uuid };
+    }
+    const matches = this.accounts.list().filter((a) => a.name === peer);
+    if (matches.length === 0) return { error: `그런 계정이 없습니다: ${peer}` };
+    if (matches.length > 1) return { error: `이름이 모호합니다(${matches.length}명). UUID로 지정하세요: ${peer}` };
+    if (matches[0].uuid === me) return { error: "자기 자신과는 DM할 수 없습니다." };
+    return { uuid: matches[0].uuid };
+  }
+
+  /** 기존 DM이 있으면 그 channelId, 없으면 생성 후 양쪽 역색인·채널 등록. */
+  private ensureDm(a: string, b: string): string {
+    const existing = this.dm.findByPair(a, b);
+    if (existing) return existing.channelId;
+    const aName = this.accounts.get(a)!.name;
+    const bName = this.accounts.getOrCreate(b).name;
+    const rec = this.dm.create(a, b, `${aName}-${bName}`);
+    this.channels.register({ id: rec.channelId, kind: "dm", label: rec.label, members: [a, b] });
+    this.accounts.setDm(a, b, rec.channelId);
+    this.accounts.setDm(b, a, rec.channelId);
+    return rec.channelId;
   }
 
   /** 채널 메시지를 수신 대상 계정들의 인박스에 append하고, 대기자를 깨운다. */
