@@ -3,7 +3,7 @@
 로컬 PC 안에서 여러 AI 세션(Claude Code, Claude Desktop 등)이 서로 메시지를 주고받게 하는 MCP + 커뮤니케이션 서버.
 
 - **Hub**: `127.0.0.1:47800`(에이전트 TCP) + `127.0.0.1:47801`(브라우저 로그 뷰어). 첫 MCP가 자동으로 띄우며, 단일 인스턴스로 동작.
-- **MCP(Agent Uplink)**: 각 AI 세션에 stdio로 붙어 Hub에 연결. 계정·채널 기반 통신(`whoami / set_name / list_accounts / send / read / check / wait`).
+- **MCP(Agent Uplink)**: 각 AI 세션에 stdio로 붙어 Hub에 연결. 역할(계정)·채널 기반 통신(`use_account / whoami / set_profile / set_name / list_accounts / send / read / check / wait` 등). 세션을 시작하면 먼저 `use_account`로 역할을 고릅니다.
 - **로그 뷰어**: 브라우저로 `http://127.0.0.1:47801` 접속 시 메시지 흐름 실시간 확인.
 
 > 로컬 전용입니다. 외부 네트워크에 노출되지 않으며 권한 상승도 하지 않습니다.
@@ -66,6 +66,10 @@ claude mcp add agent-uplink -- node "<빌드한 경로>/dist/mcp/index.js"
 
 세션 하나를 계정 하나로 완전히 고정하려면 기존처럼 `UPLINK_ACCOUNT="<uuid>"`(+ `UPLINK_ACCOUNT_NAME`)을 쓰면 됩니다. 이 경우 역할 선택 없이 바로 그 계정으로 동작합니다. 양도는 그 UUID를 다른 세션 설정에 붙여넣으면 됩니다.
 
+**이전 버전에서 업그레이드할 때**
+- env 없이 쓰던 세션들은 데이터 폴더의 `state/mcp-account` 파일에 든 UUID 하나를 함께 쓰고 있었습니다. 이 파일은 이제 쓰이지 않습니다. 그 계정(이력·DM)을 계속 쓰려면 `UPLINK_ACCOUNTS`에 `역할=<그 UUID>`로 넣으세요.
+- 새 빌드를 배포한 뒤에는 **실행 중인 Hub를 종료**하고 세션들을 다시 시작하세요. 구버전 Hub에는 역할 기능이 없어, 새 MCP가 역할 선택을 거부하고 재시작을 안내합니다.
+
 ## 사용 (1단계: 코어 + 계정)
 
 1. `use_account(role)`로 역할(계정)을 고르고, `whoami`로 확인합니다(위 "계정 (역할)" 참고).
@@ -122,7 +126,7 @@ npm run dist     # → admin/release/AgentUplinkAdmin-<버전>-portable.exe
 | `UPLINK_IDLE_MINUTES` | 10 | 모든 세션이 떠난 뒤 Hub 자동 종료까지 분. `0`이면 종료 안 함 |
 | `UPLINK_ACCOUNT` | (없음) | 세션 하나를 이 계정 UUID로 고정(역할 선택 생략) |
 | `UPLINK_ACCOUNTS` | (없음) | 역할별 계정 고정 `역할=<uuid>;역할=<uuid>`. 로컬 역할 저장보다 우선 |
-| `UPLINK_ACCOUNT_NAME` | (uuid 앞 8자) | 계정 표시 이름 |
+| `UPLINK_ACCOUNT_NAME` | (uuid 앞 8자) | `UPLINK_ACCOUNT` 고정 계정을 처음 만들 때의 표시 이름. 역할 계정의 이름은 역할 이름 |
 
 서버당 채널 수 상한 등은 데이터 폴더의 `config.json`(`maxChannelsPerServer`, `allowDevDelete`, `inboxMaxBatch`)에서 조정합니다.
 
