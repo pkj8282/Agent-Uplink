@@ -323,3 +323,52 @@ test("재시작 후에도 기존 서버 채널로 send/read가 동작한다", as
   assert.equal((await a2.req("send", { channelId: ch.channelId, text: "재시작후" })).ok, true);
   a2.close(); h2.hub.stop();
 });
+
+test("admin op는 토큰이 없거나 틀리면 거부된다", async () => {
+  const { hub, port } = await startHub();
+  const c = new Client(port); await c.ready(); await c.req("login", { uuid: "u1", name: "A" });
+  assert.equal((await c.req("admin_snapshot", {})).ok, false); // 토큰 없음
+  assert.equal((await c.req("admin_snapshot", { token: "deadbeef" })).ok, false); // 틀림
+  c.close(); hub.stop();
+});
+
+test("admin_snapshot은 config·서버·계정·DM을 반환한다", async () => {
+  const { hub, port, dataDir } = await startHub();
+  const token = fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim();
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  const b = new Client(port); await b.ready(); await b.req("login", { uuid: "u2", name: "B" });
+  const srv = await a.req("create_server", { name: "A서버" });
+  await a.req("create_channel", { serverId: srv.serverId, name: "논의방" });
+  await a.req("open_dm", { peer: "u2" });
+  const snap = await a.req("admin_snapshot", { token });
+  assert.equal(snap.ok, true);
+  assert.equal(snap.config!.maxChannelsPerServer, 30);
+  assert.equal(snap.snapshotServers!.find((s) => s.id === srv.serverId)!.channels[0].name, "논의방");
+  assert.deepEqual(snap.snapshotAccounts!.map((x) => x.name).sort(), ["A", "B"]);
+  assert.equal(snap.snapshotDms!.length, 1);
+  a.close(); b.close(); hub.stop();
+});
+
+test("admin_set_config는 저장하고 즉시(라이브) 반영된다", async () => {
+  const { hub, port, dataDir } = await startHub();
+  const token = fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim();
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  const srv = await a.req("create_server", { name: "A" });
+  const set = await a.req("admin_set_config", { token, patch: { maxChannelsPerServer: 1 } });
+  assert.equal(set.ok, true);
+  assert.equal(set.config!.maxChannelsPerServer, 1);
+  assert.equal((await a.req("create_channel", { serverId: srv.serverId, name: "c1" })).ok, true);
+  assert.equal((await a.req("create_channel", { serverId: srv.serverId, name: "c2" })).ok, false); // 상한1 즉시 반영
+  a.close(); hub.stop();
+});
+
+test("admin_set_config는 잘못된 값을 거부하고 기존 값을 유지한다", async () => {
+  const { hub, port, dataDir } = await startHub();
+  const token = fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim();
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  assert.equal((await a.req("admin_set_config", { token, patch: { maxChannelsPerServer: 0 } })).ok, false);
+  assert.equal((await a.req("admin_set_config", { token, patch: { inboxMaxBatch: -5 } })).ok, false);
+  assert.equal((await a.req("admin_set_config", { token, patch: { allowDevDelete: "yes" } })).ok, false);
+  assert.equal((await a.req("admin_snapshot", { token })).config!.maxChannelsPerServer, 30); // 유지
+  a.close(); hub.stop();
+});

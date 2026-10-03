@@ -29,3 +29,8 @@ export function loadConfig(dir: string): Config {
   }
   return cfg;
 }
+
+export function saveConfig(dir: string, cfg: Config): void {
+  fs.mkdirSync(dir, { recursive: true });
+  writeFileAtomic(path.join(dir, "config.json"), JSON.stringify(cfg, null, 2));
+}

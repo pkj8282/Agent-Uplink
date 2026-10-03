@@ -2,7 +2,8 @@ import net from "node:net";
 import http from "node:http";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 import { renderViewerHtml } from "./viewer.js";
-import { loadConfig, Config } from "./config.js";
+import { loadConfig, saveConfig, Config } from "./config.js";
+import { loadOrCreateAdminKey, verifyAdminToken } from "./adminKey.js";
 import { ChannelStore } from "./channels.js";
 import { AccountStore } from "./accounts.js";
 import { InboxStore } from "./inbox.js";
@@ -41,6 +42,7 @@ export class Hub {
   protected inbox: InboxStore;
   protected dm: DmStore;
   protected servers: ServerStore;
+  private adminKey: string;
   private tcp: net.Server;
   private http: http.Server;
   private sseClients = new Set<http.ServerResponse>();
@@ -70,6 +72,7 @@ export class Hub {
     for (const c of this.servers.allChannels()) {
       this.channels.register({ id: c.channelId, kind: "server", label: `${c.serverName}/${c.channelName}`, members: null });
     }
+    this.adminKey = loadOrCreateAdminKey(opts.dataDir);
     this.tcp = net.createServer((sock) => this.onConnection(sock));
     this.http = http.createServer((req, res) => this.onHttp(req, res));
   }
@@ -170,6 +173,14 @@ export class Hub {
         return null;
       }
       return state.uuid;
+    };
+    const adminAuth = (): boolean => {
+      const token = (req as { token?: unknown }).token;
+      if (!verifyAdminToken(this.adminKey, token)) {
+        reply({ ok: false, error: "admin 인증 실패" });
+        return false;
+      }
+      return true;
     };
 
     switch (req.op) {
@@ -406,6 +417,46 @@ export class Hub {
         };
         state.waiter = waiter;
         this.addWaiter(uuid, waiter);
+        return;
+      }
+
+      case "admin_snapshot": {
+        if (!adminAuth()) return;
+        reply({
+          ok: true,
+          config: { ...this.config },
+          snapshotServers: this.servers.listServers().map((s) => ({
+            id: s.id,
+            name: s.name,
+            channels: s.channels.map((c) => ({ id: c.id, name: c.name })),
+          })),
+          snapshotAccounts: this.accounts.list().map((a) => ({ uuid: a.uuid, name: a.name })),
+          snapshotDms: this.dm.all().map((r) => ({ channelId: r.channelId, members: [...r.members], label: r.label })),
+        });
+        return;
+      }
+
+      case "admin_set_config": {
+        if (!adminAuth()) return;
+        const patch = req.patch ?? {};
+        const isPosInt = (v: unknown) => typeof v === "number" && Number.isInteger(v) && v >= 1;
+        if (patch.maxChannelsPerServer !== undefined && !isPosInt(patch.maxChannelsPerServer)) {
+          reply({ ok: false, error: "maxChannelsPerServer는 1 이상 정수여야 합니다." });
+          return;
+        }
+        if (patch.inboxMaxBatch !== undefined && !isPosInt(patch.inboxMaxBatch)) {
+          reply({ ok: false, error: "inboxMaxBatch는 1 이상 정수여야 합니다." });
+          return;
+        }
+        if (patch.allowDevDelete !== undefined && typeof patch.allowDevDelete !== "boolean") {
+          reply({ ok: false, error: "allowDevDelete는 boolean이어야 합니다." });
+          return;
+        }
+        if (patch.maxChannelsPerServer !== undefined) this.config.maxChannelsPerServer = patch.maxChannelsPerServer;
+        if (patch.inboxMaxBatch !== undefined) this.config.inboxMaxBatch = patch.inboxMaxBatch;
+        if (patch.allowDevDelete !== undefined) this.config.allowDevDelete = patch.allowDevDelete;
+        saveConfig(this.opts.dataDir, this.config);
+        reply({ ok: true, config: { ...this.config } });
         return;
       }
 
