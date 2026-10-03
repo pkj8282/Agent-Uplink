@@ -47,11 +47,35 @@ export function parseAccountsEnv(raw: string | undefined): EnvRoles {
   return { roles, ignored };
 }
 
-/** 작업 폴더 키. win32는 대소문자를 무시한다(C:\ 와 c:\ 는 같은 폴더). */
+function hashKey(p: string, platform: NodeJS.Platform): string {
+  const k = platform === "win32" ? p.toLowerCase() : p;
+  return createHash("sha256").update(k, "utf8").digest("hex").slice(0, 16);
+}
+
+/** v2.0.0 방식 키(실경로화 없음) — 기존 역할 폴더 이전용. win32는 대소문자 무시. */
+export function legacyFolderKey(cwd: string, platform: NodeJS.Platform = process.platform): string {
+  return hashKey(path.resolve(cwd), platform);
+}
+
+/** 8.3 짧은 이름·junction·subst를 실제 경로로 푼다(없는 경로면 path.resolve 결과). */
+function realOrResolved(cwd: string): string {
+  const p = path.resolve(cwd);
+  try {
+    return fs.realpathSync.native(p);
+  } catch {
+    return p;
+  }
+}
+
+/** 작업 폴더 키. 실제 경로 기준(같은 폴더를 다른 표기로 열어도 같은 키), win32는 대소문자 무시. */
 export function folderKey(cwd: string, platform: NodeJS.Platform = process.platform): string {
-  let p = path.resolve(cwd);
-  if (platform === "win32") p = p.toLowerCase();
-  return createHash("sha256").update(p, "utf8").digest("hex").slice(0, 16);
+  return hashKey(realOrResolved(cwd), platform);
+}
+
+/** 역할 폴더 기준: UPLINK_PROJECT_DIR(공백 제외)가 있으면 그것, 없으면 cwd. */
+export function resolveRoleCwd(env: NodeJS.ProcessEnv, cwd: string): string {
+  const v = env.UPLINK_PROJECT_DIR?.trim();
+  return v ? v : cwd;
 }
 
 export interface RoleEntry {
@@ -68,12 +92,22 @@ export interface Resolved {
 
 export class RoleStore {
   readonly folder: string;
-  private readonly dir: string;
+  private dir: string;
   private readonly env: EnvRoles;
 
   constructor(opts: { dataDir: string; cwd: string; env?: string; platform?: NodeJS.Platform }) {
-    this.folder = path.resolve(opts.cwd);
-    this.dir = path.join(opts.dataDir, "state", "roles", folderKey(opts.cwd, opts.platform));
+    this.folder = realOrResolved(opts.cwd);
+    const root = path.join(opts.dataDir, "state", "roles");
+    this.dir = path.join(root, folderKey(opts.cwd, opts.platform));
+    const legacy = path.join(root, legacyFolderKey(opts.cwd, opts.platform));
+    // 같은 폴더를 다른 표기(junction·8.3)로 열어 만든 v2.0.0 역할을 새 키로 이전한다.
+    if (legacy !== this.dir && !fs.existsSync(this.dir) && fs.existsSync(legacy)) {
+      try {
+        fs.renameSync(legacy, this.dir);
+      } catch {
+        if (!fs.existsSync(this.dir)) this.dir = legacy;
+      }
+    }
     this.env = parseAccountsEnv(opts.env);
   }
 

@@ -4,7 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { HubClient } from "./hubClient.js";
-import { RoleStore } from "./roles.js";
+import { RoleStore, resolveRoleCwd } from "./roles.js";
 import { AccountSession } from "./session.js";
 import { oneLine } from "./text.js";
 import { InboxItem, Message } from "../shared/protocol.js";
@@ -13,7 +13,7 @@ import { InboxItem, Message } from "../shared/protocol.js";
 // UPLINK_ACCOUNT가 있으면 그 계정으로 고정(기존 동작). 없으면 use_account로 역할을 고를 때까지 로그인하지 않는다.
 const pinnedUuid = process.env.UPLINK_ACCOUNT || undefined;
 const dataDir = process.env.UPLINK_DATA_DIR ?? path.join(process.env.PROGRAMDATA ?? ".", "AgentUplink");
-const roles = pinnedUuid ? null : new RoleStore({ dataDir, cwd: process.cwd(), env: process.env.UPLINK_ACCOUNTS });
+const roles = pinnedUuid ? null : new RoleStore({ dataDir, cwd: resolveRoleCwd(process.env, process.cwd()), env: process.env.UPLINK_ACCOUNTS });
 const client = new HubClient({
   port: Number(process.env.UPLINK_TCP_PORT ?? 47800),
   accountUuid: pinnedUuid,

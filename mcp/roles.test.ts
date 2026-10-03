@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { RoleStore, folderKey, parseAccountsEnv, validateRoleName } from "./roles.js";
+import { RoleStore, folderKey, legacyFolderKey, parseAccountsEnv, resolveRoleCwd, validateRoleName } from "./roles.js";
 
 function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-roles-")); }
 
@@ -107,4 +107,45 @@ test("RoleStore: 생성 후 임시 파일을 남기지 않는다", () => {
   new RoleStore({ dataDir, cwd: "C:\P" }).resolve("기획");
   const dir = path.join(dataDir, "state", "roles", folderKey("C:\P"));
   assert.deepEqual(fs.readdirSync(dir).filter((f) => f.endsWith(".tmp")), []);
+});
+
+test("folderKey: junction으로 연 폴더와 실제 폴더는 같은 키(같은 역할)", () => {
+  const base = tmp();
+  const real = path.join(base, "실제프로젝트");
+  fs.mkdirSync(real);
+  const link = path.join(base, "링크");
+  fs.symlinkSync(real, link, "junction");
+  assert.equal(folderKey(link), folderKey(real));
+  const dataDir = tmp();
+  const viaLink = new RoleStore({ dataDir, cwd: link }).resolve("기획");
+  const viaReal = new RoleStore({ dataDir, cwd: real }).resolve("기획");
+  assert.equal(viaLink.uuid, viaReal.uuid);
+});
+
+test("RoleStore: 이전 방식 키 폴더에 있던 역할을 새 키로 옮겨 그대로 쓴다", () => {
+  const base = tmp();
+  const real = path.join(base, "p");
+  fs.mkdirSync(real);
+  const link = path.join(base, "l");
+  fs.symlinkSync(real, link, "junction");
+  const dataDir = tmp();
+  // v2.0.0이 link 표기로 만든 역할(이전 키 = link 경로 그대로)
+  const legacyDir = path.join(dataDir, "state", "roles", legacyFolderKey(link));
+  fs.mkdirSync(legacyDir, { recursive: true });
+  const file = path.join(legacyDir, `${createHash("sha256").update("기획", "utf8").digest("hex").slice(0, 32)}.json`);
+  fs.writeFileSync(file, JSON.stringify({ role: "기획", uuid: "legacy-uuid" }));
+  const r = new RoleStore({ dataDir, cwd: link }).resolve("기획");
+  assert.equal(r.uuid, "legacy-uuid");
+  assert.equal(fs.existsSync(path.join(dataDir, "state", "roles", folderKey(link))), true);
+});
+
+test("folderKey: 없는 경로는 이전 방식과 같은 키(일반 경로의 기존 역할 유지)", () => {
+  const missing = ["C:", "Nope", "Missing"].join(path.win32.sep);
+  assert.equal(folderKey(missing, "win32"), legacyFolderKey(missing, "win32"));
+});
+
+test("resolveRoleCwd: UPLINK_PROJECT_DIR가 있으면 그것, 없거나 공백이면 cwd", () => {
+  assert.equal(resolveRoleCwd({ UPLINK_PROJECT_DIR: " D:/proj " }, "C:/app"), "D:/proj");
+  assert.equal(resolveRoleCwd({ UPLINK_PROJECT_DIR: "  " }, "C:/app"), "C:/app");
+  assert.equal(resolveRoleCwd({}, "C:/app"), "C:/app");
 });
