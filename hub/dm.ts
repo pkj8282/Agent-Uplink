@@ -60,4 +60,14 @@ export class DmStore {
   all(): DmRecord[] {
     return [...this.records.values()];
   }
+
+  remove(channelId: string): boolean {
+    const existed = this.records.delete(channelId);
+    if (existed) this.save();
+    return existed;
+  }
+
+  byMember(uuid: string): DmRecord[] {
+    return [...this.records.values()].filter((r) => r.members[0] === uuid || r.members[1] === uuid);
+  }
 }

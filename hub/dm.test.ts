@@ -29,3 +29,16 @@ test("재시작 후 dm/index.json에서 복원된다", () => {
   assert.equal(s2.findByPair("u1", "u2")!.channelId, rec.channelId);
   assert.equal(s2.all().length, 1);
 });
+
+test("remove와 byMember", () => {
+  const dir = tmp();
+  const s = new DmStore({ dir });
+  const r1 = s.create("u1", "u2", "A-B");
+  const r2 = s.create("u1", "u3", "A-C");
+  s.create("u4", "u5", "D-E");
+  assert.deepEqual(s.byMember("u1").map((r) => r.channelId).sort(), [r1.channelId, r2.channelId].sort());
+  assert.equal(s.remove(r1.channelId), true);
+  assert.equal(s.get(r1.channelId), undefined);
+  assert.equal(s.remove(r1.channelId), false);
+  assert.deepEqual(s.byMember("u1").map((r) => r.channelId), [r2.channelId]);
+});

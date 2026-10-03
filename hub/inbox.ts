@@ -81,4 +81,13 @@ export class InboxStore {
   lastSeq(uuid: string): number {
     return this.box(uuid).seq;
   }
+
+  remove(uuid: string): void {
+    this.boxes.delete(uuid);
+    try {
+      fs.rmSync(path.join(this.dir, `${uuid}.jsonl`), { force: true });
+    } catch {
+      // 파일 삭제 실패해도 메모리에서는 제거됨
+    }
+  }
 }

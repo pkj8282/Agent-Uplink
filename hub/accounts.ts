@@ -80,4 +80,23 @@ export class AccountStore {
     a.dm[peerUuid] = channelId;
     this.save(a);
   }
+
+  remove(uuid: string): boolean {
+    const existed = this.accounts.delete(uuid);
+    if (existed) {
+      try {
+        fs.rmSync(path.join(this.dir, `${uuid}.json`), { force: true });
+      } catch {
+        // 파일 삭제 실패해도 메모리에서는 제거됨
+      }
+    }
+    return existed;
+  }
+
+  removeDm(uuid: string, peerUuid: string): void {
+    const a = this.accounts.get(uuid);
+    if (!a) return;
+    delete a.dm[peerUuid];
+    this.save(a);
+  }
 }

@@ -52,3 +52,23 @@ test("setDm은 역색인을 계정 파일에 기록하고 재시작 후 복원�
   const s2 = new AccountStore({ dir });
   assert.equal(s2.get("u1")!.dm["u2"], "dmX");
 });
+
+test("remove는 계정을 메모리와 파일에서 지운다", () => {
+  const dir = tmp();
+  const s = new AccountStore({ dir });
+  s.getOrCreate("u1", "A");
+  assert.equal(s.remove("u1"), true);
+  assert.equal(s.get("u1"), undefined);
+  assert.equal(fs.existsSync(path.join(dir, "accounts", "u1.json")), false);
+  assert.equal(s.remove("u1"), false); // 이미 없음
+});
+
+test("removeDm은 역색인에서 peer만 지운다", () => {
+  const s = new AccountStore({ dir: tmp() });
+  s.getOrCreate("u1", "A");
+  s.setDm("u1", "u2", "c2");
+  s.setDm("u1", "u3", "c3");
+  s.removeDm("u1", "u2");
+  assert.equal(s.get("u1")!.dm["u2"], undefined);
+  assert.equal(s.get("u1")!.dm["u3"], "c3");
+});

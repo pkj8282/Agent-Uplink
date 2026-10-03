@@ -56,3 +56,13 @@ test("compact 후 since는 커서 오프셋을 정확히 계산한다", () => {
   assert.deepEqual(s.since("u1", 4, 10).map((x) => x.text), ["m5", "m6"]); // seq>4
   assert.deepEqual(s.since("u1", 2, 1).map((x) => x.text), ["m3"]); // 상한 1
 });
+
+test("remove는 인박스를 메모리와 파일에서 지운다", () => {
+  const dir = tmp();
+  const s = new InboxStore({ dir });
+  s.append("u1", item("x"));
+  assert.ok(fs.existsSync(path.join(dir, "notifications", "u1.jsonl")));
+  s.remove("u1");
+  assert.equal(s.lastSeq("u1"), 0); // 새 박스처럼
+  assert.equal(fs.existsSync(path.join(dir, "notifications", "u1.jsonl")), false);
+});
