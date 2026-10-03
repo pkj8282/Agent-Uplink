@@ -563,3 +563,20 @@ test("wait 중 다른 계정으로 login하면 이전 대기는 빈 결과로 �
   assert.deepEqual((await a.req("check")).items, []); // 구현(A)에게 새지 않음
   a.close(); b.close(); c.close(); hub.stop();
 });
+
+test("create_server/create_channel은 대소문자·공백 무시 같은 이름을 거부하고 기존 ID를 알려준다", async () => {
+  const { hub, port } = await startHub();
+  const c = new Client(port); await c.ready(); await c.req("login", { uuid: "u1", name: "A" });
+  const s1 = await c.req("create_server", { name: "Main" });
+  const dup = await c.req("create_server", { name: " main " });
+  assert.equal(dup.ok, false);
+  assert.match(dup.error!, new RegExp(s1.serverId!));
+  const ch1 = await c.req("create_channel", { serverId: s1.serverId, name: "일반" });
+  const dupCh = await c.req("create_channel", { serverId: s1.serverId, name: "일반" });
+  assert.equal(dupCh.ok, false);
+  assert.match(dupCh.error!, new RegExp(ch1.channelId!));
+  // 다른 서버에는 같은 채널 이름 허용
+  const s2 = await c.req("create_server", { name: "Other" });
+  assert.equal((await c.req("create_channel", { serverId: s2.serverId, name: "일반" })).ok, true);
+  c.close(); hub.stop();
+});

@@ -1,0 +1,32 @@
+// 서버·채널 이름 비교와 충돌 회피(복원 시 '이름 (n)').
+
+export function nameKey(s: string): string {
+  return s.trim().toLowerCase();
+}
+
+function isDigits(s: string): boolean {
+  if (s.length === 0) return false;
+  for (const c of s) if (c < "0" || c > "9") return false;
+  return true;
+}
+
+/**
+ * base가 taken과 겹치지 않으면 그대로, 겹치면 'base (n)'.
+ * n은 "base와 같거나 'base (숫자)' 꼴인 이름" 개수 + 1에서 시작하고, 이미 쓰이면 1씩 올린다
+ * (개수만 쓰면 'base'·'base (3)'이 있을 때 'base (3)'이 충돌한다). 비교 대상이 k개면 k+1번 안에 끝난다.
+ */
+export function uniqueName(base: string, taken: string[]): string {
+  const keys = new Set(taken.map(nameKey));
+  const b = nameKey(base);
+  if (!keys.has(b)) return base;
+  const prefix = `${b} (`;
+  let n = 0;
+  for (const k of keys) {
+    if (k === b) n++;
+    else if (k.startsWith(prefix) && k.endsWith(")") && isDigits(k.slice(prefix.length, -1))) n++;
+  }
+  for (let i = n + 1; ; i++) {
+    const cand = `${base} (${i})`;
+    if (!keys.has(nameKey(cand))) return cand;
+  }
+}

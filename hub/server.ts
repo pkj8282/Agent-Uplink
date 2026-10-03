@@ -9,6 +9,7 @@ import { AccountStore } from "./accounts.js";
 import { InboxStore } from "./inbox.js";
 import { DmStore } from "./dm.js";
 import { ServerStore } from "./servers.js";
+import { nameKey } from "./names.js";
 import {
   MAGIC,
   PROTOCOL_VERSION,
@@ -312,6 +313,11 @@ export class Hub {
           reply({ ok: false, error: "name이 필요합니다." });
           return;
         }
+        const sameServer = this.servers.listServers().find((s) => nameKey(s.name) === nameKey(req.name));
+        if (sameServer) {
+          reply({ ok: false, error: `이미 같은 이름의 서버가 있습니다: ${sameServer.name} (${sameServer.id})` });
+          return;
+        }
         const srv = this.servers.createServer(req.name);
         reply({ ok: true, serverId: srv.id });
         return;
@@ -338,6 +344,11 @@ export class Hub {
         }
         if (typeof req.name !== "string" || req.name.length === 0) {
           reply({ ok: false, error: "name이 필요합니다." });
+          return;
+        }
+        const sameChannel = srv.channels.find((c) => nameKey(c.name) === nameKey(req.name));
+        if (sameChannel) {
+          reply({ ok: false, error: `이 서버에 이미 같은 이름의 채널이 있습니다: ${sameChannel.name} (${sameChannel.id})` });
           return;
         }
         if (srv.channels.length >= this.config.maxChannelsPerServer) {
