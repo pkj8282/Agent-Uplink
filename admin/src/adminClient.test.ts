@@ -122,6 +122,7 @@ test("admin.key 없음/빈 파일/불일치는 크래시 없이 명확한 에러
   const { hub, port, dataDir } = await startHub();
   const missing = new AdminClient({ port, keyPath: path.join(tmp(), "admin.key"), timeoutMs: 2000 });
   await assert.rejects(missing.snapshot(), /admin\.key/);
+  await assert.rejects(missing.snapshot(), /관리 기능이 있는 버전/);
 
   const emptyKey = path.join(tmp(), "admin.key");
   fs.writeFileSync(emptyKey, "  \n");
@@ -162,7 +163,7 @@ test("다른 프로토콜 서버(magic 불일치)는 Agent-Uplink Hub가 아니�
   await new Promise<void>((r) => other.listen(0, "127.0.0.1", () => r()));
   const port = (other.address() as net.AddressInfo).port;
   const c = new AdminClient({ port, keyPath: path.join(tmp(), "admin.key"), timeoutMs: 2000 });
-  await assert.rejects(c.snapshot(), /Agent-Uplink Hub\(v2\)가 아닙니다/);
+  await assert.rejects(c.snapshot(), /Agent-Uplink Hub가 아닙니다/);
   for (const s of socks) s.destroy();
   other.close();
 });
@@ -172,4 +173,81 @@ test("toResult는 성공은 data로, 일반 에러는 hubDown:false로 감싼다
   assert.deepEqual(await toResult(async () => { throw new Error("x"); }), { ok: false, error: "x", hubDown: false });
   // 동기 throw도 잡는다(IPC 인자 검증용)
   assert.deepEqual(await toResult(() => { throw new Error("y"); }), { ok: false, error: "y", hubDown: false });
+});
+
+/** 요청 프레임마다 onFrame을 부르는 가짜 서버(소켓 추적·정리). */
+async function fakeServer(onFrame: (req: any, sock: net.Socket) => void, onConnect?: (sock: net.Socket) => void) {
+  const socks = new Set<net.Socket>();
+  const srv = net.createServer((s) => {
+    socks.add(s);
+    s.on("error", () => { /* 무시 */ });
+    if (onConnect) { onConnect(s); return; }
+    const dec = new FrameDecoder();
+    s.on("data", (d) => dec.push(d, (req: any) => onFrame(req, s)));
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
+  return {
+    port: (srv.address() as net.AddressInfo).port,
+    close: () => { for (const s of socks) s.destroy(); srv.close(); },
+  };
+}
+
+function keyFile(): string {
+  const p = path.join(tmp(), "admin.key");
+  fs.writeFileSync(p, "a".repeat(64));
+  return p;
+}
+
+const HELLO_OK = { magic: "agent-uplink", version: 2 };
+
+test("요청 도중 Hub가 끊기면 적용 여부 확인 안내", async () => {
+  const f = await fakeServer((req, s) => {
+    if (req.op === "hello") s.write(encodeFrame({ ok: true, id: req.id, ...HELLO_OK }));
+    else s.destroy();
+  });
+  const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 2000 });
+  await assert.rejects(c.deleteServer("s1"), /새로고침으로 확인/);
+  f.close();
+});
+
+test("접속 직후 끊는 프로그램은 Hub가 아닐 수 있다고 안내", async () => {
+  const f = await fakeServer(() => {}, (s) => s.destroy());
+  const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 2000 });
+  await assert.rejects(c.snapshot(), /응답 없이 연결을 끊었습니다/);
+  f.close();
+});
+
+test("버전만 다른 Hub는 버전 불일치로 안내", async () => {
+  const f = await fakeServer((req, s) => s.write(encodeFrame({ ok: true, id: req.id, magic: "agent-uplink", version: 3 })));
+  const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 2000 });
+  await assert.rejects(c.snapshot(), /버전\(v3\)이 관리 도구\(v2\)와 맞지 않습니다/);
+  f.close();
+});
+
+test("구버전 Hub(admin op 없음)는 재배포 안내", async () => {
+  const f = await fakeServer((req, s) => {
+    if (req.op === "hello") s.write(encodeFrame({ ok: true, id: req.id, ...HELLO_OK }));
+    else s.write(encodeFrame({ ok: false, id: req.id, error: "알 수 없는 op" }));
+  });
+  const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 2000 });
+  await assert.rejects(c.snapshot(), /구버전/);
+  f.close();
+});
+
+test("응답 프레임이 JSON null이어도 크래시 없이 처리", async () => {
+  const f = await fakeServer((req, s) => {
+    s.write(encodeFrame(null));
+    s.write(encodeFrame({ ok: true, id: req.id, magic: "other", version: 1 }));
+  });
+  const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 2000 });
+  await assert.rejects(c.snapshot(), /Agent-Uplink Hub가 아닙니다/);
+  f.close();
+});
+
+test("연결 단계가 멈춰도 무한 대기하지 않는다", async () => {
+  // 라우팅 불가 주소로 SYN이 버려지는 상황을 흉내 낸다(실제 Hub 포트는 쓰지 않는다).
+  const c = new AdminClient({ port: await closedPort(), host: "10.255.255.1", connectTimeoutMs: 300, keyPath: keyFile(), timeoutMs: 300 });
+  const t0 = Date.now();
+  await assert.rejects(c.snapshot(), /연결 시간이 초과/);
+  assert.ok(Date.now() - t0 < 1500, `${Date.now() - t0}ms`);
 });
