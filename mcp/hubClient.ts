@@ -45,6 +45,8 @@ export class HubClient {
   async whoami(): Promise<Response> { await this.ensureConnected(); return this.request("whoami", {}); }
   async setName(name: string): Promise<Response> { await this.ensureConnected(); return this.request("set_name", { name }); }
   async listAccounts(): Promise<Response> { await this.ensureConnected(); return this.request("list_accounts", {}); }
+  async openDm(peer: string): Promise<Response> { await this.ensureConnected(); return this.request("open_dm", { peer }); }
+  async listDms(): Promise<Response> { await this.ensureConnected(); return this.request("list_dms", {}); }
   async send(channelId: string, text: string): Promise<Response> { await this.ensureConnected(); return this.request("send", { channelId, text }); }
   async read(channelId: string, limit?: number): Promise<Response> { await this.ensureConnected(); return this.request("read", { channelId, limit }); }
   async check(): Promise<Response> { await this.ensureConnected(); return this.request("check", {}); }

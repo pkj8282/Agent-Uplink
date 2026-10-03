@@ -54,3 +54,19 @@ test("재연결 후에도 같은 계정으로 커서가 유지된다", async () 
   a.close(); b.close();
   await new Promise((r) => setTimeout(r, 300));
 });
+
+test("open_dm으로 연 채널로 두 계정이 DM을 주고받는다", async () => {
+  const port = freshPort();
+  const a = makeClient(port, "acc-A", "A");
+  const b = makeClient(port, "acc-B", "B");
+  await Promise.all([a.whoami(), b.whoami()]);
+  const dm = await a.openDm("acc-B");
+  assert.equal(dm.ok, true);
+  await a.send(dm.channelId!, "디엠 테스트");
+  const got = await b.wait(3000);
+  assert.deepEqual(got.items!.map((i) => i.text), ["디엠 테스트"]);
+  assert.equal(got.items![0].channelKind, "dm");
+  assert.equal((await a.listDms()).dms!.find((d) => d.peer === "acc-B")!.channelId, dm.channelId);
+  a.close(); b.close();
+  await new Promise((r) => setTimeout(r, 300));
+});
