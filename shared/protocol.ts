@@ -56,7 +56,12 @@ export type Request =
   | { op: "create_channel"; id: number; serverId: string; name: string }
   | { op: "list_channels"; id: number; serverId: string }
   | { op: "delete_channel"; id: number; channelId: string }
-  | { op: "delete_server"; id: number; serverId: string };
+  | { op: "delete_server"; id: number; serverId: string }
+  | { op: "admin_snapshot"; id: number; token: string }
+  | { op: "admin_set_config"; id: number; token: string; patch: { maxChannelsPerServer?: number; allowDevDelete?: boolean; inboxMaxBatch?: number } }
+  | { op: "admin_delete_channel"; id: number; token: string; channelId: string }
+  | { op: "admin_delete_server"; id: number; token: string; serverId: string }
+  | { op: "admin_delete_account"; id: number; token: string; uuid: string };
 
 export interface Response {
   ok: boolean;
@@ -74,5 +79,9 @@ export interface Response {
   serverId?: string; // create_server
   servers?: { serverId: string; name: string; channelCount: number }[]; // list_servers
   channels?: { channelId: string; name: string }[]; // list_channels
+  config?: { maxChannelsPerServer: number; allowDevDelete: boolean; inboxMaxBatch: number }; // admin_snapshot/set_config
+  snapshotServers?: { id: string; name: string; channels: { id: string; name: string }[] }[]; // admin_snapshot
+  snapshotAccounts?: { uuid: string; name: string }[]; // admin_snapshot
+  snapshotDms?: { channelId: string; members: string[]; label: string }[]; // admin_snapshot
   error?: string;
 }
