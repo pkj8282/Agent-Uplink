@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   }
 
   process.stderr.write(
-    `Agent-Uplink Hub 시작: tcp=127.0.0.1:${opts.tcpPort} viewer=http://127.0.0.1:${opts.httpPort}\n`,
+    `Agent-Uplink Hub(v2) 시작: tcp=127.0.0.1:${opts.tcpPort} viewer=http://127.0.0.1:${opts.httpPort}\n`,
   );
 }
 
