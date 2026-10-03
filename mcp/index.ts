@@ -193,21 +193,21 @@ server.tool(
 
 server.tool(
   "delete_channel",
-  "채널을 삭제합니다(개발용: allowDevDelete가 켜져 있을 때만 동작).",
+  "채널을 삭제합니다(개발용: allowDevDelete가 켜져 있을 때만 동작). 로그는 휴지통으로 이동하며 관리 앱에서 복원·비우기할 수 있습니다.",
   { channelId: z.string().min(1).describe("삭제할 채널 ID") },
   gated(async ({ channelId }: { channelId: string }) => {
     const r = await client.deleteChannel(channelId);
-    return r.ok ? text("채널 삭제됨") : text(session.explainError(r.error), true);
+    return r.ok ? text("채널 삭제됨(휴지통으로 이동)") : text(session.explainError(r.error), true);
   }),
 );
 
 server.tool(
   "delete_server",
-  "서버를 삭제합니다(개발용: allowDevDelete가 켜져 있을 때만 동작).",
+  "서버를 삭제합니다(개발용: allowDevDelete가 켜져 있을 때만 동작). 로그는 휴지통으로 이동하며 관리 앱에서 복원·비우기할 수 있습니다.",
   { serverId: z.string().min(1).describe("삭제할 서버 ID") },
   gated(async ({ serverId }: { serverId: string }) => {
     const r = await client.deleteServer(serverId);
-    return r.ok ? text("서버 삭제됨") : text(session.explainError(r.error), true);
+    return r.ok ? text("서버 삭제됨(휴지통으로 이동)") : text(session.explainError(r.error), true);
   }),
 );
 

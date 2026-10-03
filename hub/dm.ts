@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { writeFileAtomic } from "./fsutil.js";
+import { backupCorrupt, writeFileAtomic } from "./fsutil.js";
 
 export interface DmRecord {
   channelId: string;
@@ -12,6 +12,8 @@ export interface DmRecord {
 export class DmStore {
   private readonly file: string;
   private records = new Map<string, DmRecord>(); // channelId → record
+  /** index.json을 읽지 못했는가(계정 역색인으로 재구성 — recovery.ts). */
+  corrupt = false;
 
   constructor(opts: { dir: string }) {
     const dir = path.join(opts.dir, "dm");
@@ -22,7 +24,9 @@ export class DmStore {
         const obj = JSON.parse(fs.readFileSync(this.file, "utf8")) as Record<string, DmRecord>;
         for (const [id, rec] of Object.entries(obj)) this.records.set(id, rec);
       } catch {
-        // 손상 시 빈 상태로 시작(개별 DM 로그는 보존됨)
+        // 손상: 원본을 보존하고 빈 상태로 시작 → Hub가 계정 역색인으로 재구성한다(개별 DM 로그는 보존)
+        backupCorrupt(this.file);
+        this.corrupt = true;
       }
     }
   }
@@ -65,6 +69,19 @@ export class DmStore {
     const existed = this.records.delete(channelId);
     if (existed) this.save();
     return existed;
+  }
+
+  /** 복원: 지정 레코드를 넣는다(같은 channelId가 있으면 무시). */
+  restore(rec: DmRecord): void {
+    if (this.records.has(rec.channelId)) return;
+    this.records.set(rec.channelId, { channelId: rec.channelId, members: [rec.members[0], rec.members[1]], label: rec.label });
+    this.save();
+  }
+
+  /** 손상 복구: 전체를 교체하고 저장한다. */
+  replaceAll(recs: DmRecord[]): void {
+    this.records = new Map(recs.map((r) => [r.channelId, r]));
+    this.save();
   }
 
   byMember(uuid: string): DmRecord[] {

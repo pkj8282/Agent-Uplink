@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { writeFileAtomic } from "./fsutil.js";
+import { backupCorrupt, writeFileAtomic } from "./fsutil.js";
 
 export interface ServerChannel {
   id: string;
@@ -17,6 +17,8 @@ export interface ServerRecord {
 export class ServerStore {
   private readonly file: string;
   private servers = new Map<string, ServerRecord>();
+  /** index.json을 읽지 못해 빈 상태로 시작했는가(고아 정리를 건너뛰는 근거). */
+  corrupt = false;
 
   constructor(opts: { dir: string }) {
     const dir = path.join(opts.dir, "servers");
@@ -30,7 +32,9 @@ export class ServerStore {
           this.servers.set(id, rec);
         }
       } catch {
-        // 손상 시 빈 상태(개별 채널 로그는 보존됨)
+        // 손상: 원본을 보존하고 빈 상태로 시작(개별 채널 로그는 보존, 고아 정리는 건너뜀)
+        backupCorrupt(this.file);
+        this.corrupt = true;
       }
     }
   }
@@ -67,6 +71,25 @@ export class ServerStore {
     srv.channels.push(ch);
     this.save();
     return ch;
+  }
+
+  /** 복원: 지정 id로 서버를 만든다(이미 있으면 그대로 반환). */
+  restoreServer(id: string, name: string): ServerRecord {
+    const found = this.servers.get(id);
+    if (found) return found;
+    const rec: ServerRecord = { id, name, channels: [] };
+    this.servers.set(id, rec);
+    this.save();
+    return rec;
+  }
+
+  /** 복원: 지정 id의 채널을 추가한다(이미 있으면 무시). */
+  addChannelWithId(serverId: string, ch: ServerChannel): void {
+    const srv = this.servers.get(serverId);
+    if (!srv) throw new Error(`서버가 없습니다: ${serverId}`);
+    if (srv.channels.some((c) => c.id === ch.id)) return;
+    srv.channels.push({ id: ch.id, name: ch.name });
+    this.save();
   }
 
   channelCount(serverId: string): number {

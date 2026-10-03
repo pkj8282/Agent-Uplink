@@ -51,6 +51,16 @@ export class AccountStore {
     return a;
   }
 
+  /** 복원: 계정이 없으면 원래 정보로 만든다(true). 이미 있으면 현재 정보를 유지(false). */
+  restore(rec: { uuid: string; name: string; createdAt: number; description?: string }): boolean {
+    if (this.accounts.has(rec.uuid)) return false;
+    const a: Account = { uuid: rec.uuid, name: rec.name, createdAt: rec.createdAt, dm: {}, inboxCursor: 0 };
+    if (rec.description) a.description = rec.description;
+    this.accounts.set(a.uuid, a);
+    this.save(a);
+    return true;
+  }
+
   get(uuid: string): Account | undefined {
     return this.accounts.get(uuid);
   }

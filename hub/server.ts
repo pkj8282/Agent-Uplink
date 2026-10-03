@@ -10,6 +10,8 @@ import { InboxStore } from "./inbox.js";
 import { DmStore } from "./dm.js";
 import { ServerStore } from "./servers.js";
 import { nameKey } from "./names.js";
+import { TrashStore } from "./trash.js";
+import { TrashOps } from "./trashOps.js";
 import {
   MAGIC,
   PROTOCOL_VERSION,
@@ -50,6 +52,8 @@ export class Hub {
   protected inbox: InboxStore;
   protected dm: DmStore;
   protected servers: ServerStore;
+  protected trash: TrashStore;
+  protected trashOps: TrashOps;
   private adminKey: string;
   private tcp: net.Server;
   private http: http.Server;
@@ -66,6 +70,15 @@ export class Hub {
     this.accounts = new AccountStore({ dir: opts.dataDir });
     this.inbox = new InboxStore({ dir: opts.dataDir });
     this.dm = new DmStore({ dir: opts.dataDir });
+    this.servers = new ServerStore({ dir: opts.dataDir });
+    this.trash = new TrashStore({ dir: opts.dataDir });
+    this.trashOps = new TrashOps({
+      dataDir: opts.dataDir, servers: this.servers, dm: this.dm, accounts: this.accounts,
+      channels: this.channels, inbox: this.inbox, trash: this.trash,
+      maxChannelsPerServer: () => this.config.maxChannelsPerServer,
+    });
+    // 크래시로 중단된 삭제·복원을 먼저 마무리한다 — 이후 DM 재조정이 삭제 중이던 계정을 되살리지 않도록.
+    this.trashOps.recoverPending();
     // 1단계 검증용 lobby 채널(전체 공개)
     this.channels.register({ id: LOBBY_CHANNEL_ID, kind: "server", label: "main/lobby", members: null });
     // 재시작 시 기존 DM 채널을 복원(라우팅)하고, dm/index.json을 권위로 삼아
@@ -77,7 +90,6 @@ export class Hub {
       this.accounts.setDm(b, a, rec.channelId);
     }
     // 서버 채널 복원(전체 공개)
-    this.servers = new ServerStore({ dir: opts.dataDir });
     for (const c of this.servers.allChannels()) {
       this.channels.register({ id: c.channelId, kind: "server", label: `${c.serverName}/${c.channelName}`, members: null });
     }
@@ -379,12 +391,10 @@ export class Hub {
           reply({ ok: false, error: "MCP 삭제가 허용되지 않습니다(allowDevDelete=false)." });
           return;
         }
-        if (!this.servers.findChannel(req.channelId)) {
+        if (!this.trashOps.deleteChannel(req.channelId, "mcp")) {
           reply({ ok: false, error: `채널이 없습니다: ${req.channelId}` });
           return;
         }
-        this.servers.removeChannel(req.channelId);
-        this.channels.unregister(req.channelId);
         reply({ ok: true });
         return;
       }
@@ -396,13 +406,10 @@ export class Hub {
           reply({ ok: false, error: "MCP 삭제가 허용되지 않습니다(allowDevDelete=false)." });
           return;
         }
-        const srv = this.servers.getServer(req.serverId);
-        if (!srv) {
+        if (!this.trashOps.deleteServer(req.serverId, "mcp")) {
           reply({ ok: false, error: `서버가 없습니다: ${req.serverId}` });
           return;
         }
-        for (const ch of srv.channels) this.channels.unregister(ch.id);
-        this.servers.removeServer(req.serverId);
         reply({ ok: true });
         return;
       }
@@ -530,25 +537,20 @@ export class Hub {
 
       case "admin_delete_channel": {
         if (!adminAuth()) return;
-        if (!this.servers.findChannel(req.channelId)) {
+        if (!this.trashOps.deleteChannel(req.channelId, "admin")) {
           reply({ ok: false, error: `채널이 없습니다: ${req.channelId}` });
           return;
         }
-        this.servers.removeChannel(req.channelId);
-        this.channels.unregister(req.channelId);
         reply({ ok: true });
         return;
       }
 
       case "admin_delete_server": {
         if (!adminAuth()) return;
-        const srv = this.servers.getServer(req.serverId);
-        if (!srv) {
+        if (!this.trashOps.deleteServer(req.serverId, "admin")) {
           reply({ ok: false, error: `서버가 없습니다: ${req.serverId}` });
           return;
         }
-        for (const ch of srv.channels) this.channels.unregister(ch.id);
-        this.servers.removeServer(req.serverId);
         reply({ ok: true });
         return;
       }
@@ -559,14 +561,7 @@ export class Hub {
           reply({ ok: false, error: `계정이 없습니다: ${req.uuid}` });
           return;
         }
-        for (const rec of this.dm.byMember(req.uuid)) {
-          this.channels.unregister(rec.channelId);
-          this.dm.remove(rec.channelId);
-          const peer = rec.members[0] === req.uuid ? rec.members[1] : rec.members[0];
-          this.accounts.removeDm(peer, req.uuid);
-        }
-        this.inbox.remove(req.uuid);
-        this.accounts.remove(req.uuid);
+        this.trashOps.deleteAccount(req.uuid, "admin");
         reply({ ok: true });
         return;
       }

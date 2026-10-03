@@ -19,9 +19,13 @@ export class ChannelStore {
     this.ringSize = opts.ringSize ?? 1000;
   }
 
+  /** 채널 로그 파일 경로(등록 여부와 무관). */
+  pathOf(kind: Channel["kind"], id: string): string {
+    return path.join(this.dir, kind === "dm" ? "dm" : "servers", `${id}.jsonl`);
+  }
+
   private pathFor(ch: Channel): string {
-    const sub = ch.kind === "dm" ? "dm" : "servers";
-    return path.join(this.dir, sub, `${ch.id}.jsonl`);
+    return this.pathOf(ch.kind, ch.id);
   }
 
   register(ch: Channel): void {
@@ -72,7 +76,7 @@ export class ChannelStore {
     return e.ring.slice(-limit);
   }
 
-  /** 채널 메타·인메모리 로그를 제거한다(라우팅 불가). 로그 파일은 남겨둔다. */
+  /** 채널 메타·인메모리 로그를 제거한다(라우팅 불가). 로그 파일은 휴지통 이동(trashOps)이 맡는다. */
   unregister(channelId: string): boolean {
     return this.entries.delete(channelId);
   }
