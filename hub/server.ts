@@ -172,6 +172,12 @@ export class Hub {
         reply({ ok: false, error: "먼저 login 하세요(계정 맥락 없음)." });
         return null;
       }
+      // 로그인 이후 계정이 admin에 의해 삭제됐을 수 있다 → 크래시 대신 재로그인 요구.
+      if (!this.accounts.get(state.uuid)) {
+        reply({ ok: false, error: "이 계정은 더 이상 존재하지 않습니다. 다시 login 하세요." });
+        state.uuid = null;
+        return null;
+      }
       return state.uuid;
     };
     const adminAuth = (): boolean => {
@@ -511,7 +517,9 @@ export class Hub {
 
   /** 계정 인박스에서 커서 이후를 상한까지 꺼내고 커서를 전진시킨다. */
   private drain(uuid: string): InboxItem[] {
-    const cursor = this.accounts.get(uuid)!.inboxCursor;
+    const acc = this.accounts.get(uuid);
+    if (!acc) return []; // 삭제된 계정(끊기기 전 잔여 호출 등)에서도 크래시하지 않는다
+    const cursor = acc.inboxCursor;
     const items = this.inbox.since(uuid, cursor, this.config.inboxMaxBatch);
     if (items.length) {
       const last = items[items.length - 1].seq;

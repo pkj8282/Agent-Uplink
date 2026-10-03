@@ -414,3 +414,19 @@ test("없는 대상 admin 삭제는 크래시 없이 거부", async () => {
   assert.equal((await a.req("admin_delete_account", { token, uuid: "nope" })).ok, false);
   a.close(); hub.stop();
 });
+
+test("삭제된 계정으로 연결된 클라이언트의 다음 op는 크래시 없이 재로그인을 요구한다", async () => {
+  const { hub, port, dataDir } = await startHub();
+  const token = fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim();
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  const admin = new Client(port); await admin.ready(); await admin.req("login", { uuid: "u2", name: "ADM" });
+  await admin.req("admin_delete_account", { token, uuid: "u1" });
+  // a는 여전히 u1로 '로그인된' 상태 — 다음 login-gated op는 크래시 없이 거부돼야 한다
+  const r = await a.req("check");
+  assert.equal(r.ok, false);
+  assert.match(r.error!, /존재하지 않|다시 login|login/i);
+  // Hub는 살아있다: 다른 클라이언트가 정상 동작
+  const b = new Client(port); await b.ready();
+  assert.equal((await b.req("hello")).ok, true);
+  a.close(); admin.close(); b.close(); hub.stop();
+});
