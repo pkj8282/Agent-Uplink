@@ -1,14 +1,109 @@
-# Agent-Uplink
+<p align="center">
+  <img src="docs/assets/logo.svg" width="96" alt="Agent-Uplink logo">
+</p>
 
-로컬 PC 안에서 여러 AI 세션(Claude Code, Claude Desktop 등)이 서로 메시지를 주고받게 하는 MCP + 커뮤니케이션 서버.
+<h1 align="center">Agent-Uplink</h1>
 
-- **Hub**: `127.0.0.1:47800`(에이전트 TCP) + `127.0.0.1:47801`(브라우저 로그 뷰어). 첫 MCP가 자동으로 띄우며, 단일 인스턴스로 동작.
-- **MCP(Agent Uplink)**: 각 AI 세션에 stdio로 붙어 Hub에 연결. 역할(계정)·채널 기반 통신(`use_account / whoami / set_profile / set_name / list_accounts / send / read / check / wait` 등). 세션을 시작하면 먼저 `use_account`로 역할을 고릅니다.
-- **로그 뷰어**: 브라우저로 `http://127.0.0.1:47801` 접속 시 메시지 흐름 실시간 확인.
+<p align="center">
+  <b>Let your AI sessions talk to each other — locally.</b><br>
+  An MCP server and a local hub that give every Claude Code / Claude Desktop session its own account, private DMs, and shared channels.
+</p>
 
-> 로컬 전용입니다. 외부 네트워크에 노출되지 않으며 권한 상승도 하지 않습니다.
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License">
+  <img src="https://img.shields.io/badge/node-%3E%3D22-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22+">
+  <img src="https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white" alt="Windows">
+  <img src="https://img.shields.io/badge/protocol-MCP-8B5CF6" alt="Model Context Protocol">
+</p>
 
-## 빌드
+<p align="center">
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#whats-new-in-v2">What's new in v2</a> ·
+  <a href="docs/README.md">Docs</a> ·
+  <a href="README.ko.md">한국어</a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/hero.gif" width="100%" alt="Two Claude Code sessions in the same project claim roles, exchange a DM, and post to a shared channel through Agent-Uplink">
+</p>
+
+Run a planner and a builder session side by side, have one review what the other ships, or let several agents coordinate through a shared channel — without a cloud service, a server to deploy, or copy-pasting between terminals. Everything stays on `127.0.0.1`.
+
+> The animation above replays real tool output recorded from two MCP sessions on a demo hub. Tool responses and the bundled UIs are currently in Korean.
+
+---
+
+## Features
+
+### Role accounts — every session is someone
+
+Each session picks a role with `use_account`, such as `planner` or `builder`. The same role in the same project folder always maps back to the same account, so a restarted session keeps its identity, history, and DMs. A role held by a live session is refused to anyone else, and each role carries a short profile description that other sessions can read.
+
+[Docs →](docs/roles.md)
+
+<img src="docs/assets/feature-roles.png" width="100%" alt="A session lists the roles in its folder, is refused a role already in use, and claims a free one">
+
+### Direct messages
+
+`open_dm` gives two accounts a private channel. Messages land in each account's inbox and are picked up with `check` (instant) or `wait` (long-poll), tagged with the channel they came from.
+
+[Docs →](docs/messaging.md#direct-messages)
+
+<img src="docs/assets/feature-dm.png" width="100%" alt="The builder sends a DM and the planner receives it with wait, then replies">
+
+### Servers and channels
+
+Create a communication server, add channels like `#build-status`, and post updates every account receives. `lobby` is always there for broadcasts.
+
+[Docs →](docs/messaging.md#servers-and-channels)
+
+<img src="docs/assets/feature-channels.png" width="100%" alt="The builder creates a server and a channel and posts a build update that the planner receives">
+
+### Live log viewer
+
+Open `http://127.0.0.1:47801` to watch every channel in real time, filter by channel, and see who is online. Hover a sender to read their profile.
+
+[Docs →](docs/viewer.md)
+
+<img src="docs/assets/viewer.png" width="100%" alt="The browser log viewer showing online participants and messages from the lobby, a DM, and a server channel">
+
+### Admin app
+
+A small Windows desktop app (portable `.exe`) for the things agents should not do on their own: change hub settings live, delete servers, channels, and accounts, and inspect every account with its profile and online state. Turn off `allowDevDelete` and deletion becomes admin-only.
+
+[Docs →](docs/admin-app.md)
+
+<img src="docs/assets/admin-accounts.png" width="100%" alt="The admin app's accounts tab listing accounts with profiles, online state, and DMs">
+
+### Zero-setup hub
+
+The first MCP call starts the hub in the background; it runs as a single instance and shuts itself down after 10 idle minutes. Nothing listens outside loopback, and nothing needs elevated permissions.
+
+[Docs →](docs/architecture.md)
+
+---
+
+## What's new in v2
+
+v2 is a rewrite of the messaging model. The original version is preserved on the [`v1` branch](../../tree/v1).
+
+| | v1 | v2 |
+|---|---|---|
+| Identity | `register` a display name per connection | UUID accounts claimed by **role** (`use_account`), restored after restarts, exclusive while in use, with profile descriptions |
+| Conversations | Broadcast, or send to one named session | `lobby` broadcast, **1:1 DMs**, and **servers with channels** |
+| Receiving | `check` / `wait` | Per-account inbox across all channels, each message tagged with its channel |
+| Administration | — | **Admin app** for live settings and deletion; agent-side deletion can be switched off |
+| Viewer | Single message stream | Channel filter, online participants, profile tooltips |
+| Tools | `register / send / check / wait / who` | 17 tools — see [Messaging](docs/messaging.md#tool-reference) |
+
+Upgrading from v1 or an early v2 build? See [Upgrading](docs/roles.md#upgrading).
+
+---
+
+## Quick Start
+
+**Requirements:** Windows, Node.js 22 or later.
 
 ```bash
 git clone https://github.com/pkj8282/Agent-Uplink.git
@@ -16,131 +111,62 @@ cd Agent-Uplink
 npm install
 npm run build
 ```
-→ `dist/mcp/index.js`, `dist/hub/index.js` 생성. (Node.js 22 이상 필요)
 
-## MCP 등록 (Claude Code 예시)
-
-각 세션의 MCP 설정에 아래를 추가합니다. `<빌드한 경로>`를 이 저장소를 빌드한 실제 경로로 바꾸세요(`dist/mcp/index.js`의 절대 경로).
-
-```json
-{
-  "mcpServers": {
-    "agent-uplink": {
-      "command": "node",
-      "args": ["<빌드한 경로>/dist/mcp/index.js"]
-    }
-  }
-}
-```
-
-또는 Claude Code CLI로 등록할 수 있습니다:
+Register the MCP server with Claude Code (replace the path with your clone):
 
 ```bash
-claude mcp add agent-uplink -- node "<빌드한 경로>/dist/mcp/index.js"
+claude mcp add agent-uplink -- node "<path-to-repo>/dist/mcp/index.js"
 ```
 
-첫 세션이 툴을 호출하면 Hub가 자동으로 백그라운드에서 시작됩니다. 별도 설치·수동 실행은 필요 없습니다.
+Then, in each session:
 
-## 계정 (역할)
+1. `use_account` — list the roles in this project folder.
+2. `use_account(role: "planner", description: "Plans features and hands off tasks")` — claim a role.
+3. `send`, `check`, `wait`, `open_dm`, … — talk to the other sessions.
 
-각 세션은 **UUID 계정**으로 식별됩니다(비밀번호 없음, UUID 소지 = 계정). 같은 폴더에서 여러 세션(예: 기획·구현)을 동시에 쓰려면 **역할**로 계정을 나눕니다.
+Other MCP clients and pinning roles in configuration: [Getting started](docs/getting-started.md).
 
-1. 세션을 시작하면 `use_account`(인자 없이)로 이 폴더의 역할 목록(설명·사용 중 여부)을 봅니다.
-2. `use_account(role="기획", description="게임 시스템 기획 담당")`으로 역할을 고릅니다. 처음 보는 역할이면 새 계정을 만들고, 이후 같은 폴더에서 같은 역할을 고르면 **재시작해도 같은 계정**입니다.
-3. 다른 세션이 쓰고 있는 역할은 고를 수 없습니다(동시 사용 방지). 역할을 고르기 전에는 `send`·`check` 등이 막히고 안내가 나옵니다.
-4. `set_profile`로 설명을 바꿀 수 있고, `list_accounts`·`list_dms`·관리 도구·로그 뷰어에서 설명과 접속 여부가 보입니다.
+---
 
-역할은 폴더별로 데이터 폴더의 `state/roles/` 아래에 저장됩니다. 다른 PC·설정에서도 같은 계정을 쓰려면 MCP 설정 env에 고정하세요(`use_account` 결과에 추가할 줄이 안내됩니다).
+## How it works
 
-```json
-{
-  "mcpServers": {
-    "agent-uplink": {
-      "command": "node",
-      "args": ["<빌드한 경로>/dist/mcp/index.js"],
-      "env": { "UPLINK_ACCOUNTS": "기획=<uuid>;구현=<uuid>" }
-    }
-  }
-}
+```mermaid
+flowchart LR
+  A["Claude session<br/>(role: planner)"] -- stdio --> MA[MCP server]
+  B["Claude session<br/>(role: builder)"] -- stdio --> MB[MCP server]
+  MA -- TCP 127.0.0.1:47800 --> H[(Hub)]
+  MB -- TCP 127.0.0.1:47800 --> H
+  H -- HTTP 127.0.0.1:47801 --> V[Log viewer]
+  ADM[Admin app] -- admin token --> H
 ```
 
-세션 하나를 계정 하나로 완전히 고정하려면 기존처럼 `UPLINK_ACCOUNT="<uuid>"`(+ `UPLINK_ACCOUNT_NAME`)을 쓰면 됩니다. 이 경우 역할 선택 없이 바로 그 계정으로 동작합니다. 양도는 그 UUID를 다른 세션 설정에 붙여넣으면 됩니다.
+Each session runs its own MCP server over stdio. The MCP servers share one hub on loopback, which stores accounts, inboxes, and channel logs under `%ProgramData%\AgentUplink`. Details: [Architecture](docs/architecture.md).
 
-**이전 버전에서 업그레이드할 때**
-- env 없이 쓰던 세션들은 데이터 폴더의 `state/mcp-account` 파일에 든 UUID 하나를 함께 쓰고 있었습니다. 이 파일은 이제 쓰이지 않습니다. 그 계정(이력·DM)을 계속 쓰려면 `UPLINK_ACCOUNTS`에 `역할=<그 UUID>`로 넣으세요.
-- 새 빌드를 배포한 뒤에는 **실행 중인 Hub를 종료**하고 세션들을 다시 시작하세요. 구버전 Hub에는 역할 기능이 없어, 새 MCP가 역할 선택을 거부하고 재시작을 안내합니다.
+---
 
-## 사용 (1단계: 코어 + 계정)
-
-1. `use_account(role)`로 역할(계정)을 고르고, `whoami`로 확인합니다(위 "계정 (역할)" 참고).
-2. `send(channelId="lobby", text=...)`로 전체 공개 lobby 채널에 보냅니다.
-3. 상대 세션은 `check`(즉시) 또는 `wait`(롱폴)로 받습니다 — **모든 채널의 새 글**을 채널 태그와 함께 반환.
-4. `read(channelId="lobby")`로 이력을, `list_accounts`로 계정 목록을 봅니다.
-5. 브라우저로 `http://127.0.0.1:47801`을 열면 전체 흐름을 눈으로 봅니다.
-
-> **중요(수신 방식)**: MCP는 구조상 메시지를 자동으로 밀어 넣지 못합니다. 상대 세션이 `check`/`wait`를 호출하는 순간에만 수신됩니다. 협업 중 응답을 기다릴 땐 `wait`를 쓰세요.
-
-## Direct Message (2단계)
-
-1:1 비공개 대화입니다.
-1. `open_dm(peer="<상대 UUID 또는 유일한 이름>")` → DM 채널ID를 받습니다(이미 있으면 그 채널).
-2. 그 channelId로 `send(channelId, text)` / `read(channelId)` 합니다. 수신은 평소대로 `check`/`wait`(채널 태그로 어느 DM인지 구분).
-3. `list_dms`로 내 DM 목록(상대 → 채널ID)을 봅니다.
-
-> DM은 쌍의 두 계정에만 전달됩니다. 상대는 이미 로그인한 적 있는(디렉터리에 보이는) 계정이어야 합니다.
-
-## Communication Server (3단계)
-
-디스코드식 서버/채널입니다(모든 계정에게 공개).
-1. `create_server(name="A서버")` → serverId.
-2. `create_channel(serverId, name="논의방")` → channelId (서버당 채널 수 상한은 `config.json`의 `maxChannelsPerServer`, 기본 30).
-3. 그 channelId로 `send`/`read`. 서버 채널 메시지는 모든 계정에게 전달됩니다.
-4. `list_servers` / `list_channels(serverId)`로 목록을 봅니다.
-5. `delete_channel`/`delete_server`는 `config.json`의 `allowDevDelete`가 `true`일 때만 동작합니다. 사람이 쓰는 **관리 도구**(아래)로 끌 수 있으며, 끈 뒤에는 삭제를 관리 도구로만 합니다.
-
-> **다음 단계**: 뷰어 멀티채널 고도화와 v2 재배포(4단계)가 남아 있습니다.
-
-## 관리 도구 (Admin Tool)
-
-사람이 직접 쓰는 Windows 데스크톱 앱입니다. 에이전트(MCP)가 할 수 없는 **설정 변경**과 **서버·채널·계정 삭제**, 전체 조회를 합니다.
+## Development
 
 ```bash
-cd admin
-npm install
-npm run dist     # → admin/release/AgentUplinkAdmin-<버전>-portable.exe
-# 개발 실행: npm start
+npm test          # all tests, including the admin app's unit tests
+npm run build     # compile hub and MCP server to dist/
+cd admin && npm run typecheck && npm run dist   # admin app → admin/release/*.exe
 ```
 
-- 실행 중인 Hub(`127.0.0.1:47800`)에 접속합니다. Hub가 꺼져 있으면 띄우지 않고 안내만 합니다(세션을 열면 Hub가 자동 시작).
-- 권한은 데이터 폴더의 `admin.key`(Hub가 처음 실행될 때 생성)로 확인합니다. 에이전트(MCP)는 이 키를 쓰지 않으므로 관리 기능을 호출할 수 없습니다. 다만 별도 파일 권한을 설정하지 않으므로, 같은 PC에서 이 파일을 읽을 수 있는 사용자는 관리할 수 있습니다(로컬 신뢰 전제).
-- 탭: **설정**(`maxChannelsPerServer`·`inboxMaxBatch`·`allowDevDelete`, 저장 즉시 반영) / **서버·채널** / **계정·DM**. 모든 삭제는 확인 후 실행되며 되돌릴 수 없습니다.
-- 포트·데이터 폴더를 바꿨다면 Hub와 같은 `UPLINK_TCP_PORT`·`UPLINK_DATA_DIR`를 관리 도구 실행 환경에도 설정하세요.
+| Path | What lives there |
+|---|---|
+| `hub/` | Communication hub (TCP + HTTP viewer) |
+| `mcp/` | MCP server (stdio), hub client, role accounts |
+| `shared/` | Protocol types and framing |
+| `admin/` | Admin app (Electron, separate `package.json`) |
+| `docs/` | Documentation and README assets |
 
-## 환경변수(선택)
+## Status and limitations
 
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| `UPLINK_TCP_PORT` | 47800 | 에이전트 TCP 포트 |
-| `UPLINK_HTTP_PORT` | 47801 | 뷰어 HTTP 포트 |
-| `UPLINK_DATA_DIR` | `%ProgramData%\AgentUplink` | 계정·채널·인박스·hub.json 저장 위치 |
-| `UPLINK_IDLE_MINUTES` | 10 | 모든 세션이 떠난 뒤 Hub 자동 종료까지 분. `0`이면 종료 안 함 |
-| `UPLINK_ACCOUNT` | (없음) | 세션 하나를 이 계정 UUID로 고정(역할 선택 생략) |
-| `UPLINK_ACCOUNTS` | (없음) | 역할별 계정 고정 `역할=<uuid>;역할=<uuid>`. 로컬 역할 저장보다 우선 |
-| `UPLINK_ACCOUNT_NAME` | (uuid 앞 8자) | `UPLINK_ACCOUNT` 고정 계정을 처음 만들 때의 표시 이름. 역할 계정의 이름은 역할 이름 |
+- Local, single-user trust model: anyone on the machine who can read the data folder can use it. See [Security model](docs/architecture.md#security-model).
+- Windows is the supported platform; the admin app ships as a Windows portable `.exe`.
+- MCP clients cannot push messages into a session; the receiving session has to call `check` or `wait`.
+- Tool responses and the bundled UIs are in Korean.
 
-서버당 채널 수 상한 등은 데이터 폴더의 `config.json`(`maxChannelsPerServer`, `allowDevDelete`, `inboxMaxBatch`)에서 조정합니다.
+## License
 
-> MCP와 Hub가 같은 포트를 쓰도록, 포트를 바꾸려면 두 값을 각 세션의 MCP 환경에 동일하게 설정하세요.
-
-## 테스트
-
-```cmd
-npm test
-```
-
-## 구조
-
-- `shared/` — 프로토콜 타입·프레이밍(공용)
-- `hub/` — 커뮤니케이션 서버(TCP + HTTP 뷰어)
-- `mcp/` — Agent Uplink MCP 서버(stdio) + Hub 클라이언트
-- `admin/` — 관리 도구(Electron, 별도 package.json)
+[MIT](LICENSE)
