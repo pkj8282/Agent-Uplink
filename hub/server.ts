@@ -460,6 +460,49 @@ export class Hub {
         return;
       }
 
+      case "admin_delete_channel": {
+        if (!adminAuth()) return;
+        if (!this.servers.findChannel(req.channelId)) {
+          reply({ ok: false, error: `채널이 없습니다: ${req.channelId}` });
+          return;
+        }
+        this.servers.removeChannel(req.channelId);
+        this.channels.unregister(req.channelId);
+        reply({ ok: true });
+        return;
+      }
+
+      case "admin_delete_server": {
+        if (!adminAuth()) return;
+        const srv = this.servers.getServer(req.serverId);
+        if (!srv) {
+          reply({ ok: false, error: `서버가 없습니다: ${req.serverId}` });
+          return;
+        }
+        for (const ch of srv.channels) this.channels.unregister(ch.id);
+        this.servers.removeServer(req.serverId);
+        reply({ ok: true });
+        return;
+      }
+
+      case "admin_delete_account": {
+        if (!adminAuth()) return;
+        if (!this.accounts.get(req.uuid)) {
+          reply({ ok: false, error: `계정이 없습니다: ${req.uuid}` });
+          return;
+        }
+        for (const rec of this.dm.byMember(req.uuid)) {
+          this.channels.unregister(rec.channelId);
+          this.dm.remove(rec.channelId);
+          const peer = rec.members[0] === req.uuid ? rec.members[1] : rec.members[0];
+          this.accounts.removeDm(peer, req.uuid);
+        }
+        this.inbox.remove(req.uuid);
+        this.accounts.remove(req.uuid);
+        reply({ ok: true });
+        return;
+      }
+
       default:
         reply({ ok: false, error: "알 수 없는 op" });
         return;

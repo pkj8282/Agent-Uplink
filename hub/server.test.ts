@@ -372,3 +372,45 @@ test("admin_set_config는 잘못된 값을 거부하고 기존 값을 유지한�
   assert.equal((await a.req("admin_snapshot", { token })).config!.maxChannelsPerServer, 30); // 유지
   a.close(); hub.stop();
 });
+
+test("admin_delete_channel/server는 allowDevDelete=false여도 삭제하고 라우팅을 제거한다", async () => {
+  const dataDir = tmp();
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(path.join(dataDir, "config.json"), JSON.stringify({ allowDevDelete: false }));
+  const { hub, port } = await startHub(dataDir);
+  const token = fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim();
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  const srv = await a.req("create_server", { name: "A" });
+  const ch = await a.req("create_channel", { serverId: srv.serverId, name: "c1" });
+  assert.equal((await a.req("delete_channel", { channelId: ch.channelId })).ok, false); // MCP 삭제 막힘
+  assert.equal((await a.req("admin_delete_channel", { token, channelId: ch.channelId })).ok, true);
+  assert.equal((await a.req("send", { channelId: ch.channelId, text: "x" })).ok, false); // 라우팅 제거
+  assert.equal((await a.req("admin_delete_server", { token, serverId: srv.serverId })).ok, true);
+  assert.equal((await a.req("admin_snapshot", { token })).snapshotServers!.length, 0);
+  a.close(); hub.stop();
+});
+
+test("admin_delete_account는 계정·알림·DM·상대 역색인을 정리한다", async () => {
+  const { hub, port, dataDir } = await startHub();
+  const token = fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim();
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  const b = new Client(port); await b.ready(); await b.req("login", { uuid: "u2", name: "B" });
+  const dm = await a.req("open_dm", { peer: "u2" });
+  await b.req("send", { channelId: dm.channelId, text: "hi" });
+  assert.equal((await a.req("admin_delete_account", { token, uuid: "u1" })).ok, true);
+  const snap = await a.req("admin_snapshot", { token });
+  assert.equal(snap.snapshotAccounts!.find((x) => x.uuid === "u1"), undefined);
+  assert.equal(snap.snapshotDms!.length, 0);
+  assert.equal((await b.req("list_dms")).dms!.find((d) => d.peer === "u1"), undefined);
+  a.close(); b.close(); hub.stop();
+});
+
+test("없는 대상 admin 삭제는 크래시 없이 거부", async () => {
+  const { hub, port, dataDir } = await startHub();
+  const token = fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim();
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  assert.equal((await a.req("admin_delete_channel", { token, channelId: "nope" })).ok, false);
+  assert.equal((await a.req("admin_delete_server", { token, serverId: "nope" })).ok, false);
+  assert.equal((await a.req("admin_delete_account", { token, uuid: "nope" })).ok, false);
+  a.close(); hub.stop();
+});
