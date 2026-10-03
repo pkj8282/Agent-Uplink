@@ -1,5 +1,8 @@
 import type { AdminApi, AdminConfig, IpcResult, Snapshot } from "../types.js";
-import { deleteConfirmMessage, dmCountOf, memberNames, parseConfigForm } from "./view.js";
+import { ConfigFormState, deleteConfirmMessage, dmCountOf, memberNames, parseConfigForm } from "./view.js";
+import type { FormMessage } from "./view.js";
+
+const formState = new ConfigFormState();
 
 declare global {
   interface Window { admin: AdminApi }
@@ -32,7 +35,7 @@ async function refresh(): Promise<void> {
   }
   document.body.dataset.state = "ready";
   showBanner("");
-  renderConfig(r.data.config);
+  if (formState.acceptsRefresh()) renderConfig(r.data.config); // 저장 안 된 수정은 덮어쓰지 않는다
   renderServers(r.data);
   renderAccounts(r.data);
 }
@@ -133,19 +136,26 @@ byId("refresh").addEventListener("click", () => {
   void refresh();
 });
 
+function showFormMessage(m: FormMessage): void {
+  const msg = byId("config-msg");
+  msg.textContent = m.text;
+  msg.className = `msg ${m.kind}`;
+}
+
+// 값이 바뀌면 이전 "저장했습니다"를 지우고 미저장 상태로 표시한다.
+byId<HTMLFormElement>("config-form").addEventListener("input", () => showFormMessage(formState.edit()));
+
 byId<HTMLFormElement>("config-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const msg = byId("config-msg");
   const parsed = parseConfigForm({
     maxChannelsPerServer: byId<HTMLInputElement>("cfg-max").value,
     inboxMaxBatch: byId<HTMLInputElement>("cfg-batch").value,
     allowDevDelete: byId<HTMLInputElement>("cfg-dev-delete").checked,
   });
-  if (!parsed.ok) { msg.textContent = parsed.error; msg.className = "msg err"; return; }
+  if (!parsed.ok) { showFormMessage(formState.failed(parsed.error)); return; }
   const r = await window.admin.setConfig(parsed.patch);
-  if (!r.ok) { msg.textContent = `저장 실패: ${r.error}`; msg.className = "msg err"; return; }
-  msg.textContent = "저장했습니다(즉시 반영).";
-  msg.className = "msg ok";
+  if (!r.ok) { showFormMessage(formState.failed(`저장 실패: ${r.error}`)); return; }
+  showFormMessage(formState.saved());
   await refresh();
 });
 

@@ -1,6 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deleteConfirmMessage, dmCountOf, memberNames, parseConfigForm } from "./view.js";
+import { ConfigFormState, deleteConfirmMessage, dmCountOf, memberNames, parseConfigForm } from "./view.js";
+
+test("ConfigFormState: 저장 안 된 수정은 '저장됨'을 지우고 새로고침 덮어쓰기를 막는다", () => {
+  const f = new ConfigFormState();
+  assert.equal(f.acceptsRefresh(), true); // 초기: Hub 값으로 채워도 됨
+  assert.deepEqual(f.saved(), { text: "저장했습니다(즉시 반영).", kind: "ok" });
+  // 저장 후 다시 수정 → "저장했습니다"가 남으면 안 되고, 새로고침이 수정값을 덮으면 안 된다
+  const dirty = f.edit();
+  assert.equal(dirty.kind, "dirty");
+  assert.match(dirty.text, /저장되지 않은 변경/);
+  assert.equal(f.acceptsRefresh(), false);
+  // 저장 실패 → 여전히 미저장
+  assert.deepEqual(f.failed("저장 실패: x"), { text: "저장 실패: x", kind: "err" });
+  assert.equal(f.acceptsRefresh(), false);
+  // 저장 성공 → 다시 새로고침 반영
+  f.saved();
+  assert.equal(f.acceptsRefresh(), true);
+});
 
 test("parseConfigForm은 유효 입력을 숫자 patch로 바꾼다(앞뒤 공백 허용)", () => {
   assert.deepEqual(parseConfigForm({ maxChannelsPerServer: " 30 ", inboxMaxBatch: "100", allowDevDelete: false }), {

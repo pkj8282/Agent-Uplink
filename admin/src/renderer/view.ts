@@ -26,6 +26,35 @@ export function parseConfigForm(input: ConfigFormInput): ParseResult {
   return { ok: true, patch: { maxChannelsPerServer: max, inboxMaxBatch: batch, allowDevDelete: input.allowDevDelete } };
 }
 
+export interface FormMessage { text: string; kind: "ok" | "err" | "dirty" }
+
+/**
+ * 설정 폼의 저장 상태. 저장 안 된 수정이 있으면 "저장됨" 표시를 지우고,
+ * 새로고침이 사용자의 수정값을 조용히 덮어쓰지 못하게 한다(allowDevDelete 오인 방지).
+ */
+export class ConfigFormState {
+  private dirty = false;
+
+  edit(): FormMessage {
+    this.dirty = true;
+    return { text: "저장되지 않은 변경이 있습니다. 저장을 눌러야 반영됩니다.", kind: "dirty" };
+  }
+
+  saved(): FormMessage {
+    this.dirty = false;
+    return { text: "저장했습니다(즉시 반영).", kind: "ok" };
+  }
+
+  failed(text: string): FormMessage {
+    return { text, kind: "err" };
+  }
+
+  /** 새로고침 시 Hub 값으로 폼을 채워도 되는가. */
+  acceptsRefresh(): boolean {
+    return !this.dirty;
+  }
+}
+
 export type DeleteTarget =
   | { kind: "channel"; name: string; serverName: string }
   | { kind: "server"; name: string; channelCount: number }

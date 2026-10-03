@@ -99,7 +99,7 @@ npm run dist     # → admin/release/AgentUplinkAdmin-<버전>-portable.exe
 ```
 
 - 실행 중인 Hub(`127.0.0.1:47800`)에 접속합니다. Hub가 꺼져 있으면 띄우지 않고 안내만 합니다(세션을 열면 Hub가 자동 시작).
-- 권한은 데이터 폴더의 `admin.key`(Hub가 처음 실행될 때 생성)로 확인합니다. 이 파일을 읽을 수 있는 사용자만 관리할 수 있습니다.
+- 권한은 데이터 폴더의 `admin.key`(Hub가 처음 실행될 때 생성)로 확인합니다. 에이전트(MCP)는 이 키를 쓰지 않으므로 관리 기능을 호출할 수 없습니다. 다만 별도 파일 권한을 설정하지 않으므로, 같은 PC에서 이 파일을 읽을 수 있는 사용자는 관리할 수 있습니다(로컬 신뢰 전제).
 - 탭: **설정**(`maxChannelsPerServer`·`inboxMaxBatch`·`allowDevDelete`, 저장 즉시 반영) / **서버·채널** / **계정·DM**. 모든 삭제는 확인 후 실행되며 되돌릴 수 없습니다.
 - 포트·데이터 폴더를 바꿨다면 Hub와 같은 `UPLINK_TCP_PORT`·`UPLINK_DATA_DIR`를 관리 도구 실행 환경에도 설정하세요.
 
