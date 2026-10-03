@@ -36,3 +36,15 @@ test("본문이 JSON이 아닌 프레임은 건너뛰고 다음 프레임을 계
   dec.push(Buffer.concat([bad, encodeFrame({ ok: 1 })]), (o) => out.push(o));
   assert.deepEqual(out, [{ ok: 1 }]);
 });
+
+test("maxFrame을 넘는 길이 선언은 본문을 기다리지 않고 FrameTooLargeError를 던진다", async () => {
+  const { FrameTooLargeError } = await import("./framing.js");
+  const dec = new FrameDecoder({ maxFrame: 1024 });
+  const len = Buffer.alloc(4);
+  len.writeUInt32LE(1025, 0);
+  assert.throws(() => dec.push(len, () => {}), FrameTooLargeError);
+  const ok = new FrameDecoder({ maxFrame: 1024 });
+  const out: any[] = [];
+  ok.push(encodeFrame({ a: "x".repeat(100) }), (o) => out.push(o));
+  assert.equal(out.length, 1);
+});

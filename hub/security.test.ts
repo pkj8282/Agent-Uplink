@@ -120,6 +120,52 @@ test("RT6: junction 항목에 대한 restore/empty op는 바깥 폴더를 건드
   }
 });
 
+test("RT7: 1 MiB를 넘는 길이를 선언한 연결(HTTP POST 바이트)은 즉시 끊기고 Hub는 계속 응답한다", async () => {
+  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir: tmp(), idleShutdownMs: 0 });
+  await hub.startTcp();
+  const port = hub.tcpAddress.port;
+  try {
+    const closed = await new Promise<boolean>((resolve) => {
+      const s = net.connect(port, "127.0.0.1", () => s.write(["POST / HTTP/1.1", "Host: x", "", ""].join(CRLF)));
+      s.on("close", () => resolve(true));
+      s.on("error", () => {});
+      setTimeout(() => { s.destroy(); resolve(false); }, 1000);
+    });
+    assert.equal(closed, true);
+    const hello = await new Promise<any>((resolve) => {
+      const s = net.connect(port, "127.0.0.1", () => s.write(encodeFrame({ op: "hello", id: 1 })));
+      const dec = new FrameDecoder();
+      s.on("data", (d) => dec.push(d, (r: any) => { resolve(r); s.destroy(); }));
+    });
+    assert.equal(hello.ok, true);
+  } finally {
+    hub.stop();
+  }
+});
+
+test("send는 65536자를 넘는 메시지를 거부한다", async () => {
+  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir: tmp(), idleShutdownMs: 0 });
+  await hub.startTcp();
+  const port = hub.tcpAddress.port;
+  try {
+    const replies: any[] = [];
+    await new Promise<void>((resolve) => {
+      const s = net.connect(port, "127.0.0.1", () => {
+        s.write(encodeFrame({ op: "login", id: 1, uuid: "u-long", name: "L" }));
+        s.write(encodeFrame({ op: "send", id: 2, channelId: "lobby", text: "가".repeat(65537) }));
+        s.write(encodeFrame({ op: "send", id: 3, channelId: "lobby", text: "가".repeat(65536) }));
+      });
+      const dec = new FrameDecoder();
+      s.on("data", (d) => dec.push(d, (r: any) => { replies.push(r); if (replies.length === 3) { s.destroy(); resolve(); } }));
+    });
+    assert.equal(replies[1].ok, false);
+    assert.match(replies[1].error, /65536/);
+    assert.equal(replies[2].ok, true);
+  } finally {
+    hub.stop();
+  }
+});
+
 test("isAllowedHost: 루프백 이름+정확한 포트만", () => {
   assert.equal(isAllowedHost("127.0.0.1:47801", 47801), true);
   assert.equal(isAllowedHost("LOCALHOST:47801", 47801), true);

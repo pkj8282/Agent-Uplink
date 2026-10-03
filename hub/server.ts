@@ -1,6 +1,6 @@
 import net from "node:net";
 import http from "node:http";
-import { encodeFrame, FrameDecoder } from "../shared/framing.js";
+import { encodeFrame, FrameDecoder, FrameTooLargeError } from "../shared/framing.js";
 import { renderViewerHtml, isAllowedHost } from "./viewer.js";
 import { loadConfig, saveConfig, Config } from "./config.js";
 import { loadOrCreateAdminKey, verifyAdminToken } from "./adminKey.js";
@@ -41,6 +41,10 @@ interface ConnState {
   waiter: Waiter | null;
   sessionToken: string | null;
 }
+
+// Hub가 받는 요청 프레임 상한(정상 요청은 수 KB, 메시지 본문 상한 64K자 ≈ 최대 192KB).
+export const MAX_REQUEST_FRAME = 1024 * 1024;
+export const MAX_TEXT_LENGTH = 65536;
 
 // 계정 인박스가 이 수를 넘으면 소비분을 압축한다(무한 증가 방지, 재작성 빈도 억제).
 const INBOX_COMPACT_THRESHOLD = 1000;
@@ -192,10 +196,18 @@ export class Hub {
   private onConnection(sock: net.Socket): void {
     this.cancelIdle();
     this.connections.add(sock);
-    const dec = new FrameDecoder();
+    const dec = new FrameDecoder({ maxFrame: MAX_REQUEST_FRAME });
     const state: ConnState = { uuid: null, waiter: null, sessionToken: null };
     this.connStates.add(state);
-    sock.on("data", (chunk) => dec.push(chunk, (req: Request) => this.dispatch(sock, state, req)));
+    sock.on("data", (chunk) => {
+      try {
+        dec.push(chunk, (req: Request) => this.dispatch(sock, state, req));
+      } catch (e) {
+        // 상한을 넘는 길이 선언(HTTP 요청 바이트·악의적 대용량)은 그 연결만 끊는다.
+        if (e instanceof FrameTooLargeError) sock.destroy();
+        else throw e;
+      }
+    });
     sock.on("close", () => {
       this.connections.delete(sock);
       this.connStates.delete(state);
@@ -429,6 +441,10 @@ export class Hub {
         if (!uuid) return;
         if (typeof req.text !== "string" || req.text.length === 0) {
           reply({ ok: false, error: "text는 비어있지 않은 문자열이어야 합니다." });
+          return;
+        }
+        if (req.text.length > MAX_TEXT_LENGTH) {
+          reply({ ok: false, error: `메시지는 ${MAX_TEXT_LENGTH}자 이하여야 합니다.` });
           return;
         }
         const ch = this.channels.getChannel(req.channelId);
