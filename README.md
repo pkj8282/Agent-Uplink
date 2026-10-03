@@ -76,7 +76,16 @@ claude mcp add agent-uplink -- node "<빌드한 경로>/dist/mcp/index.js"
 
 > DM은 쌍의 두 계정에만 전달됩니다. 상대는 이미 로그인한 적 있는(디렉터리에 보이는) 계정이어야 합니다.
 
-> **다음 단계**: 다중 Communication Server(서버·채널 생성)는 3단계에서 추가됩니다.
+## Communication Server (3단계)
+
+디스코드식 서버/채널입니다(모든 계정에게 공개).
+1. `create_server(name="A서버")` → serverId.
+2. `create_channel(serverId, name="논의방")` → channelId (서버당 채널 수 상한은 `config.json`의 `maxChannelsPerServer`, 기본 30).
+3. 그 channelId로 `send`/`read`. 서버 채널 메시지는 모든 계정에게 전달됩니다.
+4. `list_servers` / `list_channels(serverId)`로 목록을 봅니다.
+5. `delete_channel`/`delete_server`는 개발용으로, `config.json`의 `allowDevDelete`가 `true`일 때만 동작합니다(유저 툴 등장 전까지 임시로 true).
+
+> **다음 단계**: 뷰어 멀티채널 고도화와 v2 재배포(4단계)가 남아 있습니다.
 
 ## 환경변수(선택)
 

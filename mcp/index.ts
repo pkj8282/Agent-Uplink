@@ -121,6 +121,82 @@ server.tool(
 );
 
 server.tool(
+  "create_server",
+  "새 Communication Server를 만듭니다(모든 계정에게 공개). 반환된 serverId로 채널을 만드세요.",
+  { name: z.string().min(1).describe("서버 이름") },
+  async ({ name }) => {
+    try {
+      const r = await client.createServer(name);
+      return r.ok ? text(`서버 생성됨: ${r.serverId}`) : text(`실패: ${r.error}`, true);
+    } catch (e) { return text((e as Error).message, true); }
+  },
+);
+
+server.tool(
+  "list_servers",
+  "모든 Communication Server 목록(서버ID·이름·채널 수)을 봅니다.",
+  {},
+  async () => {
+    try {
+      const r = await client.listServers();
+      if (!r.ok) return text(`실패: ${r.error}`, true);
+      const list = (r.servers ?? []).map((s) => `${s.name} (${s.serverId}) · 채널 ${s.channelCount}개`);
+      return text(list.length ? list.join("\n") : "(서버 없음)");
+    } catch (e) { return text((e as Error).message, true); }
+  },
+);
+
+server.tool(
+  "create_channel",
+  "서버 안에 새 채널을 만듭니다(서버당 상한 있음). 반환된 channelId로 send/read 하세요.",
+  { serverId: z.string().min(1).describe("대상 서버 ID"), name: z.string().min(1).describe("채널 이름") },
+  async ({ serverId, name }) => {
+    try {
+      const r = await client.createChannel(serverId, name);
+      return r.ok ? text(`채널 생성됨: ${r.channelId}`) : text(`실패: ${r.error}`, true);
+    } catch (e) { return text((e as Error).message, true); }
+  },
+);
+
+server.tool(
+  "list_channels",
+  "한 서버의 채널 목록(채널ID·이름)을 봅니다.",
+  { serverId: z.string().min(1).describe("서버 ID") },
+  async ({ serverId }) => {
+    try {
+      const r = await client.listChannels(serverId);
+      if (!r.ok) return text(`실패: ${r.error}`, true);
+      const list = (r.channels ?? []).map((c) => `${c.name} → ${c.channelId}`);
+      return text(list.length ? list.join("\n") : "(채널 없음)");
+    } catch (e) { return text((e as Error).message, true); }
+  },
+);
+
+server.tool(
+  "delete_channel",
+  "채널을 삭제합니다(개발용: allowDevDelete가 켜져 있을 때만 동작).",
+  { channelId: z.string().min(1).describe("삭제할 채널 ID") },
+  async ({ channelId }) => {
+    try {
+      const r = await client.deleteChannel(channelId);
+      return r.ok ? text("채널 삭제됨") : text(`실패: ${r.error}`, true);
+    } catch (e) { return text((e as Error).message, true); }
+  },
+);
+
+server.tool(
+  "delete_server",
+  "서버를 삭제합니다(개발용: allowDevDelete가 켜져 있을 때만 동작).",
+  { serverId: z.string().min(1).describe("삭제할 서버 ID") },
+  async ({ serverId }) => {
+    try {
+      const r = await client.deleteServer(serverId);
+      return r.ok ? text("서버 삭제됨") : text(`실패: ${r.error}`, true);
+    } catch (e) { return text((e as Error).message, true); }
+  },
+);
+
+server.tool(
   "send",
   "채널에 메시지를 보냅니다. 1단계에서는 channelId='lobby'로 전체에게 보냅니다(DM·서버 채널은 이후 단계).",
   { channelId: z.string().min(1).describe("대상 채널 ID (예: lobby)"), text: z.string().min(1).describe("보낼 내용") },

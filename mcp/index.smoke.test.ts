@@ -30,7 +30,7 @@ function rpc(reqs: object[], env: Record<string, string>): Promise<any[]> {
   });
 }
 
-test("MCP v2는 tools/list에서 9개 툴을 노출한다", async () => {
+test("MCP v2는 tools/list에서 15개 툴을 노출한다", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-smoke-"));
   const out = await rpc([
     { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } } },
@@ -38,5 +38,9 @@ test("MCP v2는 tools/list에서 9개 툴을 노출한다", async () => {
   ], { UPLINK_ACCOUNT: "smoke-acc", UPLINK_DATA_DIR: dataDir });
   const list = out.find((m) => m.id === 2);
   const names = list.result.tools.map((t: any) => t.name).sort();
-  assert.deepEqual(names, ["check", "list_accounts", "list_dms", "open_dm", "read", "send", "set_name", "wait", "whoami"].sort());
+  assert.deepEqual(names, [
+    "check", "create_channel", "create_server", "delete_channel", "delete_server",
+    "list_accounts", "list_channels", "list_dms", "list_servers",
+    "open_dm", "read", "send", "set_name", "wait", "whoami",
+  ].sort());
 });
