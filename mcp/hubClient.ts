@@ -1,6 +1,5 @@
 import net from "node:net";
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
@@ -8,8 +7,10 @@ import { MAGIC, PROTOCOL_VERSION, DEFAULT_TCP_PORT, Response } from "../shared/p
 
 export interface HubClientOptions {
   port?: number;
-  hubEntry?: string; // Hub 진입점 경로(기본: 컴파일된 ../hub/index.js)
-  nodeArgs?: string[]; // node 앞 인자(기본: []). 개발 중엔 ["--import","tsx"].
+  accountUuid: string;
+  accountName?: string;
+  hubEntry?: string;
+  nodeArgs?: string[];
 }
 
 interface Pending {
@@ -22,91 +23,54 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export class HubClient {
   private readonly port: number;
+  private readonly uuid: string;
+  private readonly name?: string;
   private readonly hubEntry: string;
   private readonly nodeArgs: string[];
   private sock: net.Socket | null = null;
   private dec = new FrameDecoder();
   private nextId = 1;
   private pending = new Map<number, Pending>();
-  private name: string | null = null;
-  private readonly clientId = randomUUID(); // 재연결 시 같은 세션으로 이어지기 위한 안정적 식별자
   private connecting: Promise<void> | null = null;
 
-  constructor(opts: HubClientOptions = {}) {
+  constructor(opts: HubClientOptions) {
     this.port = opts.port ?? DEFAULT_TCP_PORT;
+    this.uuid = opts.accountUuid;
+    this.name = opts.accountName;
     this.hubEntry =
-      opts.hubEntry ??
-      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "hub", "index.js");
+      opts.hubEntry ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "hub", "index.js");
     this.nodeArgs = opts.nodeArgs ?? [];
   }
 
-  async register(name?: string): Promise<Response> {
-    await this.ensureConnected();
-    const r = await this.request("register", { clientId: this.clientId, ...(name ? { name } : {}) });
-    if (r.ok && r.name) this.name = r.name;
-    return r;
-  }
-
-  async send(text: string, to?: string): Promise<Response> {
-    await this.ensureConnected();
-    return this.request("send", { text, to: to ?? null });
-  }
-
-  async check(): Promise<Response> {
-    await this.ensureConnected();
-    return this.request("check", {});
-  }
-
+  async whoami(): Promise<Response> { await this.ensureConnected(); return this.request("whoami", {}); }
+  async setName(name: string): Promise<Response> { await this.ensureConnected(); return this.request("set_name", { name }); }
+  async listAccounts(): Promise<Response> { await this.ensureConnected(); return this.request("list_accounts", {}); }
+  async send(channelId: string, text: string): Promise<Response> { await this.ensureConnected(); return this.request("send", { channelId, text }); }
+  async read(channelId: string, limit?: number): Promise<Response> { await this.ensureConnected(); return this.request("read", { channelId, limit }); }
+  async check(): Promise<Response> { await this.ensureConnected(); return this.request("check", {}); }
   async wait(timeoutMs = 30000): Promise<Response> {
     await this.ensureConnected();
     const clamped = Math.min(Math.max(timeoutMs, 1000), 120000);
     return this.request("wait", { timeoutMs: clamped }, clamped + 15000);
   }
 
-  async who(): Promise<Response> {
-    await this.ensureConnected();
-    return this.request("who", {});
-  }
-
-  close(): void {
-    if (this.sock) {
-      this.sock.destroy();
-      this.sock = null;
-    }
-  }
-
-  /** 테스트 전용: 연결을 강제로 끊어 재연결 경로를 검증한다. */
-  dropConnectionForTest(): void {
-    if (this.sock) {
-      this.sock.destroy();
-      this.sock = null;
-    }
-  }
+  close(): void { if (this.sock) { this.sock.destroy(); this.sock = null; } }
+  dropConnectionForTest(): void { this.close(); }
 
   private async ensureConnected(): Promise<void> {
     if (this.sock && !this.sock.destroyed) return;
     if (this.connecting) return this.connecting;
-    this.connecting = this.doConnect().finally(() => {
-      this.connecting = null;
-    });
+    this.connecting = this.doConnect().finally(() => { this.connecting = null; });
     return this.connecting;
   }
 
   private async doConnect(): Promise<void> {
     let sock: net.Socket;
-    try {
-      sock = await this.connectOnce();
-    } catch {
-      this.spawnHub();
-      sock = await this.retryConnect();
-    }
+    try { sock = await this.connectOnce(); }
+    catch { this.spawnHub(); sock = await this.retryConnect(); }
     this.attach(sock);
     await this.handshake();
-    if (this.name) {
-      // 재연결 시 동일 clientId·이름으로 재등록 → Hub가 같은 세션에 이어붙인다.
-      const r = await this.request("register", { name: this.name, clientId: this.clientId });
-      if (r.ok && r.name) this.name = r.name;
-    }
+    await this.request("login", this.name ? { uuid: this.uuid, name: this.name } : { uuid: this.uuid });
   }
 
   private connectOnce(): Promise<net.Socket> {
@@ -120,20 +84,14 @@ export class HubClient {
   private async retryConnect(): Promise<net.Socket> {
     for (let i = 0; i < 30; i++) {
       await delay(100);
-      try {
-        return await this.connectOnce();
-      } catch {
-        // 아직 기동 중 — 재시도
-      }
+      try { return await this.connectOnce(); } catch { /* 재시도 */ }
     }
     throw new Error("Hub를 시작했지만 연결에 실패했습니다(포트 점유 또는 기동 실패).");
   }
 
   private spawnHub(): void {
     const child = spawn(process.execPath, [...this.nodeArgs, this.hubEntry], {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
+      detached: true, stdio: "ignore", windowsHide: true,
     });
     child.unref();
   }
@@ -141,59 +99,35 @@ export class HubClient {
   private attach(sock: net.Socket): void {
     this.sock = sock;
     this.dec = new FrameDecoder();
-    sock.on("data", (chunk) => {
-      this.dec.push(chunk, (r: Response) => {
-        const p = this.pending.get(r.id);
-        if (p) {
-          clearTimeout(p.timer);
-          this.pending.delete(r.id);
-          p.resolve(r);
-        }
-      });
-    });
+    sock.on("data", (chunk) => this.dec.push(chunk, (r: Response) => {
+      const p = this.pending.get(r.id);
+      if (p) { clearTimeout(p.timer); this.pending.delete(r.id); p.resolve(r); }
+    }));
     const fail = () => {
       this.sock = null;
-      for (const [, p] of this.pending) {
-        clearTimeout(p.timer);
-        p.reject(new Error("Hub 연결이 끊겼습니다."));
-      }
+      for (const [, p] of this.pending) { clearTimeout(p.timer); p.reject(new Error("Hub 연결이 끊겼습니다.")); }
       this.pending.clear();
     };
     sock.on("close", fail);
-    sock.on("error", () => {
-      /* close가 뒤따른다 */
-    });
+    sock.on("error", () => { /* close 뒤따름 */ });
   }
 
   private async handshake(): Promise<void> {
     let r: Response;
-    try {
-      r = await this.request("hello", {}, 5000);
-    } catch (e) {
-      // 타임아웃 등 어떤 실패든 소켓을 반드시 정리해 좀비 연결이 남지 않게 한다.
-      this.close();
-      throw new Error(
-        `포트 ${this.port}가 응답하지 않습니다(Agent-Uplink Hub가 아닐 수 있음): ${(e as Error).message}`,
-      );
-    }
+    try { r = await this.request("hello", {}, 5000); }
+    catch (e) { this.close(); throw new Error(`포트 ${this.port}가 응답하지 않습니다(Agent-Uplink Hub가 아닐 수 있음): ${(e as Error).message}`); }
     if (r.magic !== MAGIC || r.version !== PROTOCOL_VERSION) {
       this.close();
-      throw new Error(`포트 ${this.port}가 Agent-Uplink Hub가 아닙니다(다른 프로세스 점유 가능).`);
+      throw new Error(`포트 ${this.port}가 Agent-Uplink Hub(v${PROTOCOL_VERSION})가 아닙니다.`);
     }
   }
 
   private request(op: string, params: object, timeoutMs = 60000): Promise<Response> {
     return new Promise((resolve, reject) => {
       const sock = this.sock;
-      if (!sock || sock.destroyed) {
-        reject(new Error("Hub 연결이 없습니다."));
-        return;
-      }
+      if (!sock || sock.destroyed) { reject(new Error("Hub 연결이 없습니다.")); return; }
       const id = this.nextId++;
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`Hub 응답 타임아웃(op=${op}).`));
-      }, timeoutMs);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`Hub 응답 타임아웃(op=${op}).`)); }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       sock.write(encodeFrame({ op, id, ...params }));
     });
