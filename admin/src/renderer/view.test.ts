@@ -41,7 +41,7 @@ test("parseConfigForm은 빈칸·0·음수·소수·문자·지수·초거대 �
   }
 });
 
-test("deleteConfirmMessage는 대상·영향 범위·되돌릴 수 없음을 알린다", () => {
+test("deleteConfirmMessage는 대상·영향 범위와 휴지통 이동(복원 가능)을 알린다", () => {
   const ch = deleteConfirmMessage({ kind: "channel", name: "일반", serverName: "데모" });
   assert.match(ch, /데모\/일반/);
   const srv = deleteConfirmMessage({ kind: "server", name: "데모", channelCount: 3 });
@@ -51,7 +51,12 @@ test("deleteConfirmMessage는 대상·영향 범위·되돌릴 수 없음을 알
   assert.match(acc, /알파/);
   assert.match(acc, /u-1/);
   assert.match(acc, /DM 2개/);
-  for (const m of [ch, srv, acc]) assert.match(m, /되돌릴 수 없습니다/);
+  for (const m of [ch, srv, acc]) {
+    assert.match(m, /휴지통으로 이동합니다/);
+    assert.match(m, /휴지통 탭에서 복원할 수 있습니다/);
+    assert.doesNotMatch(m, /되돌릴 수 없습니다/);
+  }
+  assert.match(acc, /알림은 복원되지 않습니다/); // 인박스 알림은 영구 삭제
 });
 
 test("dmCountOf와 memberNames는 DM 멤버를 이름으로 보여주고 모르는 uuid를 표시한다", () => {

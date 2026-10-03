@@ -62,6 +62,7 @@ export type DeleteTarget =
   | { kind: "account"; name: string; uuid: string; dmCount: number };
 
 const IRREVERSIBLE = "\n\n이 작업은 되돌릴 수 없습니다.";
+const TO_TRASH = "\n\n휴지통으로 이동합니다. 휴지통 탭에서 복원할 수 있습니다.";
 
 /** 확인창 등 평문 UI에 넣을 이름: 위장 문자(제어·방향·폭 0)를 정리하고 코드포인트 기준으로 자른다. */
 export function displayName(s: string, max = 80): string {
@@ -139,11 +140,11 @@ export function emptyTrashConfirmMessage(count: number, bytes: number): string {
 export function deleteConfirmMessage(t: DeleteTarget): string {
   switch (t.kind) {
     case "channel":
-      return `채널 '${displayName(t.serverName)}/${displayName(t.name)}'을(를) 삭제합니다.${IRREVERSIBLE}`;
+      return `채널 '${displayName(t.serverName)}/${displayName(t.name)}'을(를) 삭제합니다.${TO_TRASH}`;
     case "server":
-      return `서버 '${displayName(t.name)}'과(와) 그 채널 ${t.channelCount}개를 삭제합니다.${IRREVERSIBLE}`;
+      return `서버 '${displayName(t.name)}'과(와) 그 채널 ${t.channelCount}개를 삭제합니다.${TO_TRASH}`;
     case "account":
-      return `계정 '${displayName(t.name)}' (${displayName(t.uuid)})을(를) 삭제합니다.\n이 계정의 DM ${t.dmCount}개와 알림도 함께 정리됩니다.${IRREVERSIBLE}`;
+      return `계정 '${displayName(t.name)}' (${displayName(t.uuid)})을(를) 삭제합니다.\n이 계정의 DM ${t.dmCount}개도 함께 옮겨지며, 알림은 복원되지 않습니다.${TO_TRASH}`;
   }
 }
 
