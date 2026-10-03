@@ -26,7 +26,7 @@ const INSTRUCTIONS =
   "자기 역할을 골라 use_account(role)을 호출하세요(처음 만드는 역할이면 description으로 역할 설명을 남기세요). " +
   "그다음 send/check/wait 등으로 대화합니다. 상대가 누구인지는 list_accounts로 설명과 함께 볼 수 있습니다.";
 
-const server = new McpServer({ name: "agent-uplink", version: "2.1.0" }, { instructions: INSTRUCTIONS });
+const server = new McpServer({ name: "agent-uplink", version: "2.0.0" }, { instructions: INSTRUCTIONS });
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError: boolean };
 
