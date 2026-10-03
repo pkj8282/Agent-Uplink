@@ -28,6 +28,9 @@ interface Waiter {
   timer: NodeJS.Timeout;
 }
 
+// 계정 인박스가 이 수를 넘으면 소비분을 압축한다(무한 증가 방지, 재작성 빈도 억제).
+const INBOX_COMPACT_THRESHOLD = 1000;
+
 export class Hub {
   protected opts: HubOptions;
   protected config: Config;
@@ -278,7 +281,12 @@ export class Hub {
   private drain(uuid: string): InboxItem[] {
     const cursor = this.accounts.get(uuid)!.inboxCursor;
     const items = this.inbox.since(uuid, cursor, this.config.inboxMaxBatch);
-    if (items.length) this.accounts.setInboxCursor(uuid, items[items.length - 1].seq);
+    if (items.length) {
+      const last = items[items.length - 1].seq;
+      this.accounts.setInboxCursor(uuid, last);
+      // 소비분이 많이 쌓였을 때만 압축해 인박스 무한 증가를 막는다(재작성은 드물게).
+      if (this.inbox.size(uuid) > INBOX_COMPACT_THRESHOLD) this.inbox.compact(uuid, last);
+    }
     return items;
   }
 

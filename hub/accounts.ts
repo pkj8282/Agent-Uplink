@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { writeFileAtomic } from "./fsutil.js";
 import { AccountInfo } from "../shared/protocol.js";
 
 export interface Account {
@@ -32,7 +33,9 @@ export class AccountStore {
 
   private save(a: Account): void {
     try {
-      fs.writeFileSync(path.join(this.dir, `${a.uuid}.json`), JSON.stringify(a, null, 2));
+      // 수신 경로(커서 갱신)에서 자주 재작성되므로, 크래시 시 계정 파일이 손상돼
+      // 신원·DM역색인·커서가 통째로 소실되지 않도록 원자적으로 교체한다.
+      writeFileAtomic(path.join(this.dir, `${a.uuid}.json`), JSON.stringify(a, null, 2));
     } catch {
       // 쓰기 실패해도 메모리 유지
     }

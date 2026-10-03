@@ -33,3 +33,26 @@ test("재시작 후 seq와 내용을 복원한다", () => {
   assert.equal(s2.append("u1", item("다음")).seq, 2);
   assert.deepEqual(s2.since("u1", 0, 10).map((x) => x.text), ["영속", "다음"]);
 });
+
+test("compact는 소비된 항목을 버리고 seq·나머지를 유지하며 영속한다", () => {
+  const dir = tmp();
+  const s = new InboxStore({ dir });
+  for (let i = 1; i <= 5; i++) s.append("u1", item("m" + i));
+  s.compact("u1", 3); // seq<=3 제거
+  assert.equal(s.size("u1"), 2);
+  assert.equal(s.lastSeq("u1"), 5); // seq 카운터는 유지
+  assert.deepEqual(s.since("u1", 3, 10).map((x) => x.text), ["m4", "m5"]);
+  // 재시작 후에도 나머지가 복원되고 seq가 이어진다
+  const s2 = new InboxStore({ dir });
+  assert.deepEqual(s2.since("u1", 3, 10).map((x) => x.text), ["m4", "m5"]);
+  assert.equal(s2.append("u1", item("m6")).seq, 6);
+});
+
+test("compact 후 since는 커서 오프셋을 정확히 계산한다", () => {
+  const dir = tmp();
+  const s = new InboxStore({ dir });
+  for (let i = 1; i <= 6; i++) s.append("u1", item("m" + i));
+  s.compact("u1", 2); // m1,m2 제거 → 남은 첫 seq=3
+  assert.deepEqual(s.since("u1", 4, 10).map((x) => x.text), ["m5", "m6"]); // seq>4
+  assert.deepEqual(s.since("u1", 2, 1).map((x) => x.text), ["m3"]); // 상한 1
+});

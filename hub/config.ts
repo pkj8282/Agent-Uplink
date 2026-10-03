@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { writeFileAtomic } from "./fsutil.js";
 
 export interface Config {
   maxChannelsPerServer: number;
@@ -22,7 +23,7 @@ export function loadConfig(dir: string): Config {
   }
   const cfg: Config = { ...DEFAULTS, ...parsed };
   try {
-    fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
+    writeFileAtomic(file, JSON.stringify(cfg, null, 2));
   } catch {
     // 쓰기 실패해도 메모리 설정은 유효
   }
