@@ -67,53 +67,74 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
-/** UPLINK_ADMIN_SMOKE=<파일>: 첫 로드가 끝난 화면 상태를 JSON으로 쓰고 종료(빌드 검증용). */
+/** 첫 로드가 끝난 화면 상태를 모은다(스모크 리포트 본문). */
+async function collectReport(win: BrowserWindow): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    const state = await win.webContents.executeJavaScript("document.body.dataset.state");
+    if (state !== "loading") break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  const report: Record<string, unknown> = await win.webContents.executeJavaScript(`({
+    state: document.body.dataset.state,
+    banner: document.getElementById("banner").hidden ? "" : document.getElementById("banner").textContent,
+    status: document.getElementById("status").textContent,
+    mainInert: document.querySelector("main").inert,
+    servers: document.querySelectorAll("[data-kind=server]").length,
+    channels: document.querySelectorAll("[data-kind=channel]").length,
+    accounts: [...document.querySelectorAll("[data-kind=account] .name")].map((e) => e.textContent),
+    descriptions: [...document.querySelectorAll("[data-kind=account] .desc")].map((e) => e.textContent),
+    dms: document.querySelectorAll("[data-kind=dm]").length,
+    injected: document.querySelectorAll("main img, main script, main iframe").length,
+    trash: document.querySelectorAll("[data-kind=trash]").length,
+    trashSummary: document.getElementById("trash-summary").textContent,
+    opMsgHidden: document.getElementById("op-msg").hidden,
+  })`);
+  // inert 전환 뒤 포커스 복원 확인: 설정 입력에 포커스 → 새로고침 → 끝난 뒤 포커스 위치
+  report.focusAfterRefresh = await win.webContents.executeJavaScript(`(async () => {
+    document.getElementById("cfg-max").focus();
+    document.getElementById("refresh").click();
+    for (let i = 0; i < 50 && document.body.dataset.state === "loading"; i++) await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 100));
+    return document.activeElement ? document.activeElement.id : "";
+  })()`);
+  return report;
+}
+
+/**
+ * UPLINK_ADMIN_SMOKE=<파일>: 첫 로드가 끝난 화면 상태를 JSON으로 쓰고 종료(빌드 검증용).
+ * 정상 화면(ready/hubdown/error)은 exit 0, 시간 초과·로드 실패·렌더러 종료·스모크 오류는 exit 1.
+ * 어느 경로든 결과 파일을 남기고 반드시 종료한다(검증이 멈춘 채 대기하지 않도록).
+ */
 function runSmoke(win: BrowserWindow, outFile: string): void {
   const consoleErrors: string[] = [];
+  let done = false;
+  const limit = Number(process.env.UPLINK_ADMIN_SMOKE_TIMEOUT_MS ?? 30000);
+  const finish = (report: Record<string, unknown>, code: number) => {
+    if (done) return;
+    done = true;
+    clearTimeout(watchdog);
+    try {
+      fs.writeFileSync(outFile, JSON.stringify({ ...report, consoleErrors }, null, 2));
+    } finally {
+      app.exit(code);
+    }
+  };
+  const watchdog = setTimeout(() => finish({ state: "smoke-timeout", limitMs: limit }, 1), limit);
   win.webContents.on("console-message", (...args: unknown[]) => {
     const ev = args[0] as { message?: string; level?: unknown };
     const message = ev?.message ?? String(args[2] ?? "");
     const level = ev?.level ?? args[1];
     if (level === "error" || level === 3) consoleErrors.push(message);
   });
+  win.webContents.once("did-fail-load", (_e, code: number, desc: string) => finish({ state: "load-failed", error: `${code} ${desc}` }, 1));
+  win.webContents.once("render-process-gone", (_e, d: { reason: string }) => finish({ state: "renderer-gone", error: d.reason }, 1));
   win.webContents.once("did-finish-load", async () => {
-    let report: Record<string, unknown>;
     try {
-      const deadline = Date.now() + 15000;
-      while (Date.now() < deadline) {
-        const state = await win.webContents.executeJavaScript("document.body.dataset.state");
-        if (state !== "loading") break;
-        await new Promise((r) => setTimeout(r, 200));
-      }
-      report = await win.webContents.executeJavaScript(`({
-        state: document.body.dataset.state,
-        banner: document.getElementById("banner").hidden ? "" : document.getElementById("banner").textContent,
-        status: document.getElementById("status").textContent,
-        mainInert: document.querySelector("main").inert,
-        servers: document.querySelectorAll("[data-kind=server]").length,
-        channels: document.querySelectorAll("[data-kind=channel]").length,
-        accounts: [...document.querySelectorAll("[data-kind=account] .name")].map((e) => e.textContent),
-        descriptions: [...document.querySelectorAll("[data-kind=account] .desc")].map((e) => e.textContent),
-        dms: document.querySelectorAll("[data-kind=dm]").length,
-        injected: document.querySelectorAll("main img, main script, main iframe").length,
-        trash: document.querySelectorAll("[data-kind=trash]").length,
-        trashSummary: document.getElementById("trash-summary").textContent,
-        opMsgHidden: document.getElementById("op-msg").hidden,
-      })`);
-      // inert 전환 뒤 포커스 복원 확인: 설정 입력에 포커스 → 새로고침 → 끝난 뒤 포커스 위치
-      report.focusAfterRefresh = await win.webContents.executeJavaScript(`(async () => {
-        document.getElementById("cfg-max").focus();
-        document.getElementById("refresh").click();
-        for (let i = 0; i < 50 && document.body.dataset.state === "loading"; i++) await new Promise((r) => setTimeout(r, 100));
-        await new Promise((r) => setTimeout(r, 100));
-        return document.activeElement ? document.activeElement.id : "";
-      })()`);
+      finish(await collectReport(win), 0);
     } catch (e) {
-      report = { state: "smoke-error", error: (e as Error).message };
+      finish({ state: "smoke-error", error: (e as Error).message }, 1);
     }
-    // 스모크가 실패해도 결과를 남기고 반드시 종료한다(검증이 멈춘 채 대기하지 않도록).
-    fs.writeFileSync(outFile, JSON.stringify({ ...report, consoleErrors }, null, 2));
-    app.exit(0);
   });
 }
 

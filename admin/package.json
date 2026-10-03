@@ -8,7 +8,7 @@
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
-    "build": "node scripts/clean.mjs && tsc && node scripts/copy-static.mjs",
+    "build": "npm run typecheck && node scripts/clean.mjs && tsc && node scripts/copy-static.mjs",
     "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
     "dist": "npm run build && electron-builder --win portable"
