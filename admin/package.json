@@ -3,6 +3,8 @@
   "version": "2.0.0",
   "private": true,
   "description": "Agent-Uplink 관리 도구(설정·삭제·조회)",
+  "author": "Hello, System!",
+  "license": "MIT",
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
@@ -29,10 +31,11 @@
     ],
     "win": {
       "target": "portable",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": true
     },
     "portable": {
       "artifactName": "AgentUplinkAdmin-${version}-portable.exe"
-    }
+    },
+    "copyright": "Copyright (c) 2026 Hello, System!"
   }
 }

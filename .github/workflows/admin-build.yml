@@ -1,0 +1,52 @@
+# 관리 앱(Windows portable exe)을 저장소 소스에서 빌드한다.
+# 태그(v*) push 또는 Actions 탭의 "Run workflow"로 실행. 결과 exe는 워크플로 아티팩트로 남는다.
+# SignPath Foundation 승인 후 이 아티팩트를 서명 요청으로 보내는 단계를 추가한다.
+name: Admin app build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            admin/package-lock.json
+
+      - name: Install (root)
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Install (admin)
+        working-directory: admin
+        run: npm ci
+
+      - name: Typecheck (admin)
+        working-directory: admin
+        run: npm run typecheck
+
+      - name: Build portable exe
+        working-directory: admin
+        run: npm run dist
+
+      - name: Upload unsigned exe
+        id: upload-unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentUplinkAdmin-unsigned
+          path: admin/release/*.exe
+          if-no-files-found: error
