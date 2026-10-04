@@ -1,4 +1,5 @@
-// 서버·채널 이름 비교와 충돌 회피(복원 시 '이름 (n)').
+// 서버·채널 이름 비교와 충돌 회피(복원 시 '이름 (n)'), 이름 길이 검사.
+import { NAME_MAX } from "../shared/protocol.js";
 
 export function nameKey(s: string): string {
   return s.trim().toLowerCase();
@@ -29,4 +30,12 @@ export function uniqueName(base: string, taken: string[]): string {
     const cand = `${base} (${i})`;
     if (!keys.has(nameKey(cand))) return cand;
   }
+}
+
+/** 서버·채널·계정 이름: 앞뒤 공백을 지운 뒤 1~NAME_MAX 코드포인트. 통과하면 trim된 이름. */
+export function validateName(raw: unknown, what: string): { ok: true; name: string } | { ok: false; error: string } {
+  const name = typeof raw === "string" ? raw.trim() : "";
+  const len = [...name].length;
+  if (len === 0 || len > NAME_MAX) return { ok: false, error: `${what} 이름은 1~${NAME_MAX}자여야 합니다.` };
+  return { ok: true, name };
 }

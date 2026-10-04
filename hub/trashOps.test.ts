@@ -13,6 +13,8 @@ function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-to
 import { startTestHub, TestClient as Client } from "./testing.js";
 
 async function startHub(dataDir = tmp()) {
+  // MCP 삭제(delete_channel/delete_server) 경로를 시험하므로 기존 설치처럼 켜 둔다(v2.0.2 새 설치 기본값은 꺼짐).
+  if (!fs.existsSync(path.join(dataDir, "config.json"))) fs.writeFileSync(path.join(dataDir, "config.json"), JSON.stringify({ allowDevDelete: true }));
   const { hub, port } = await startTestHub({ dataDir });
   return { hub, port, dataDir, token: fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim() };
 }

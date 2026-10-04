@@ -647,3 +647,28 @@ test("create_server/create_channel은 대소문자·공백 무시 같은 이름�
   assert.equal((await c.req("create_channel", { serverId: s2.serverId, name: "일반" })).ok, true);
   c.close(); hub.stop();
 });
+
+test("이름 상한: 서버·채널·계정 이름 65자는 거부, 저장은 trim", async () => {
+  const { hub, port } = await startHub();
+  const c = new Client(port); await c.ready();
+  assert.equal((await c.req("login", { uuid: "u1", name: "a".repeat(65) })).ok, false);
+  await c.req("login", { uuid: "u1", name: "A" });
+  assert.equal((await c.req("set_name", { name: "b".repeat(65) })).ok, false);
+  assert.equal((await c.req("set_name", { name: "  비  " })).name, "비");
+  assert.equal((await c.req("create_server", { name: "s".repeat(65) })).ok, false);
+  const srv = await c.req("create_server", { name: "  서버  " });
+  assert.equal((await c.req("list_servers")).servers!.find((s) => s.serverId === srv.serverId)!.name, "서버");
+  assert.equal((await c.req("create_channel", { serverId: srv.serverId, name: "c".repeat(65) })).ok, false);
+  c.close(); hub.stop();
+});
+
+test("allowDevDelete가 꺼져 있으면 MCP 삭제 거부 문구가 관리 앱 설정을 안내", async () => {
+  const { hub, port } = await startHub();
+  const c = new Client(port); await c.ready();
+  await c.req("login", { uuid: "u1", name: "A" });
+  const srv = await c.req("create_server", { name: "S" });
+  const r = await c.req("delete_server", { serverId: srv.serverId });
+  assert.equal(r.ok, false);
+  assert.match(r.error!, /관리 앱 설정/);
+  c.close(); hub.stop();
+});

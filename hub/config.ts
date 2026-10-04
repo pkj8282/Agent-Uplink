@@ -8,7 +8,7 @@ export interface Config {
   inboxMaxBatch: number;
 }
 
-const DEFAULTS: Config = { maxChannelsPerServer: 30, allowDevDelete: true, inboxMaxBatch: 200 };
+const DEFAULTS: Config = { maxChannelsPerServer: 30, allowDevDelete: false, inboxMaxBatch: 200 };
 
 export function loadConfig(dir: string): Config {
   fs.mkdirSync(dir, { recursive: true });

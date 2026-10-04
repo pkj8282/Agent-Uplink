@@ -4,6 +4,8 @@ export const PROTOCOL_VERSION = 3;
 export const DEFAULT_TCP_PORT = 47800;
 export const DEFAULT_HTTP_PORT = 47801;
 export const LOBBY_CHANNEL_ID = "lobby";
+/** 서버·채널·계정 표시 이름 최대 길이(코드포인트). */
+export const NAME_MAX = 64;
 
 export type ChannelKind = "dm" | "server";
 

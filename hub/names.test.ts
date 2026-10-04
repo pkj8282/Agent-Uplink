@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { nameKey, uniqueName } from "./names.js";
+import { nameKey, uniqueName, validateName } from "./names.js";
 
 test("nameKey는 앞뒤 공백·대소문자를 무시한다", () => {
   assert.equal(nameKey("  Main "), "main");
@@ -24,4 +24,16 @@ test("uniqueName: 개수+1이 이미 있으면 빈 번호까지 올린다(개수
 
 test("uniqueName: 관련 없는 이름·숫자 아닌 괄호는 세지 않는다", () => {
   assert.equal(uniqueName("기획", ["기획", "기획팀", "기획 (초안)", "기획 ()"]), "기획 (2)");
+});
+
+test("validateName: 앞뒤 공백 제거, 1~64 코드포인트", () => {
+  assert.deepEqual(validateName("  방  ", "채널"), { ok: true, name: "방" });
+  assert.deepEqual(validateName("a".repeat(64), "서버"), { ok: true, name: "a".repeat(64) });
+  const emoji = String.fromCodePoint(0x1f600).repeat(64); // UTF-16으로는 128
+  assert.deepEqual(validateName(emoji, "계정"), { ok: true, name: emoji });
+  for (const bad of ["", "   ", "a".repeat(65), 5, null, undefined]) {
+    const r = validateName(bad, "서버");
+    assert.equal(r.ok, false, String(bad));
+    if (!r.ok) assert.match(r.error, /서버 이름은 1~64자/);
+  }
 });

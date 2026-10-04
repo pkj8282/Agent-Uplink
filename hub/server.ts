@@ -12,7 +12,7 @@ import { AccountStore } from "./accounts.js";
 import { InboxStore } from "./inbox.js";
 import { DmStore } from "./dm.js";
 import { ServerStore } from "./servers.js";
-import { nameKey } from "./names.js";
+import { nameKey, validateName } from "./names.js";
 import { isSafeAccountId } from "./ids.js";
 import { TrashStore } from "./trash.js";
 import { TrashOps } from "./trashOps.js";
@@ -385,6 +385,15 @@ export class Hub {
           reply({ ok: false, error: "uuid에는 영숫자와 '-', '_', '.'만 쓸 수 있습니다(128자 이하)." });
           return;
         }
+        let loginName: string | undefined;
+        if (req.name !== undefined) {
+          const v = validateName(req.name, "계정");
+          if (!v.ok) {
+            reply({ ok: false, error: v.error });
+            return;
+          }
+          loginName = v.name;
+        }
         const token = typeof req.sessionToken === "string" && req.sessionToken.length > 0 ? req.sessionToken : null;
         if (req.exclusive === true) {
           // 같은 계정을 다른 세션(다른 sessionToken 또는 비독점 연결)이 쓰고 있으면 거부. 상태는 바꾸지 않는다.
@@ -395,7 +404,7 @@ export class Hub {
             }
           }
         }
-        const acc = this.accounts.getOrCreate(req.uuid, req.name);
+        const acc = this.accounts.getOrCreate(req.uuid, loginName);
         // 다른 계정으로 전환: 이전 계정으로 걸어 둔 wait를 빈 결과로 끝낸다.
         // (남겨 두면 이전 계정 앞 메시지가 이 연결로 새거나, 새 주인이 받지 못하고 유실된다.)
         if (state.uuid && state.uuid !== acc.uuid && state.waiter) {
@@ -431,11 +440,12 @@ export class Hub {
       case "set_name": {
         const uuid = needLogin();
         if (!uuid) return;
-        if (typeof req.name !== "string" || req.name.length === 0) {
-          reply({ ok: false, error: "name이 필요합니다." });
+        const v = validateName(req.name, "계정");
+        if (!v.ok) {
+          reply({ ok: false, error: v.error });
           return;
         }
-        reply({ ok: true, name: this.accounts.setName(uuid, req.name) });
+        reply({ ok: true, name: this.accounts.setName(uuid, v.name) });
         return;
       }
 
@@ -479,16 +489,17 @@ export class Hub {
       case "create_server": {
         const uuid = needLogin();
         if (!uuid) return;
-        if (typeof req.name !== "string" || req.name.length === 0) {
-          reply({ ok: false, error: "name이 필요합니다." });
+        const v = validateName(req.name, "서버");
+        if (!v.ok) {
+          reply({ ok: false, error: v.error });
           return;
         }
-        const sameServer = this.servers.listServers().find((s) => nameKey(s.name) === nameKey(req.name));
+        const sameServer = this.servers.listServers().find((s) => nameKey(s.name) === nameKey(v.name));
         if (sameServer) {
           reply({ ok: false, error: `이미 같은 이름의 서버가 있습니다: ${sameServer.name} (${sameServer.id})` });
           return;
         }
-        const srv = this.servers.createServer(req.name);
+        const srv = this.servers.createServer(v.name);
         reply({ ok: true, serverId: srv.id });
         return;
       }
@@ -512,11 +523,12 @@ export class Hub {
           reply({ ok: false, error: `서버가 없습니다: ${req.serverId}` });
           return;
         }
-        if (typeof req.name !== "string" || req.name.length === 0) {
-          reply({ ok: false, error: "name이 필요합니다." });
+        const v = validateName(req.name, "채널");
+        if (!v.ok) {
+          reply({ ok: false, error: v.error });
           return;
         }
-        const sameChannel = srv.channels.find((c) => nameKey(c.name) === nameKey(req.name));
+        const sameChannel = srv.channels.find((c) => nameKey(c.name) === nameKey(v.name));
         if (sameChannel) {
           reply({ ok: false, error: `이 서버에 이미 같은 이름의 채널이 있습니다: ${sameChannel.name} (${sameChannel.id})` });
           return;
@@ -525,7 +537,7 @@ export class Hub {
           reply({ ok: false, error: `채널 수 한계(${this.config.maxChannelsPerServer})를 초과했습니다.` });
           return;
         }
-        const ch = this.servers.addChannel(srv.id, req.name);
+        const ch = this.servers.addChannel(srv.id, v.name);
         this.channels.register({ id: ch.id, kind: "server", label: `${srv.name}/${ch.name}`, members: null });
         reply({ ok: true, channelId: ch.id });
         return;
@@ -546,7 +558,7 @@ export class Hub {
         const uuid = needLogin();
         if (!uuid) return;
         if (!this.config.allowDevDelete) {
-          reply({ ok: false, error: "MCP 삭제가 허용되지 않습니다(allowDevDelete=false)." });
+          reply({ ok: false, error: "MCP 삭제가 꺼져 있습니다(allowDevDelete=false). 사용자가 관리 앱 설정에서 켤 수 있습니다." });
           return;
         }
         if (!this.trashOps.deleteChannel(req.channelId, "mcp")) {
@@ -561,7 +573,7 @@ export class Hub {
         const uuid = needLogin();
         if (!uuid) return;
         if (!this.config.allowDevDelete) {
-          reply({ ok: false, error: "MCP 삭제가 허용되지 않습니다(allowDevDelete=false)." });
+          reply({ ok: false, error: "MCP 삭제가 꺼져 있습니다(allowDevDelete=false). 사용자가 관리 앱 설정에서 켤 수 있습니다." });
           return;
         }
         if (!this.trashOps.deleteServer(req.serverId, "mcp")) {
