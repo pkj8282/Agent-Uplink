@@ -174,3 +174,32 @@ test("isAllowedHost: 루프백 이름+정확한 포트만", () => {
   assert.equal(isAllowedHost("127.0.0.1.attacker.example:47801", 47801), false);
   assert.equal(isAllowedHost(undefined, 47801), false);
 });
+
+test("RT15: 연결 상한을 넘는 연결은 바로 끊기고, 자리가 나면 다시 받는다", async () => {
+  const { hub, port } = await startTestHub({ limits: { maxConnections: 2 } });
+  try {
+    const a = new TestClient(port); await a.ready();
+    const b = new TestClient(port); await b.ready();
+    const c = new TestClient(port);
+    await c.onClose(); // 즉시 끊김
+    a.close();
+    await new Promise((r) => setTimeout(r, 100));
+    const d = new TestClient(port); await d.ready();
+    assert.equal((await d.req("login", { uuid: "d", name: "D" })).ok, true);
+    b.close(); d.close();
+  } finally { hub.stop(); }
+});
+
+test("RT15: 인증하지 않은 연결은 authTimeoutMs 뒤 끊기고, 인증한 연결은 유지된다", async () => {
+  const { hub, port } = await startTestHub({ limits: { authTimeoutMs: 200 } });
+  try {
+    const idle = new TestClient(port); await idle.connected();
+    const ok = new TestClient(port); await ok.ready();
+    const t0 = Date.now();
+    await idle.onClose();
+    assert.ok(Date.now() - t0 < 2000);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal((await ok.req("login", { uuid: "k", name: "K" })).ok, true);
+    ok.close();
+  } finally { hub.stop(); }
+});

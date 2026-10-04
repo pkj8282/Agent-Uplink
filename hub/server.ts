@@ -26,11 +26,20 @@ import {
   Response,
 } from "../shared/protocol.js";
 
+export interface HubLimits {
+  maxConnections: number;
+  authTimeoutMs: number;
+  maxSse: number;
+}
+// 로컬 대량 연결로 Hub를 점유하지 못하게(정상 사용은 세션 수 + 관리 앱 정도).
+export const DEFAULT_LIMITS: HubLimits = { maxConnections: 64, authTimeoutMs: 10_000, maxSse: 16 };
+
 export interface HubOptions {
   tcpPort: number;
   httpPort: number;
   dataDir: string;
   idleShutdownMs: number;
+  limits?: Partial<HubLimits>;
 }
 
 interface Waiter {
@@ -58,6 +67,7 @@ const INBOX_COMPACT_THRESHOLD = 1000;
 export class Hub {
   protected opts: HubOptions;
   protected config: Config;
+  protected limits: HubLimits;
   protected channels: ChannelStore;
   protected accounts: AccountStore;
   protected inbox: InboxStore;
@@ -84,6 +94,7 @@ export class Hub {
     this.ready = new Promise<void>((res, rej) => { this.markReady = res; this.markFailed = rej; });
     this.ready.catch(() => { /* 실패는 hello 응답과 index.ts가 다룬다 */ });
     this.opts = opts;
+    this.limits = { ...DEFAULT_LIMITS, ...opts.limits };
     this.config = loadConfig(opts.dataDir);
     this.channels = new ChannelStore({ dir: opts.dataDir });
     this.accounts = new AccountStore({ dir: opts.dataDir });
@@ -221,11 +232,22 @@ export class Hub {
   }
 
   private onConnection(sock: net.Socket): void {
+    if (this.connections.size >= this.limits.maxConnections) {
+      sock.destroy();
+      return;
+    }
     this.cancelIdle();
     this.connections.add(sock);
     const dec = new FrameDecoder({ maxFrame: MAX_REQUEST_FRAME });
     const state: ConnState = { uuid: null, waiter: null, sessionToken: null, hubNonce: null, authed: false, closed: false };
     this.connStates.add(state);
+    // 인증하지 않은 연결이 자리를 오래 차지하지 못하게 한다. 보안 준비가 늦어도 정상 클라이언트가 잘리지 않도록 준비 완료 시점부터 센다.
+    let authTimer: NodeJS.Timeout | null = null;
+    this.ready.then(() => {
+      if (sock.destroyed || state.authed) return;
+      authTimer = setTimeout(() => { if (!state.authed) sock.destroy(); }, this.limits.authTimeoutMs);
+      authTimer.unref();
+    }, () => {});
     sock.on("data", (chunk) => {
       try {
         dec.push(chunk, (req: Request) => {
@@ -246,6 +268,7 @@ export class Hub {
       }
     });
     sock.on("close", () => {
+      if (authTimer) clearTimeout(authTimer);
       this.connections.delete(sock);
       this.connStates.delete(state);
       if (state.uuid && state.waiter) this.removeWaiter(state.uuid, state.waiter);

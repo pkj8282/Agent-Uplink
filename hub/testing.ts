@@ -7,7 +7,7 @@ import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 import { newNonce, clientProof, hubProof, proofEquals } from "../shared/auth.js";
 import { readClientKey } from "../shared/clientKey.js";
 import { Response } from "../shared/protocol.js";
-import { Hub } from "./server.js";
+import { Hub, HubLimits } from "./server.js";
 import { SecureDeps } from "./secure.js";
 
 /** win32 경로(PowerShell·icacls)를 건너뛴다 — 실제 경로는 secure.test.ts가 주입·통합 테스트로 검증한다. */
@@ -24,9 +24,9 @@ export function registerTestHub(port: number, dataDir: string): void {
   dataDirByPort.set(port, dataDir);
 }
 
-export async function startTestHub(opts: { dataDir?: string; http?: boolean } = {}): Promise<{ hub: Hub; port: number; dataDir: string }> {
+export async function startTestHub(opts: { dataDir?: string; http?: boolean; limits?: Partial<HubLimits> } = {}): Promise<{ hub: Hub; port: number; dataDir: string }> {
   const dataDir = opts.dataDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "uplink-t-"));
-  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0 });
+  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0, ...(opts.limits ? { limits: opts.limits } : {}) });
   await hub.startTcp();
   if (opts.http) await hub.startHttp();
   await hub.secure(TEST_SECURE_DEPS);
