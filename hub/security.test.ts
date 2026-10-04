@@ -7,17 +7,18 @@ import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { Hub } from "./server.js";
-import { startTestHub, TestClient } from "./testing.js";
+import { startTestHub, TestClient, httpGet, openViewerSession } from "./testing.js";
 import { isAllowedHost, renderViewerHtml } from "./viewer.js";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 
 function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-sec-")); }
 const CRLF = String.fromCharCode(13, 10);
 
-function get(port: number, urlPath: string, host: string | null): Promise<{ status: number; body: string }> {
+function get(port: number, urlPath: string, host: string | null, cookie?: string): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const headers: Record<string, string> = {};
     if (host !== null) headers.Host = host;
+    if (cookie) headers.Cookie = cookie;
     const req = http.request({ host: "127.0.0.1", port, path: urlPath, headers, setHost: host !== null }, (res) => {
       let body = "";
       res.on("data", (d) => {
@@ -32,11 +33,12 @@ function get(port: number, urlPath: string, host: string | null): Promise<{ stat
 }
 
 test("RT1: DNS rebinding — 공격자 Host로는 /accounts·/events·/ 를 읽을 수 없다(403)", async () => {
-  const { hub } = await startTestHub({ http: true });
+  const { hub, port: tcpPort } = await startTestHub({ http: true });
   const port = hub.httpAddress.port;
   try {
+    const cookie = await openViewerSession(tcpPort); // 세션이 있어도 Host가 틀리면 403
     for (const p of ["/accounts", "/events", "/"]) {
-      const r = await get(port, p, `attacker.example:${port}`);
+      const r = await get(port, p, `attacker.example:${port}`, cookie);
       assert.equal(r.status, 403, p);
       assert.doesNotMatch(r.body, /uuid|event: init/, p);
     }
@@ -44,9 +46,9 @@ test("RT1: DNS rebinding — 공격자 Host로는 /accounts·/events·/ 를 읽�
     const noHost = await get(port, "/accounts", null);
     assert.ok(noHost.status === 400 || noHost.status === 403, String(noHost.status));
     assert.doesNotMatch(noHost.body, /uuid/);
-    assert.equal((await get(port, "/accounts", `127.0.0.1:${port}`)).status, 200);
-    assert.equal((await get(port, "/accounts", `localhost:${port}`)).status, 200);
-    assert.equal((await get(port, "/accounts", `[::1]:${port}`)).status, 200);
+    assert.equal((await get(port, "/accounts", `127.0.0.1:${port}`, cookie)).status, 200);
+    assert.equal((await get(port, "/accounts", `localhost:${port}`, cookie)).status, 200);
+    assert.equal((await get(port, "/accounts", `[::1]:${port}`, cookie)).status, 200);
   } finally {
     hub.stop();
   }
@@ -73,12 +75,14 @@ test("RT2: HTTP 요청 바이트로는 TCP op가 실행되지 않는다(교차 �
 });
 
 test("RT3: 뷰어 응답에 CORS 허용 헤더가 없다(다른 출처 페이지가 읽을 수 없음)", async () => {
-  const { hub } = await startTestHub({ http: true });
+  const { hub, port: tcpPort } = await startTestHub({ http: true });
   const port = hub.httpAddress.port;
   try {
+    const cookie = await openViewerSession(tcpPort);
     for (const p of ["/accounts", "/"]) {
       const res = await new Promise<http.IncomingMessage>((resolve) =>
-        http.get({ host: "127.0.0.1", port, path: p, headers: { Origin: "http://evil.example" } }, resolve));
+        http.get({ host: "127.0.0.1", port, path: p, headers: { Origin: "http://evil.example", Cookie: cookie } }, resolve));
+      assert.equal(res.statusCode, 200, p);
       assert.equal(res.headers["access-control-allow-origin"], undefined, p);
       res.resume();
     }
@@ -201,5 +205,92 @@ test("RT15: 인증하지 않은 연결은 authTimeoutMs 뒤 끊기고, 인증한
     await new Promise((r) => setTimeout(r, 300));
     assert.equal((await ok.req("login", { uuid: "k", name: "K" })).ok, true);
     ok.close();
+  } finally { hub.stop(); }
+});
+
+test("RT11: 쿠키 없이는 /, /events, /accounts가 401이고 데이터가 없다", async () => {
+  const { hub } = await startTestHub({ http: true });
+  const port = hub.httpAddress.port;
+  try {
+    for (const p of ["/", "/events", "/accounts"]) {
+      const r = await httpGet(port, p);
+      assert.equal(r.status, 401, p);
+      assert.doesNotMatch(r.body, /uuid|event: init/, p);
+    }
+    assert.match((await httpGet(port, "/")).body, /agent-uplink-viewer/);
+    assert.equal((await httpGet(port, "/accounts", { Cookie: `uplink_viewer=${"a".repeat(64)}` })).status, 401);
+  } finally { hub.stop(); }
+});
+
+test("티켓 → 302 + HttpOnly·SameSite=Strict 쿠키 → 데이터 열림, 티켓 재사용은 401", async () => {
+  const { hub, port } = await startTestHub({ http: true });
+  const httpPort = hub.httpAddress.port;
+  try {
+    const c = new TestClient(port); await c.ready();
+    const t = await c.req("viewer_ticket");
+    assert.equal(t.ok, true);
+    const url = new URL(t.url!);
+    assert.equal(url.host, `127.0.0.1:${httpPort}`);
+    const r = await httpGet(httpPort, url.pathname + url.search);
+    assert.equal(r.status, 302);
+    assert.equal(r.headers.location, "/");
+    const cookie = String(r.headers["set-cookie"]);
+    assert.match(cookie, /uplink_viewer=[0-9a-f]{64}/);
+    assert.match(cookie, /HttpOnly/); assert.match(cookie, /SameSite=Strict/); assert.match(cookie, /Path=\//);
+    const value = cookie.match(/uplink_viewer=[0-9a-f]{64}/)![0];
+    assert.equal((await httpGet(httpPort, "/accounts", { Cookie: value })).status, 200);
+    assert.equal((await httpGet(httpPort, url.pathname + url.search)).status, 401); // 재사용
+    c.close();
+  } finally { hub.stop(); }
+});
+
+test("RT17: Hub 재시작 뒤 옛 쿠키는 401 안내 페이지", async () => {
+  const first = await startTestHub({ http: true });
+  const cookie = await openViewerSession(first.port);
+  first.hub.stop();
+  const second = await startTestHub({ http: true, dataDir: first.dataDir });
+  try {
+    const r = await httpGet(second.hub.httpAddress.port, "/", { Cookie: cookie });
+    assert.equal(r.status, 401);
+    assert.match(r.body, /다시 열어야/);
+  } finally { second.hub.stop(); }
+});
+
+test("뷰어 포트를 열지 않은 Hub는 viewer_unavailable", async () => {
+  const { hub, port } = await startTestHub(); // http 없음
+  try {
+    const c = new TestClient(port); await c.ready();
+    const r = await c.req("viewer_ticket");
+    assert.equal(r.code, "viewer_unavailable");
+    c.close();
+  } finally { hub.stop(); }
+});
+
+test("보안 준비 전 뷰어 요청은 503", async () => {
+  const dataDir = tmp();
+  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0 });
+  await hub.startTcp(); await hub.startHttp();
+  try {
+    assert.equal((await httpGet(hub.httpAddress.port, "/")).status, 503);
+  } finally { hub.stop(); }
+});
+
+test("SSE 동시 연결 상한을 넘으면 503", async () => {
+  const { hub, port } = await startTestHub({ http: true, limits: { maxSse: 1 } });
+  const httpPort = hub.httpAddress.port;
+  try {
+    const cookie = await openViewerSession(port);
+    const first = http.get({ host: "127.0.0.1", port: httpPort, path: "/events", headers: { Cookie: cookie } });
+    await new Promise((r) => first.once("response", r));
+    assert.equal((await httpGet(httpPort, "/events", { Cookie: cookie })).status, 503);
+    first.destroy();
+  } finally { hub.stop(); }
+});
+
+test("알 수 없는 경로는 404", async () => {
+  const { hub, port } = await startTestHub({ http: true });
+  try {
+    const cookie = await openViewerSession(port);
+    assert.equal((await httpGet(hub.httpAddress.port, "/nope", { Cookie: cookie })).status, 404);
   } finally { hub.stop(); }
 });

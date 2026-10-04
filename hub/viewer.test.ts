@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { startTestHub, TestClient } from "./testing.js";
-import { renderViewerHtml } from "./viewer.js";
+import { startTestHub, TestClient, openViewerSession } from "./testing.js";
+import { renderViewerHtml, renderUnauthorizedHtml } from "./viewer.js";
 
 test("뷰어 HTML은 외부 CDN 없이 EventSource를 쓴다", () => {
   const html = renderViewerHtml();
@@ -21,9 +21,10 @@ test("뷰어에 채널 필터 셀렉트와 채널별 분류 로직이 있다", (
 test("send하면 SSE로 채널 라벨과 함께 실시간 전달된다", async () => {
   const { hub, port: tcpPort } = await startTestHub({ http: true });
   const httpPort = hub.httpAddress.port;
+  const cookie = await openViewerSession(tcpPort);
 
   const got = new Promise<string>((resolve) => {
-    http.get({ host: "127.0.0.1", port: httpPort, path: "/events" }, (res) => {
+    http.get({ host: "127.0.0.1", port: httpPort, path: "/events", headers: { Cookie: cookie } }, (res) => {
       let buf = "";
       res.on("data", (d) => {
         buf += d;
@@ -42,11 +43,12 @@ test("send하면 SSE로 채널 라벨과 함께 실시간 전달된다", async (
 
 test("GET /accounts는 이름·설명·접속 여부를 JSON으로 준다", async () => {
   const { hub, port } = await startTestHub({ http: true });
+  const cookie = await openViewerSession(port);
   const sock = new TestClient(port); await sock.ready();
   await sock.req("login", { uuid: "u1", name: "A" });
   await sock.req("set_profile", { description: "설명" });
   const body = await new Promise<string>((resolve) => {
-    http.get({ host: "127.0.0.1", port: hub.httpAddress.port, path: "/accounts" }, (res) => {
+    http.get({ host: "127.0.0.1", port: hub.httpAddress.port, path: "/accounts", headers: { Cookie: cookie } }, (res) => {
       assert.match(String(res.headers["content-type"]), /application\/json/);
       let b = ""; res.on("data", (d) => (b += d)); res.on("end", () => resolve(b));
     });
@@ -57,8 +59,9 @@ test("GET /accounts는 이름·설명·접속 여부를 JSON으로 준다", asyn
 
 test("SSE 실시간 메시지에 보낸 사람 uuid(fromUuid)가 포함된다", async () => {
   const { hub, port } = await startTestHub({ http: true });
+  const cookie = await openViewerSession(port);
   const got = new Promise<string>((resolve) => {
-    http.get({ host: "127.0.0.1", port: hub.httpAddress.port, path: "/events" }, (res) => {
+    http.get({ host: "127.0.0.1", port: hub.httpAddress.port, path: "/events", headers: { Cookie: cookie } }, (res) => {
       let buf = "";
       res.on("data", (d) => { buf += d; if (buf.includes("uuid확인")) resolve(buf); });
     });
@@ -84,11 +87,12 @@ test("뷰어는 /accounts로 참여자 목록을 그리고 발신자에 설명 �
 
 test("뷰어 초기 기록과 실시간 메시지는 같은 채널 라벨과 보낸 사람 uuid를 쓴다(lobby가 두 이름으로 갈리지 않음)", async () => {
   const { hub, port } = await startTestHub({ http: true });
+  const cookie = await openViewerSession(port);
   const sock = new TestClient(port); await sock.ready();
   await sock.req("login", { uuid: "sender-1", name: "S" });
   await sock.req("send", { channelId: "lobby", text: "이전기록" });
   const events = new Promise<string>((resolve) => {
-    http.get({ host: "127.0.0.1", port: hub.httpAddress.port, path: "/events" }, (res) => {
+    http.get({ host: "127.0.0.1", port: hub.httpAddress.port, path: "/events", headers: { Cookie: cookie } }, (res) => {
       let buf = "";
       res.on("data", (d) => { buf += d; if (buf.includes("실시간")) resolve(buf); });
     });
@@ -104,4 +108,14 @@ test("뷰어 초기 기록과 실시간 메시지는 같은 채널 라벨과 보
   assert.equal(old.channelLabel, "main/lobby");
   assert.equal(old.fromUuid, "sender-1");
   sock.close(); hub.stop();
+});
+
+test("뷰어는 401이면 안내를 보여주고, 안내 페이지는 데이터 없이 여는 법을 알려준다", () => {
+  const html = renderViewerHtml();
+  assert.match(html, /id="auth"/);
+  assert.match(html, /status === 401/);
+  const page = renderUnauthorizedHtml();
+  assert.match(page, /뷰어 열기/);
+  assert.match(page, /agent-uplink-viewer/);
+  assert.doesNotMatch(page, /<script/i);
 });

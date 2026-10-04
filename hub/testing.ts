@@ -1,5 +1,6 @@
 // 테스트 전용 도우미(dist 제외 — tsconfig exclude): 보안 준비를 마친 Hub, v3 핸드셰이크를 하는 원시 클라이언트.
 import net from "node:net";
+import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -73,4 +74,30 @@ export class TestClient {
   }
   onClose(): Promise<void> { return new Promise((res) => this.sock.once("close", () => res())); }
   close(): void { this.sock.destroy(); }
+}
+
+export function httpGet(port: number, urlPath: string, headers: Record<string, string> = {}): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: "127.0.0.1", port, path: urlPath, headers: { Host: `127.0.0.1:${port}`, ...headers } }, (res) => {
+      let body = "";
+      const done = () => resolve({ status: res.statusCode!, headers: res.headers, body });
+      res.on("data", (d) => { body += d; if (urlPath === "/events") { res.destroy(); done(); } });
+      res.on("end", done);
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+/** 인증된 TCP로 티켓을 받아 세션 쿠키 헤더 값("uplink_viewer=...")을 돌려준다. */
+export async function openViewerSession(tcpPort: number): Promise<string> {
+  const c = new TestClient(tcpPort); await c.ready();
+  const t = await c.req("viewer_ticket");
+  c.close();
+  if (!t.ok) throw new Error(`viewer_ticket 실패: ${t.error}`);
+  const url = new URL(t.url!);
+  const r = await httpGet(Number(url.port), url.pathname + url.search);
+  const m = String(r.headers["set-cookie"]).match(/uplink_viewer=[0-9a-f]{64}/);
+  if (!m) throw new Error("세션 쿠키 없음");
+  return m[0];
 }

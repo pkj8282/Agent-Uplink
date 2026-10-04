@@ -1,7 +1,8 @@
 import net from "node:net";
 import http from "node:http";
 import { encodeFrame, FrameDecoder, FrameTooLargeError } from "../shared/framing.js";
-import { renderViewerHtml, isAllowedHost } from "./viewer.js";
+import { renderViewerHtml, renderUnauthorizedHtml, isAllowedHost } from "./viewer.js";
+import { ViewerAuth, VIEWER_COOKIE } from "./viewerAuth.js";
 import { loadConfig, saveConfig, Config } from "./config.js";
 import { verifyAdminToken } from "./adminKey.js";
 import { secureDataDir, SecureDeps } from "./secure.js";
@@ -85,6 +86,8 @@ export class Hub {
   private tcp: net.Server;
   private http: http.Server;
   private sseClients = new Set<http.ServerResponse>();
+  private viewerAuth = new ViewerAuth();
+  private httpListening = false;
   private connections = new Set<net.Socket>();
   private waiters = new Map<string, Set<Waiter>>(); // uuid → 대기자들
   private idleTimer: NodeJS.Timeout | null = null;
@@ -163,7 +166,7 @@ export class Hub {
   startHttp(): Promise<void> {
     return new Promise((resolve) => {
       this.http.once("error", () => resolve()); // 뷰어 포트 실패는 치명적이지 않다
-      this.http.listen(this.opts.httpPort, "127.0.0.1", () => resolve());
+      this.http.listen(this.opts.httpPort, "127.0.0.1", () => { this.httpListening = true; resolve(); });
     });
   }
 
@@ -179,7 +182,37 @@ export class Hub {
       res.end("Forbidden");
       return;
     }
-    if (req.url === "/events") {
+    if (!this.isReady) {
+      res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "1" });
+      res.end("Hub 준비 중");
+      return;
+    }
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (url.pathname === "/" && url.searchParams.has("t")) {
+      const session = this.viewerAuth.redeem(url.searchParams.get("t"));
+      if (!session) {
+        this.viewerUnauthorized(res, true);
+        return;
+      }
+      // 주소창에서 티켓을 지운다(302). 쿠키는 스크립트가 읽을 수 없고 다른 사이트 요청에 실리지 않는다.
+      res.writeHead(302, {
+        Location: "/",
+        "Set-Cookie": `${VIEWER_COOKIE}=${session}; HttpOnly; SameSite=Strict; Path=/`,
+        "Cache-Control": "no-store",
+      });
+      res.end();
+      return;
+    }
+    if (!this.viewerAuth.hasSession(req.headers.cookie)) {
+      this.viewerUnauthorized(res, url.pathname === "/");
+      return;
+    }
+    if (url.pathname === "/events") {
+      if (this.sseClients.size >= this.limits.maxSse) {
+        res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("뷰어 연결이 너무 많습니다.");
+        return;
+      }
       res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
       // 실시간 메시지(pushSse)와 같은 모양으로 보낸다 — 라벨이 없으면 뷰어가 채널 ID로 대신 표시해 lobby가 두 이름으로 갈린다.
       const lobbyLabel = this.channels.getChannel(LOBBY_CHANNEL_ID)?.label ?? LOBBY_CHANNEL_ID;
@@ -191,7 +224,7 @@ export class Hub {
       const drop = () => this.sseClients.delete(res);
       req.on("close", drop);
       res.on("error", drop);
-    } else if (req.url === "/accounts") {
+    } else if (url.pathname === "/accounts") {
       const list = this.accounts.list().map((a) => ({
         uuid: a.uuid,
         name: a.name,
@@ -200,10 +233,18 @@ export class Hub {
       }));
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-cache" });
       res.end(JSON.stringify(list));
-    } else {
+    } else if (url.pathname === "/") {
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(renderViewerHtml());
+    } else {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Not Found");
     }
+  }
+
+  private viewerUnauthorized(res: http.ServerResponse, page: boolean): void {
+    res.writeHead(401, { "Content-Type": page ? "text/html; charset=utf-8" : "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(page ? renderUnauthorizedHtml() : "");
   }
 
   private pushSse(label: string, m: { ts: number; channelId: string; from: string; fromName: string; text: string }): void {
@@ -366,6 +407,16 @@ export class Hub {
         state.uuid = acc.uuid;
         state.sessionToken = token;
         reply({ ok: true, uuid: acc.uuid, name: acc.name });
+        return;
+      }
+
+      case "viewer_ticket": {
+        // 뷰어 포트를 실제로 연 Hub만 티켓을 준다 → 다른 사용자가 점유한 포트로 티켓을 보내지 않는다.
+        if (!this.httpListening) {
+          reply({ ok: false, code: "viewer_unavailable", error: `뷰어가 꺼져 있습니다(포트 ${this.opts.httpPort}를 열지 못함).` });
+          return;
+        }
+        reply({ ok: true, url: `http://127.0.0.1:${this.httpAddress.port}/?t=${this.viewerAuth.issueTicket()}` });
         return;
       }
 
