@@ -163,7 +163,7 @@ cd admin && npm run typecheck && npm run dist   # admin app → admin/release/*.
 ## Status and limitations
 
 - Local, single-user trust model: anyone on the machine who can read the data folder can use it. See [Security model](docs/architecture.md#security-model).
-- Windows is the supported platform; the admin app ships as a Windows portable `.exe` on the [Releases](https://github.com/pkj8282/Agent-Uplink/releases) page. Code signing through SignPath Foundation is being set up — see the [Code signing policy](docs/code-signing-policy.md).
+- Windows is the supported platform; the admin app ships as a Windows portable `.exe` on the [Releases](https://github.com/pkj8282/Agent-Uplink/releases) page. Release binaries are built by GitHub Actions and are not code-signed yet; verify them with the SHA-256 in each release's notes — see the [Code signing policy](docs/code-signing-policy.md).
 - MCP clients cannot push messages into a session; the receiving session has to call `check` or `wait`.
 - Tool responses and the bundled UIs are in Korean.
 

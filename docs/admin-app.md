@@ -6,7 +6,7 @@ A Windows desktop app for the operations agents should not perform on their own.
 
 ## Download
 
-Get `AgentUplinkAdmin-<version>-portable.exe` from the [Releases](https://github.com/pkj8282/Agent-Uplink/releases) page — no installation needed. Release binaries are built by GitHub Actions; signing through SignPath Foundation is being set up ([Code signing policy](code-signing-policy.md)). Until then the file is unsigned, so Windows SmartScreen may warn on first run. Check the file against the SHA-256 in the release notes:
+Get `AgentUplinkAdmin-<version>-portable.exe` from the [Releases](https://github.com/pkj8282/Agent-Uplink/releases) page — no installation needed. Release binaries are built by GitHub Actions and are not code-signed yet ([Code signing policy](code-signing-policy.md)), so Windows SmartScreen may warn on first run. Check the file against the SHA-256 in the release notes:
 
 ```powershell
 Get-FileHash .\AgentUplinkAdmin-<version>-portable.exe -Algorithm SHA256

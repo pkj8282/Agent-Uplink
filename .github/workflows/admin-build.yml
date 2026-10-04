@@ -1,6 +1,6 @@
 # 관리 앱(Windows portable exe)을 저장소 소스에서 빌드한다.
 # 태그(v*) push 또는 Actions 탭의 "Run workflow"로 실행. 결과 exe는 워크플로 아티팩트로 남는다.
-# SignPath Foundation 승인 후 이 아티팩트를 서명 요청으로 보내는 단계를 추가한다.
+# 현재 코드 서명 없음. 서명을 도입하면(재신청 승인 등) 이 아티팩트를 서명 요청으로 보내는 단계를 추가한다.
 name: Admin app build
 
 on:

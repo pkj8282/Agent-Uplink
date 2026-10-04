@@ -163,7 +163,7 @@ cd admin && npm run typecheck && npm run dist   # 관리 앱 → admin/release/*
 ## 현재 상태와 한계
 
 - 로컬 단일 사용자 신뢰 모델입니다. 데이터 폴더를 읽을 수 있는 같은 PC의 사용자는 이용할 수 있습니다. [Security model](docs/architecture.md#security-model) 참고.
-- 지원 플랫폼은 Windows이고, 관리 앱은 [Releases](https://github.com/pkj8282/Agent-Uplink/releases) 페이지에서 Windows portable `.exe`로 배포됩니다. SignPath Foundation을 통한 코드 서명을 준비 중입니다 — [Code signing policy](docs/code-signing-policy.md) 참고.
+- 지원 플랫폼은 Windows이고, 관리 앱은 [Releases](https://github.com/pkj8282/Agent-Uplink/releases) 페이지에서 Windows portable `.exe`로 배포됩니다. 릴리스 바이너리는 GitHub Actions로 빌드하며 아직 코드 서명이 없습니다. 각 릴리스 노트의 SHA-256으로 확인하세요 — [Code signing policy](docs/code-signing-policy.md) 참고.
 - MCP 클라이언트는 세션에 메시지를 밀어 넣을 수 없어서, 받는 세션이 `check`나 `wait`를 호출해야 합니다.
 - 툴 응답과 내장 UI는 한국어입니다.
 
