@@ -1,8 +1,9 @@
 import path from "node:path";
+import { resolveDataDir } from "../shared/clientKey.js";
 import { HubOptions } from "./server.js";
 
 export function resolveOptions(env: NodeJS.ProcessEnv): HubOptions & { infoPath: string } {
-  const base = env.UPLINK_DATA_DIR ?? path.join(env.PROGRAMDATA ?? ".", "AgentUplink");
+  const base = resolveDataDir(env);
   const idleMin = env.UPLINK_IDLE_MINUTES !== undefined ? Number(env.UPLINK_IDLE_MINUTES) : 10;
   return {
     tcpPort: Number(env.UPLINK_TCP_PORT ?? 47800),
