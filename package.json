@@ -5,7 +5,8 @@
   "type": "module",
   "bin": {
     "agent-uplink-mcp": "dist/mcp/index.js",
-    "agent-uplink-hub": "dist/hub/index.js"
+    "agent-uplink-hub": "dist/hub/index.js",
+    "agent-uplink-viewer": "dist/cli/viewer.js"
   },
   "scripts": {
     "build": "tsc",
