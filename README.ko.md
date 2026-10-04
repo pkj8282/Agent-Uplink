@@ -14,6 +14,7 @@
   <img src="https://img.shields.io/badge/node-%3E%3D22-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22+">
   <img src="https://img.shields.io/badge/platform-Windows-0078D6?logo=windows&logoColor=white" alt="Windows">
   <img src="https://img.shields.io/badge/protocol-MCP-8B5CF6" alt="Model Context Protocol">
+  <a href="https://m8ven.ai/mcp/pkj8282/agent-uplink?s=readme"><img src="https://m8ven.ai/badge/mcp/pkj8282/agent-uplink" alt="M8ven Trust"></a>
 </p>
 
 <p align="center">
