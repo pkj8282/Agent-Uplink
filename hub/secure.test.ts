@@ -101,3 +101,24 @@ test("실제 PowerShell 검사: 한글 경로에서도 내 폴더는 0건(win32 
   const rep4 = await realSecureDeps.findForeign(d, { recurse: false, paths: [file] }, [me]);
   assert.equal(rep4.count, 0, JSON.stringify(rep4));
 });
+
+test("RT13 실제 경로: ACL 잠금이 실패해도 남의 항목이 있으면 그 사실과 UPLINK_DATA_DIR를 안내한다", async () => {
+  const d = tmp();
+  await assert.rejects(
+    secureDataDir(d, deps({
+      restrictAcl: async () => ({ ok: false, error: "icacls 종료 코드 5" }),
+      findForeign: async () => ({ count: 1, samples: [{ path: d, owner: "S-1-5-21-other" }] }),
+    })),
+    (e: Error) => e.message.includes("다른 사용자가 만든 항목") && e.message.includes("S-1-5-21-other") && e.message.includes("UPLINK_DATA_DIR"),
+  );
+  assert.equal(fs.existsSync(path.join(d, "client.key")), false);
+});
+
+test("ACL 잠금만 실패하면 원인 후보와 UPLINK_DATA_DIR 안내를 준다(fail-closed)", async () => {
+  const d = tmp();
+  await assert.rejects(
+    secureDataDir(d, deps({ restrictAcl: async () => ({ ok: false, error: "icacls 종료 코드 5" }) })),
+    (e: Error) => e.message.includes("icacls 종료 코드 5") && e.message.includes("UPLINK_DATA_DIR"),
+  );
+  assert.equal(fs.existsSync(path.join(d, "client.key")), false);
+});

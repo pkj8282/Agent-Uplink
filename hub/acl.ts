@@ -49,6 +49,8 @@ export async function restrictDataDirAcl(dir: string): Promise<{ ok: boolean; er
     );
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: (e as Error).message };
+    // icacls 출력은 시스템 코드 페이지라 깨질 수 있다 → 종료 코드만 알린다(실행 자체 실패면 메시지).
+    const code = (e as { code?: unknown }).code;
+    return { ok: false, error: typeof code === "number" ? `icacls 종료 코드 ${code}` : (e as Error).message };
   }
 }

@@ -134,12 +134,19 @@ export async function secureDataDir(dir: string, deps: SecureDeps = realSecureDe
   if (deps.platform === "win32") {
     // 잠금 먼저: 검사와 잠금 사이 틈에 새 항목이 생기지 않게 한다(남의 폴더에 시도하는 것은 해가 없다).
     const acl = await deps.restrictAcl(dir);
-    if (!acl.ok) throw new Error(`데이터 폴더(${dir}) 권한을 현재 사용자 전용으로 바꾸지 못했습니다: ${acl.error}`);
     const me = await deps.currentUserSid();
     // 표식이 없으면(첫 보안 준비) 폴더 전체를 1회 검사 — 첫 실행 전에 남이 만들어 둔 하위 폴더·파일을 잡는다.
+    // 잠금이 실패했어도 검사한다: 남이 만든 폴더면 잠금부터 실패하므로, 그 사실을 알려야 사용자가 원인을 안다.
     const firstRun = !fs.existsSync(marker);
-    const rep = await deps.findForeign(dir, { recurse: firstRun, paths: [clientFile, adminFile, marker] }, [me, ...ALLOWED_OWNER_SIDS]);
+    const rep = await deps.findForeign(dir, { recurse: firstRun || !acl.ok, paths: [clientFile, adminFile, marker] }, [me, ...ALLOWED_OWNER_SIDS]);
     if (rep.count > 0) throw new Error(foreignMessage(dir, rep));
+    if (!acl.ok) {
+      throw new Error(
+        `데이터 폴더(${dir}) 권한을 현재 사용자 전용으로 바꾸지 못했습니다(${acl.error}). ` +
+          "다른 Windows 사용자가 만든 폴더이거나 권한이 바뀐 폴더일 수 있습니다. " +
+          "MCP 설정 env의 UPLINK_DATA_DIR를 자기 사용자 폴더(예: %LOCALAPPDATA%/AgentUplink)로 지정하세요.",
+      );
+    }
   } else {
     fs.chmodSync(dir, 0o700);
   }
