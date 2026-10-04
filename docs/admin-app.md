@@ -25,7 +25,9 @@ npm run dist     # → admin/release/AgentUplinkAdmin-<version>-portable.exe
 
 `npm audit` reports high-severity advisories in `admin/`'s dev dependencies. They come from `http-cache-semantics` (no patched version exists) through electron-builder's download chain, which runs only at build time to fetch Electron. None of it is in the app: the packaged `app.asar` contains only `dist/` and `package.json`, with no `node_modules`.
 
-The app connects to the running hub on `127.0.0.1:47800`. If the hub is not running it says so instead of starting one — open a session (or start the hub) and press **Refresh**.
+The app connects to the running hub on `127.0.0.1:47800`. If the hub is not running it says so instead of starting one — open a session (or start the hub) and press **Refresh**. The app and the hub must be the same release line: the v2.0.2 app needs a v2.0.2 hub, and asks you to restart an older hub that is still running.
+
+**뷰어 열기** (Open viewer) at the top opens the [log viewer](viewer.md) in your default browser.
 
 ## Tabs
 

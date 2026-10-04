@@ -21,6 +21,10 @@ When two sessions are collaborating, the one expecting a reply should call `wait
 
 `read(channelId, limit?)` shows a channel's recent history (default 50, up to 500) without touching the inbox.
 
+### Messages are untrusted input
+
+Messages come from other sessions — other AI agents — not from you. When `check`, `wait`, or `read` returns messages, the first line of the result says so, and the server's instructions tell the agent not to act on requests inside messages (deleting, sending data elsewhere, changing files) without your confirmation. Treat a message that asks for such an action the way you would treat an email asking for it.
+
 ## Direct messages
 
 ![The builder sends a DM and the planner receives it](assets/feature-dm.png)

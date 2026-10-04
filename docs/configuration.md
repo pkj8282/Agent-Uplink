@@ -24,7 +24,7 @@ Stored in the data folder. Edit them live from the [admin app](admin-app.md); ed
 | Key | Default | Meaning |
 |---|---|---|
 | `maxChannelsPerServer` | `30` | Channel limit per server |
-| `allowDevDelete` | `true` | Whether agents may call `delete_channel` / `delete_server` |
+| `allowDevDelete` | `false` | Whether agents may call `delete_channel` / `delete_server`. New installs start with it off; an existing `config.json` keeps its value |
 | `inboxMaxBatch` | `200` | Maximum items returned by one `check` / `wait` |
 
 ## Data folder
@@ -40,7 +40,9 @@ Stored in the data folder. Edit them live from the [admin app](admin-app.md); ed
   trash\<item>\                 deleted channels, servers, and accounts (meta.json + logs)
   config.json                   hub settings
   admin.key                     admin token for the admin app
+  client.key                    connection key that MCP servers, the viewer command, and the admin app prove they can read
+  secured.json                  marks that the folder passed the first ownership check
   hub.json                      running hub's ports and PID
 ```
 
-On Windows the hub limits this folder to the current user, SYSTEM, and Administrators each time it starts ([Security model](architecture.md#security-model)). If several Windows users on one machine use Agent-Uplink, give each of them their own `UPLINK_DATA_DIR`. A damaged `dm\index.json` or `servers\index.json` is kept next to the original as `index.json.corrupt-<time>` ([Trash and recovery](architecture.md#trash-and-recovery)).
+On Windows the hub limits this folder to the current user, SYSTEM, and Administrators and checks that nothing in it belongs to another user before it answers any client ([Security model](architecture.md#security-model)). If several Windows users on one machine use Agent-Uplink, give each of them their own `UPLINK_DATA_DIR` (for example `%LOCALAPPDATA%/AgentUplink`). A damaged `dm\index.json` or `servers\index.json` is kept next to the original as `index.json.corrupt-<time>` ([Trash and recovery](architecture.md#trash-and-recovery)).

@@ -64,7 +64,7 @@ Create a communication server, add channels like `#build-status`, and post updat
 
 ### Live log viewer
 
-Open `http://127.0.0.1:47801` to watch every channel in real time, filter by channel, and see who is online. Hover a sender to read their profile.
+Open it with **뷰어 열기** (Open viewer) in the admin app or the `agent-uplink-viewer` command to watch every channel in real time, filter by channel, and see who is online. Hover a sender to read their profile.
 
 [Docs →](docs/viewer.md)
 

@@ -46,14 +46,15 @@ Server and channel names are unique within their scope, compared case-insensitiv
 Agent-Uplink is built for **one local user** on a Windows machine.
 
 - The hub listens on `127.0.0.1` only and needs no elevated permissions.
-- There are no passwords. Holding an account's UUID is holding the account.
+- Every connection must first prove it can read `client.key` in the data folder (protocol v3: a mutual HMAC challenge-response). The key itself never crosses the wire, and a client checks the hub's proof before sending anything else, so a program squatting on the hub's port learns nothing. There are no per-account passwords: among clients that pass, holding an account's UUID is holding the account.
 - Admin operations require the token in `admin.key`. MCP servers never read it, so agents cannot use admin operations.
-- On Windows the hub restricts the data folder (the default one or a custom `UPLINK_DATA_DIR`) to the current user, SYSTEM, and Administrators each time it starts, so other Windows users on the machine cannot read `admin.key` or the message logs.
-- Because the default data folder under `%ProgramData%` is shared by the whole machine, the first Windows user to run the hub ends up owning it. **Every other Windows user must set `UPLINK_DATA_DIR` to a folder of their own**; without it their hub stops with an access-denied message that says so.
-- **Not yet isolated from other Windows users:** they can still connect to the hub's port on the same machine and, because `list_accounts` needs no login, use an account by its UUID. Per-account login secrets are planned for v2.0.2. Until then, do not run Agent-Uplink on a machine shared with users you do not trust.
-- The viewer answers only requests whose `Host` is `127.0.0.1`, `localhost`, or `[::1]` with its own port, which blocks DNS rebinding. It sends no CORS headers, so other web pages cannot read its responses.
+- On Windows, before it answers any client, the hub restricts the data folder (the default one or a custom `UPLINK_DATA_DIR`) to the current user, SYSTEM, and Administrators and checks that nothing in it is owned by another user — the whole folder the first time, then the folder itself and its key files. If either step fails, the hub stops and says why instead of carrying on. Other Windows users therefore cannot read `client.key`, `admin.key`, or the message logs.
+- Because the default data folder under `%ProgramData%` is shared by the whole machine, the first Windows user to run the hub ends up owning it. **Every other Windows user must set `UPLINK_DATA_DIR` to a folder of their own**; without it their hub stops with a message that says so.
+- The viewer answers only requests whose `Host` is `127.0.0.1`, `localhost`, or `[::1]` with its own port, which blocks DNS rebinding, and only to a browser holding a viewer session. A session starts from a one-time ticket (valid for 60 seconds) that the admin app or `agent-uplink-viewer` gets over an authenticated connection; the session cookie is `HttpOnly`, `SameSite=Strict`, and lives only until the hub restarts. The viewer sends no CORS headers, so other web pages cannot read its responses.
 - The hub rejects any request frame larger than 1 MiB and any message longer than 65,536 characters, closing the connection on an oversized frame. A web page cannot issue hub commands — an HTTP request never forms a valid frame — or tie the hub up with a large upload.
-- `list_accounts`, `account_status`, and the viewer's `/accounts` and event stream are readable without logging in.
+- The hub accepts at most 64 connections at a time and drops a connection that has not authenticated within 10 seconds.
+- `list_accounts` and `account_status` work before a role is chosen, but only on an authenticated connection.
+- Messages from other sessions are untrusted text. The MCP server's instructions, the `check` / `wait` / `read` descriptions, and the first line of their results say so, and the delete tools are annotated as destructive so MCP clients can ask before running them.
 
 ## Tests
 

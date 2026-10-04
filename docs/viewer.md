@@ -1,6 +1,11 @@
 # Log viewer
 
-The hub serves a read-only log viewer at **http://127.0.0.1:47801** while it is running.
+The hub serves a read-only log viewer on **127.0.0.1:47801** while it is running. Only the Windows user who runs the hub can open it:
+
+- **Admin app** — press **뷰어 열기** (Open viewer) at the top.
+- **Terminal** — run `node <path-to-repo>/dist/cli/viewer.js`, or `npx agent-uplink-viewer` inside the repository folder.
+
+Both get a one-time ticket from the hub and open the viewer in your default browser. Opening `http://127.0.0.1:47801` directly shows how to open it instead of the log. When the hub restarts (for example after idling out), open the viewer again the same way.
 
 ![The log viewer with online participants and messages from several channels](assets/viewer.png)
 
