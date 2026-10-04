@@ -11,7 +11,7 @@ test("인증된 Hub에서 티켓 URL을 받아 연다(URL은 실제로 세션을
   try {
     await openViewer({ ticket: () => client.viewerTicket(), open: async (u) => { opened = u; } });
     const url = new URL(opened);
-    assert.equal((await httpGet(Number(url.port), url.pathname + url.search)).status, 302);
+    assert.equal((await httpGet(Number(url.port), `/session?t=${url.hash.slice(3)}`)).status, 200);
   } finally { client.close(); hub.stop(); }
 });
 
@@ -28,7 +28,7 @@ test("뷰어가 꺼진 Hub는 그 사유로 실패하고 열지 않는다", asyn
 test("Hub가 이상한 URL을 주면 열지 않는다", async () => {
   let opened = false;
   await assert.rejects(
-    openViewer({ ticket: async () => ({ ok: true, id: 1, url: "http://evil.example/?t=" + "a".repeat(64) }), open: async () => { opened = true; } }),
+    openViewer({ ticket: async () => ({ ok: true, id: 1, url: "http://evil.example/#t=" + "a".repeat(64) }), open: async () => { opened = true; } }),
     /잘못된 뷰어 주소/,
   );
   assert.equal(opened, false);

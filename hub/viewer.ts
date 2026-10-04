@@ -28,7 +28,7 @@ export function renderViewerHtml(): string {
   <h1>Agent-Uplink 로그 (127.0.0.1)</h1>
   <select id="chan"><option value="">전체 채널</option></select>
 </header>
-<p id="auth" hidden>뷰어 세션이 없거나 만료됐습니다(Hub가 재시작되면 다시 열어야 합니다). 관리 앱의 '뷰어 열기' 또는 터미널에서 agent-uplink-viewer로 다시 여세요.</p>
+<p id="auth" hidden>이 뷰어는 같은 Windows 사용자만 열 수 있습니다. 관리 앱의 '뷰어 열기' 버튼이나 터미널의 agent-uplink-viewer 명령으로 여세요. Hub가 재시작되면(유휴 종료 등) 다시 열어야 합니다.</p>
 <div id="people"></div>
 <div id="log"></div>
 <script>
@@ -48,17 +48,25 @@ export function renderViewerHtml(): string {
   }
 
   const authNote = document.getElementById("auth");
+  const SESSION_KEY = "uplink_viewer_session";
   let peopleTimer = null;
   let es = null;
+  let session = null;
+  function store(get, value) {
+    try { return get ? sessionStorage.getItem(SESSION_KEY) : (value === null ? sessionStorage.removeItem(SESSION_KEY) : sessionStorage.setItem(SESSION_KEY, value)); }
+    catch { return null; }
+  }
   function showAuth() {
     authNote.hidden = false;
+    store(false, null);
     if (es) es.close();
     if (peopleTimer) clearInterval(peopleTimer);
   }
+  const q = () => "?s=" + encodeURIComponent(session);
 
   async function loadPeople() {
     try {
-      const res = await fetch("/accounts");
+      const res = await fetch("/accounts" + q());
       if (res.status === 401) { showAuth(); return; }
       const list = await res.json();
       byUuid = new Map(list.map((p) => [p.uuid, p]));
@@ -72,8 +80,7 @@ export function renderViewerHtml(): string {
       applyTitles();
     } catch { /* Hub 재시작 중 등 — 다음 주기에 재시도 */ }
   }
-  loadPeople();
-  peopleTimer = setInterval(loadPeople, 5000);
+
 
   function applyFilter(row) {
     row.classList.toggle("hidden", filter !== "" && row.dataset.ch !== filter);
@@ -116,26 +123,28 @@ export function renderViewerHtml(): string {
     for (const row of log.children) applyFilter(row);
   });
 
-  es = new EventSource("/events");
-  es.addEventListener("init", (e) => JSON.parse(e.data).forEach(fmt));
-  es.onmessage = (e) => fmt(JSON.parse(e.data));
-  // 재연결 실패(Hub 재시작으로 세션 소멸 등)면 /accounts로 401 여부를 확인해 안내한다.
-  es.onerror = () => { void loadPeople(); };
+  // 티켓(#t=)은 1회용 — 세션으로 바꾸고 주소에서 지운다. 세션은 이 탭의 sessionStorage에만 둔다(포트까지 포함한 origin 단위).
+  async function start() {
+    const m = /^#t=([0-9a-f]{64})$/.exec(location.hash);
+    if (m) {
+      history.replaceState(null, "", "/");
+      try {
+        const res = await fetch("/session?t=" + m[1]);
+        if (res.status === 200) store(false, (await res.json()).session);
+      } catch { /* 아래에서 세션 없음으로 안내 */ }
+    }
+    session = store(true);
+    if (!session) { showAuth(); return; }
+    loadPeople();
+    peopleTimer = setInterval(loadPeople, 5000);
+    es = new EventSource("/events" + q());
+    es.addEventListener("init", (e) => JSON.parse(e.data).forEach(fmt));
+    es.onmessage = (e) => fmt(JSON.parse(e.data));
+    // 재연결 실패(Hub 재시작으로 세션 소멸 등)면 /accounts로 401 여부를 확인해 안내한다.
+    es.onerror = () => { void loadPeople(); };
+  }
+  void start();
 </script>
-</body>
-</html>`;
-}
-
-/** 세션 없이 열었을 때의 안내(데이터·스크립트 없음). */
-export function renderUnauthorizedHtml(): string {
-  return `<!doctype html>
-<html lang="ko">
-<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>Agent-Uplink 로그</title>
-<style>:root { color-scheme: light dark; } body { font-family: ui-monospace, Consolas, monospace; margin: 0; padding: 24px; max-width: 640px; }</style></head>
-<body>
-<h1>Agent-Uplink 로그 뷰어</h1>
-<p>이 뷰어는 같은 Windows 사용자만 열 수 있습니다. 관리 앱의 <b>뷰어 열기</b> 버튼이나 터미널의 <code>agent-uplink-viewer</code> 명령으로 여세요.</p>
-<p>Hub가 재시작되면(유휴 종료 등) 다시 열어야 합니다.</p>
 </body>
 </html>`;
 }

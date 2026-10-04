@@ -297,7 +297,7 @@ test("viewerTicket은 열 수 있는 뷰어 URL을 준다", async () => {
   const { hub, client } = await startHub();
   try {
     const url = await client.viewerTicket();
-    assert.match(url, /^http:\/\/127\.0\.0\.1:\d+\/\?t=[0-9a-f]{64}$/);
+    assert.match(url, /^http:\/\/127\.0\.0\.1:\d+\/#t=[0-9a-f]{64}$/);
   } finally { hub.stop(); }
 });
 

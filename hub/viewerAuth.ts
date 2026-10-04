@@ -1,22 +1,12 @@
-// 뷰어 인증: 인증된 TCP 연결이 받은 1회용 티켓을 메모리 세션 쿠키로 바꾼다.
-// 쿠키는 포트를 구분하지 않아 127.0.0.1의 다른 포트 서버에도 전송된다 → 고정 값이 아니라 Hub 수명 동안만 유효한 무작위 값.
+// 뷰어 인증: 인증된 TCP 연결이 받은 1회용 티켓을 메모리 세션 값으로 바꾼다.
+// 쿠키는 쓰지 않는다 — 쿠키는 포트를 구분하지 않아 127.0.0.1의 다른 포트 서버(다른 사용자가 띄운 것 포함)로
+// 실려 갈 수 있다. 세션 값은 뷰어 페이지가 sessionStorage(포트까지 포함한 origin 단위)에 두고 ?s=로 붙인다.
 import { randomBytes } from "node:crypto";
 
-export const VIEWER_COOKIE = "uplink_viewer";
 export const TICKET_TTL_MS = 60_000;
 const MAX_TICKETS = 16;
 const MAX_SESSIONS = 16;
 const HEX64 = /^[0-9a-f]{64}$/;
-
-export function readCookie(header: string | undefined, name: string): string | null {
-  if (!header) return null;
-  for (const part of header.split(";")) {
-    const i = part.indexOf("=");
-    if (i < 0) continue;
-    if (part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
-  }
-  return null;
-}
 
 export class ViewerAuth {
   private tickets = new Map<string, number>(); // ticket → 만료 시각(삽입 순 = 오래된 순)
@@ -46,8 +36,7 @@ export class ViewerAuth {
     return session;
   }
 
-  hasSession(cookieHeader: string | undefined): boolean {
-    const v = readCookie(cookieHeader, VIEWER_COOKIE);
-    return v !== null && HEX64.test(v) && this.sessions.has(v);
+  hasSession(value: unknown): boolean {
+    return typeof value === "string" && HEX64.test(value) && this.sessions.has(value);
   }
 }

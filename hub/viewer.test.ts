@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { startTestHub, TestClient, openViewerSession } from "./testing.js";
-import { renderViewerHtml, renderUnauthorizedHtml } from "./viewer.js";
+import { renderViewerHtml } from "./viewer.js";
 
 test("뷰어 HTML은 외부 CDN 없이 EventSource를 쓴다", () => {
   const html = renderViewerHtml();
@@ -21,10 +21,10 @@ test("뷰어에 채널 필터 셀렉트와 채널별 분류 로직이 있다", (
 test("send하면 SSE로 채널 라벨과 함께 실시간 전달된다", async () => {
   const { hub, port: tcpPort } = await startTestHub({ http: true });
   const httpPort = hub.httpAddress.port;
-  const cookie = await openViewerSession(tcpPort);
+  const session = await openViewerSession(tcpPort);
 
   const got = new Promise<string>((resolve) => {
-    http.get({ host: "127.0.0.1", port: httpPort, path: "/events", headers: { Cookie: cookie } }, (res) => {
+    http.get({ host: "127.0.0.1", port: httpPort, path: `/events?s=${session}` }, (res) => {
       let buf = "";
       res.on("data", (d) => {
         buf += d;
@@ -43,12 +43,12 @@ test("send하면 SSE로 채널 라벨과 함께 실시간 전달된다", async (
 
 test("GET /accounts는 이름·설명·접속 여부를 JSON으로 준다", async () => {
   const { hub, port } = await startTestHub({ http: true });
-  const cookie = await openViewerSession(port);
+  const session = await openViewerSession(port);
   const sock = new TestClient(port); await sock.ready();
   await sock.req("login", { uuid: "u1", name: "A" });
   await sock.req("set_profile", { description: "설명" });
   const body = await new Promise<string>((resolve) => {
-    http.get({ host: "127.0.0.1", port: hub.httpAddress.port, path: "/accounts", headers: { Cookie: cookie } }, (res) => {
+    http.get({ host: "127.0.0.1", port: hub.httpAddress.port, path: `/accounts?s=${session}` }, (res) => {
       assert.match(String(res.headers["content-type"]), /application\/json/);
       let b = ""; res.on("data", (d) => (b += d)); res.on("end", () => resolve(b));
     });
@@ -59,9 +59,9 @@ test("GET /accounts는 이름·설명·접속 여부를 JSON으로 준다", asyn
 
 test("SSE 실시간 메시지에 보낸 사람 uuid(fromUuid)가 포함된다", async () => {
   const { hub, port } = await startTestHub({ http: true });
-  const cookie = await openViewerSession(port);
+  const session = await openViewerSession(port);
   const got = new Promise<string>((resolve) => {
-    http.get({ host: "127.0.0.1", port: hub.httpAddress.port, path: "/events", headers: { Cookie: cookie } }, (res) => {
+    http.get({ host: "127.0.0.1", port: hub.httpAddress.port, path: `/events?s=${session}` }, (res) => {
       let buf = "";
       res.on("data", (d) => { buf += d; if (buf.includes("uuid확인")) resolve(buf); });
     });
@@ -79,7 +79,7 @@ test("SSE 실시간 메시지에 보낸 사람 uuid(fromUuid)가 포함된다", 
 test("뷰어는 /accounts로 참여자 목록을 그리고 발신자에 설명 툴팁을 단다", () => {
   const html = renderViewerHtml();
   assert.match(html, /id="people"/);
-  assert.match(html, /fetch\("\/accounts"\)/);
+  assert.match(html, /fetch\("\/accounts" \+ q\(\)\)/);
   assert.match(html, /fromUuid/);
   assert.match(html, /\.title = /);
   assert.doesNotMatch(html, /innerHTML/);
@@ -87,12 +87,12 @@ test("뷰어는 /accounts로 참여자 목록을 그리고 발신자에 설명 �
 
 test("뷰어 초기 기록과 실시간 메시지는 같은 채널 라벨과 보낸 사람 uuid를 쓴다(lobby가 두 이름으로 갈리지 않음)", async () => {
   const { hub, port } = await startTestHub({ http: true });
-  const cookie = await openViewerSession(port);
+  const session = await openViewerSession(port);
   const sock = new TestClient(port); await sock.ready();
   await sock.req("login", { uuid: "sender-1", name: "S" });
   await sock.req("send", { channelId: "lobby", text: "이전기록" });
   const events = new Promise<string>((resolve) => {
-    http.get({ host: "127.0.0.1", port: hub.httpAddress.port, path: "/events", headers: { Cookie: cookie } }, (res) => {
+    http.get({ host: "127.0.0.1", port: hub.httpAddress.port, path: `/events?s=${session}` }, (res) => {
       let buf = "";
       res.on("data", (d) => { buf += d; if (buf.includes("실시간")) resolve(buf); });
     });
@@ -110,12 +110,14 @@ test("뷰어 초기 기록과 실시간 메시지는 같은 채널 라벨과 보
   sock.close(); hub.stop();
 });
 
-test("뷰어는 401이면 안내를 보여주고, 안내 페이지는 데이터 없이 여는 법을 알려준다", () => {
+test("뷰어는 #t= 티켓을 /session으로 바꿔 sessionStorage에 두고 주소에서 지우며, 세션이 없거나 401이면 여는 법을 안내한다", () => {
   const html = renderViewerHtml();
-  assert.match(html, /id="auth"/);
+  assert.match(html, /location\.hash/);
+  assert.match(html, /\/session\?t=/);
+  assert.match(html, /sessionStorage/);
+  assert.match(html, /history\.replaceState/);
   assert.match(html, /status === 401/);
-  const page = renderUnauthorizedHtml();
-  assert.match(page, /뷰어 열기/);
-  assert.match(page, /agent-uplink-viewer/);
-  assert.doesNotMatch(page, /<script/i);
+  assert.match(html, /id="auth"/);
+  assert.match(html, /agent-uplink-viewer/);
+  assert.doesNotMatch(html, /document\.cookie/);
 });

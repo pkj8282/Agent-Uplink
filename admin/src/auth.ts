@@ -36,7 +36,7 @@ export function proofEquals(expected: string, got: unknown): boolean {
   return timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(got, "hex"));
 }
 
-/** 뷰어 티켓 URL 검사: Hub가 주는 형식(http://127.0.0.1:<포트>/?t=<64 hex>)만 브라우저로 연다. */
+/** 뷰어 티켓 URL 검사: Hub가 주는 형식(http://127.0.0.1:<포트>/#t=<64 hex>)만 브라우저로 연다. */
 export function isViewerUrl(u: unknown): u is string {
   if (typeof u !== "string" || !u.startsWith("http://127.0.0.1:")) return false;
   let url: URL;
@@ -45,7 +45,6 @@ export function isViewerUrl(u: unknown): u is string {
   } catch {
     return false;
   }
-  const keys = [...url.searchParams.keys()];
   return (
     url.protocol === "http:" &&
     url.hostname === "127.0.0.1" &&
@@ -53,9 +52,8 @@ export function isViewerUrl(u: unknown): u is string {
     url.username === "" &&
     url.password === "" &&
     url.pathname === "/" &&
-    keys.length === 1 &&
-    keys[0] === "t" &&
-    /^[0-9a-f]{64}$/.test(url.searchParams.get("t") ?? "")
+    url.search === "" &&
+    /^#t=[0-9a-f]{64}$/.test(url.hash)
   );
 }
 

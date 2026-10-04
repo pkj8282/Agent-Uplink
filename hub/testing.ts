@@ -89,15 +89,15 @@ export function httpGet(port: number, urlPath: string, headers: Record<string, s
   });
 }
 
-/** 인증된 TCP로 티켓을 받아 세션 쿠키 헤더 값("uplink_viewer=...")을 돌려준다. */
+/** 인증된 TCP로 티켓을 받아(#t=) /session으로 바꾼 세션 값을 돌려준다(데이터 요청에 ?s=로 붙인다). */
 export async function openViewerSession(tcpPort: number): Promise<string> {
   const c = new TestClient(tcpPort); await c.ready();
   const t = await c.req("viewer_ticket");
   c.close();
   if (!t.ok) throw new Error(`viewer_ticket 실패: ${t.error}`);
   const url = new URL(t.url!);
-  const r = await httpGet(Number(url.port), url.pathname + url.search);
-  const m = String(r.headers["set-cookie"]).match(/uplink_viewer=[0-9a-f]{64}/);
-  if (!m) throw new Error("세션 쿠키 없음");
-  return m[0];
+  const ticket = url.hash.slice("#t=".length);
+  const r = await httpGet(Number(url.port), `/session?t=${ticket}`);
+  if (r.status !== 200) throw new Error(`세션 교환 실패: ${r.status}`);
+  return JSON.parse(r.body).session as string;
 }

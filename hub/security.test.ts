@@ -14,12 +14,12 @@ import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-sec-")); }
 const CRLF = String.fromCharCode(13, 10);
 
-function get(port: number, urlPath: string, host: string | null, cookie?: string): Promise<{ status: number; body: string }> {
+function get(port: number, urlPath: string, host: string | null, session?: string): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const headers: Record<string, string> = {};
     if (host !== null) headers.Host = host;
-    if (cookie) headers.Cookie = cookie;
-    const req = http.request({ host: "127.0.0.1", port, path: urlPath, headers, setHost: host !== null }, (res) => {
+    const withSession = session ? `${urlPath}?s=${session}` : urlPath;
+    const req = http.request({ host: "127.0.0.1", port, path: withSession, headers, setHost: host !== null }, (res) => {
       let body = "";
       res.on("data", (d) => {
         body += d;
@@ -36,9 +36,9 @@ test("RT1: DNS rebinding — 공격자 Host로는 /accounts·/events·/ 를 읽�
   const { hub, port: tcpPort } = await startTestHub({ http: true });
   const port = hub.httpAddress.port;
   try {
-    const cookie = await openViewerSession(tcpPort); // 세션이 있어도 Host가 틀리면 403
+    const session = await openViewerSession(tcpPort); // 세션이 있어도 Host가 틀리면 403
     for (const p of ["/accounts", "/events", "/"]) {
-      const r = await get(port, p, `attacker.example:${port}`, cookie);
+      const r = await get(port, p, `attacker.example:${port}`, session);
       assert.equal(r.status, 403, p);
       assert.doesNotMatch(r.body, /uuid|event: init/, p);
     }
@@ -46,9 +46,9 @@ test("RT1: DNS rebinding — 공격자 Host로는 /accounts·/events·/ 를 읽�
     const noHost = await get(port, "/accounts", null);
     assert.ok(noHost.status === 400 || noHost.status === 403, String(noHost.status));
     assert.doesNotMatch(noHost.body, /uuid/);
-    assert.equal((await get(port, "/accounts", `127.0.0.1:${port}`, cookie)).status, 200);
-    assert.equal((await get(port, "/accounts", `localhost:${port}`, cookie)).status, 200);
-    assert.equal((await get(port, "/accounts", `[::1]:${port}`, cookie)).status, 200);
+    assert.equal((await get(port, "/accounts", `127.0.0.1:${port}`, session)).status, 200);
+    assert.equal((await get(port, "/accounts", `localhost:${port}`, session)).status, 200);
+    assert.equal((await get(port, "/accounts", `[::1]:${port}`, session)).status, 200);
   } finally {
     hub.stop();
   }
@@ -78,11 +78,11 @@ test("RT3: 뷰어 응답에 CORS 허용 헤더가 없다(다른 출처 페이지
   const { hub, port: tcpPort } = await startTestHub({ http: true });
   const port = hub.httpAddress.port;
   try {
-    const cookie = await openViewerSession(tcpPort);
-    for (const p of ["/accounts", "/"]) {
+    const session = await openViewerSession(tcpPort);
+    for (const p of ["/accounts", "/", "/session"]) {
       const res = await new Promise<http.IncomingMessage>((resolve) =>
-        http.get({ host: "127.0.0.1", port, path: p, headers: { Origin: "http://evil.example", Cookie: cookie } }, resolve));
-      assert.equal(res.statusCode, 200, p);
+        http.get({ host: "127.0.0.1", port, path: `${p}?s=${session}`, headers: { Origin: "http://evil.example" } }, resolve));
+      assert.equal(res.statusCode, p === "/session" ? 401 : 200, p);
       assert.equal(res.headers["access-control-allow-origin"], undefined, p);
       res.resume();
     }
@@ -208,21 +208,24 @@ test("RT15: 인증하지 않은 연결은 authTimeoutMs 뒤 끊기고, 인증한
   } finally { hub.stop(); }
 });
 
-test("RT11: 쿠키 없이는 /, /events, /accounts가 401이고 데이터가 없다", async () => {
+test("RT11: 세션 없이는 /accounts·/events가 401이고, / 는 데이터 없는 껍데기만 준다", async () => {
   const { hub } = await startTestHub({ http: true });
   const port = hub.httpAddress.port;
   try {
-    for (const p of ["/", "/events", "/accounts"]) {
+    for (const p of ["/events", "/accounts", `/accounts?s=${"a".repeat(64)}`, "/accounts?s=bad"]) {
       const r = await httpGet(port, p);
       assert.equal(r.status, 401, p);
       assert.doesNotMatch(r.body, /uuid|event: init/, p);
     }
-    assert.match((await httpGet(port, "/")).body, /agent-uplink-viewer/);
-    assert.equal((await httpGet(port, "/accounts", { Cookie: `uplink_viewer=${"a".repeat(64)}` })).status, 401);
+    const shell = await httpGet(port, "/");
+    assert.equal(shell.status, 200);
+    assert.match(shell.body, /agent-uplink-viewer/); // 여는 법 안내 포함
+    assert.doesNotMatch(shell.body, /"uuid"/);
+    assert.equal(shell.headers["set-cookie"], undefined);
   } finally { hub.stop(); }
 });
 
-test("티켓 → 302 + HttpOnly·SameSite=Strict 쿠키 → 데이터 열림, 티켓 재사용은 401", async () => {
+test("RT11: 티켓은 URL 조각(#t=)으로 오고, /session에서 1회만 세션으로 바뀌며 쿠키는 쓰지 않는다", async () => {
   const { hub, port } = await startTestHub({ http: true });
   const httpPort = hub.httpAddress.port;
   try {
@@ -231,28 +234,28 @@ test("티켓 → 302 + HttpOnly·SameSite=Strict 쿠키 → 데이터 열림, �
     assert.equal(t.ok, true);
     const url = new URL(t.url!);
     assert.equal(url.host, `127.0.0.1:${httpPort}`);
-    const r = await httpGet(httpPort, url.pathname + url.search);
-    assert.equal(r.status, 302);
-    assert.equal(r.headers.location, "/");
-    const cookie = String(r.headers["set-cookie"]);
-    assert.match(cookie, /uplink_viewer=[0-9a-f]{64}/);
-    assert.match(cookie, /HttpOnly/); assert.match(cookie, /SameSite=Strict/); assert.match(cookie, /Path=\//);
-    const value = cookie.match(/uplink_viewer=[0-9a-f]{64}/)![0];
-    assert.equal((await httpGet(httpPort, "/accounts", { Cookie: value })).status, 200);
-    assert.equal((await httpGet(httpPort, url.pathname + url.search)).status, 401); // 재사용
+    assert.equal(url.search, ""); // 티켓은 서버로 전송되지 않는 조각에만
+    assert.match(url.hash, /^#t=[0-9a-f]{64}$/);
+    const ticket = url.hash.slice(3);
+    const r = await httpGet(httpPort, `/session?t=${ticket}`);
+    assert.equal(r.status, 200);
+    assert.equal(r.headers["cache-control"], "no-store");
+    assert.equal(r.headers["set-cookie"], undefined);
+    const session = JSON.parse(r.body).session;
+    assert.match(session, /^[0-9a-f]{64}$/);
+    assert.equal((await httpGet(httpPort, `/accounts?s=${session}`)).status, 200);
+    assert.equal((await httpGet(httpPort, `/session?t=${ticket}`)).status, 401); // 재사용
     c.close();
   } finally { hub.stop(); }
 });
 
-test("RT17: Hub 재시작 뒤 옛 쿠키는 401 안내 페이지", async () => {
+test("RT17: Hub 재시작 뒤 옛 세션은 401", async () => {
   const first = await startTestHub({ http: true });
-  const cookie = await openViewerSession(first.port);
+  const session = await openViewerSession(first.port);
   first.hub.stop();
   const second = await startTestHub({ http: true, dataDir: first.dataDir });
   try {
-    const r = await httpGet(second.hub.httpAddress.port, "/", { Cookie: cookie });
-    assert.equal(r.status, 401);
-    assert.match(r.body, /다시 열어야/);
+    assert.equal((await httpGet(second.hub.httpAddress.port, `/accounts?s=${session}`)).status, 401);
   } finally { second.hub.stop(); }
 });
 
@@ -279,10 +282,10 @@ test("SSE 동시 연결 상한을 넘으면 503", async () => {
   const { hub, port } = await startTestHub({ http: true, limits: { maxSse: 1 } });
   const httpPort = hub.httpAddress.port;
   try {
-    const cookie = await openViewerSession(port);
-    const first = http.get({ host: "127.0.0.1", port: httpPort, path: "/events", headers: { Cookie: cookie } });
+    const session = await openViewerSession(port);
+    const first = http.get({ host: "127.0.0.1", port: httpPort, path: `/events?s=${session}` });
     await new Promise((r) => first.once("response", r));
-    assert.equal((await httpGet(httpPort, "/events", { Cookie: cookie })).status, 503);
+    assert.equal((await httpGet(httpPort, `/events?s=${session}`)).status, 503);
     first.destroy();
   } finally { hub.stop(); }
 });
@@ -290,8 +293,8 @@ test("SSE 동시 연결 상한을 넘으면 503", async () => {
 test("알 수 없는 경로는 404", async () => {
   const { hub, port } = await startTestHub({ http: true });
   try {
-    const cookie = await openViewerSession(port);
-    assert.equal((await httpGet(hub.httpAddress.port, "/nope", { Cookie: cookie })).status, 404);
+    const session = await openViewerSession(port);
+    assert.equal((await httpGet(hub.httpAddress.port, `/nope?s=${session}`)).status, 404);
   } finally { hub.stop(); }
 });
 

@@ -19,7 +19,7 @@ test("HMAC 증명이 원본과 같다(고정 벡터 포함)", () => {
 
 test("뷰어 URL 검사가 원본과 같다", () => {
   const T = "b".repeat(64);
-  for (const u of [`http://127.0.0.1:47801/?t=${T}`, `http://localhost:47801/?t=${T}`, `http://127.0.0.1:1@evil.example/?t=${T}`, `http://127.0.0.1:47801/?t=${T}&x=1`, "javascript:1"]) {
+  for (const u of [`http://127.0.0.1:47801/#t=${T}`, `http://127.0.0.1:47801/?t=${T}`, `http://localhost:47801/#t=${T}`, `http://127.0.0.1:1@evil.example/#t=${T}`, `http://127.0.0.1:47801/#t=${T}&x=1`, "javascript:1"]) {
     assert.equal(copy.isViewerUrl(u), origIsViewerUrl(u), u);
   }
 });

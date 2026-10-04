@@ -1,8 +1,8 @@
 import net from "node:net";
 import http from "node:http";
 import { encodeFrame, FrameDecoder, FrameTooLargeError } from "../shared/framing.js";
-import { renderViewerHtml, renderUnauthorizedHtml, isAllowedHost } from "./viewer.js";
-import { ViewerAuth, VIEWER_COOKIE } from "./viewerAuth.js";
+import { renderViewerHtml, isAllowedHost } from "./viewer.js";
+import { ViewerAuth } from "./viewerAuth.js";
 import { loadConfig, saveConfig, Config } from "./config.js";
 import { verifyAdminToken } from "./adminKey.js";
 import { secureDataDir, SecureDeps } from "./secure.js";
@@ -189,23 +189,29 @@ export class Hub {
       return;
     }
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    if (url.pathname === "/" && url.searchParams.has("t")) {
-      const session = this.viewerAuth.redeem(url.searchParams.get("t"));
-      if (!session) {
-        this.viewerUnauthorized(res, true);
-        return;
-      }
-      // 주소창에서 티켓을 지운다(302). 쿠키는 스크립트가 읽을 수 없고 다른 사이트 요청에 실리지 않는다.
-      res.writeHead(302, {
-        Location: "/",
-        "Set-Cookie": `${VIEWER_COOKIE}=${session}; HttpOnly; SameSite=Strict; Path=/`,
-        "Cache-Control": "no-store",
-      });
-      res.end();
+    if (url.pathname === "/") {
+      // 뷰어 껍데기(데이터 없음). 페이지 스크립트가 #t= 티켓을 /session으로 바꾸고, 세션이 없으면 여는 법을 안내한다.
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+      res.end(renderViewerHtml());
       return;
     }
-    if (!this.viewerAuth.hasSession(req.headers.cookie)) {
-      this.viewerUnauthorized(res, url.pathname === "/");
+    if (url.pathname === "/session") {
+      const session = this.viewerAuth.redeem(url.searchParams.get("t"));
+      if (!session) {
+        this.viewerUnauthorized(res);
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+      res.end(JSON.stringify({ session }));
+      return;
+    }
+    if (url.pathname !== "/events" && url.pathname !== "/accounts") {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Not Found");
+      return;
+    }
+    if (!this.viewerAuth.hasSession(url.searchParams.get("s"))) {
+      this.viewerUnauthorized(res);
       return;
     }
     if (url.pathname === "/events") {
@@ -225,7 +231,7 @@ export class Hub {
       const drop = () => this.sseClients.delete(res);
       req.on("close", drop);
       res.on("error", drop);
-    } else if (url.pathname === "/accounts") {
+    } else {
       const list = this.accounts.list().map((a) => ({
         uuid: a.uuid,
         name: a.name,
@@ -234,18 +240,12 @@ export class Hub {
       }));
       res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-cache" });
       res.end(JSON.stringify(list));
-    } else if (url.pathname === "/") {
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(renderViewerHtml());
-    } else {
-      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end("Not Found");
     }
   }
 
-  private viewerUnauthorized(res: http.ServerResponse, page: boolean): void {
-    res.writeHead(401, { "Content-Type": page ? "text/html; charset=utf-8" : "text/plain; charset=utf-8", "Cache-Control": "no-store" });
-    res.end(page ? renderUnauthorizedHtml() : "");
+  private viewerUnauthorized(res: http.ServerResponse): void {
+    res.writeHead(401, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" });
+    res.end("");
   }
 
   private pushSse(label: string, m: { ts: number; channelId: string; from: string; fromName: string; text: string }): void {
@@ -437,7 +437,8 @@ export class Hub {
           reply({ ok: false, code: "viewer_unavailable", error: `뷰어가 꺼져 있습니다(포트 ${this.opts.httpPort}를 열지 못함).` });
           return;
         }
-        reply({ ok: true, url: `http://127.0.0.1:${this.httpAddress.port}/?t=${this.viewerAuth.issueTicket()}` });
+        // 티켓은 URL 조각(#)에 둔다 — 서버 요청줄·Referer에 실리지 않는다.
+        reply({ ok: true, url: `http://127.0.0.1:${this.httpAddress.port}/#t=${this.viewerAuth.issueTicket()}` });
         return;
       }
 
