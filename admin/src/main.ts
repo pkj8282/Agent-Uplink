@@ -1,9 +1,10 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AdminClient, resolveAdminTarget, toResult } from "./adminClient.js";
 import { isTrustedFrame } from "./ipcGuard.js";
+import { isViewerUrl } from "./auth.js";
 import type { ConfigPatch, IpcResult } from "./types.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -44,6 +45,12 @@ handle("admin:restoreTrash", (arg) => {
   return toResult(() => client.restoreTrash(asId(a.id), a.confirmRename === true));
 });
 handle("admin:emptyTrash", () => toResult(() => client.emptyTrash()));
+// 뷰어는 같은 Windows 사용자만 열 수 있다: 인증된 Hub에서 1회용 티켓을 받아 기본 브라우저로 연다(형식 검사 후).
+handle("admin:openViewer", () => toResult(async () => {
+  const url = await client.viewerTicket();
+  if (!isViewerUrl(url)) throw new Error("Hub가 잘못된 뷰어 주소를 보냈습니다.");
+  await shell.openExternal(url);
+}));
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({

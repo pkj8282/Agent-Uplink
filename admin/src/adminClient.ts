@@ -2,10 +2,11 @@ import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 import { encodeFrame, FrameDecoder } from "./framing.js";
+import { newNonce, isNonce, clientProof, hubProof, proofEquals, readClientKeyFile } from "./auth.js";
 import type { AdminConfig, ConfigPatch, IpcResult, NameConflict, RestoreReport, Snapshot } from "./types.js";
 
 const HUB_MAGIC = "agent-uplink";
-const HUB_PROTOCOL_VERSION = 2;
+const HUB_PROTOCOL_VERSION = 3;
 export const HUB_DOWN_MESSAGE = "Hub가 실행 중이 아닙니다. 세션을 열거나 Hub를 시작하세요.";
 
 export class HubNotRunningError extends Error {
@@ -18,12 +19,14 @@ export class HubNotRunningError extends Error {
 export interface AdminTarget {
   port: number;
   keyPath: string;
+  /** client.key 경로(v3 핸드셰이크). 생략하면 admin.key와 같은 폴더의 client.key. */
+  clientKeyPath?: string;
 }
 
 /** Hub(hub/options.ts)와 같은 env 규칙으로 접속 포트와 admin.key 경로를 정한다. */
 export function resolveAdminTarget(env: NodeJS.ProcessEnv): AdminTarget {
   const base = env.UPLINK_DATA_DIR ?? path.join(env.PROGRAMDATA ?? ".", "AgentUplink");
-  return { port: Number(env.UPLINK_TCP_PORT ?? 47800), keyPath: path.join(base, "admin.key") };
+  return { port: Number(env.UPLINK_TCP_PORT ?? 47800), keyPath: path.join(base, "admin.key"), clientKeyPath: path.join(base, "client.key") };
 }
 
 export interface AdminClientOptions extends AdminTarget {
@@ -68,6 +71,7 @@ export async function toResult<T>(fn: () => Promise<T>): Promise<IpcResult<T>> {
 export class AdminClient {
   private readonly port: number;
   private readonly keyPath: string;
+  private readonly clientKeyPath: string;
   private readonly timeoutMs: number;
   private readonly host: string;
   private readonly connectTimeoutMs: number;
@@ -75,6 +79,7 @@ export class AdminClient {
   constructor(opts: AdminClientOptions) {
     this.port = opts.port;
     this.keyPath = opts.keyPath;
+    this.clientKeyPath = opts.clientKeyPath ?? path.join(path.dirname(opts.keyPath), "client.key");
     this.timeoutMs = opts.timeoutMs ?? 5000;
     this.host = opts.host ?? "127.0.0.1";
     this.connectTimeoutMs = opts.connectTimeoutMs ?? 10000;
@@ -107,6 +112,11 @@ export class AdminClient {
   async deleteServer(serverId: string): Promise<void> { await this.call("admin_delete_server", { serverId }); }
   async deleteAccount(uuid: string): Promise<void> { await this.call("admin_delete_account", { uuid }); }
 
+  /** 뷰어를 열 1회용 티켓 URL. */
+  async viewerTicket(): Promise<string> {
+    return (await this.call("viewer_ticket", {})).url;
+  }
+
   private async call(op: string, params: object): Promise<Reply> {
     const conn = await this.connect();
     try {
@@ -117,10 +127,13 @@ export class AdminClient {
         if (e instanceof TimeoutError) throw new Error(`${e.message} 포트를 다른 프로그램이 쓰고 있을 수 있습니다.`);
         throw e;
       });
+      if (!hello.ok && hello.code === "secure_setup_failed") throw new Error(`Hub를 시작할 수 없습니다: ${hello.error}`);
       if (hello.magic !== HUB_MAGIC) throw new Error(`포트 ${this.port}의 프로그램은 Agent-Uplink Hub가 아닙니다.`);
       if (hello.version !== HUB_PROTOCOL_VERSION) {
+        if (hello.version === 2) throw new Error("실행 중인 Hub가 구버전(v2.0.1 이하)입니다. Hub를 종료(재시작)한 뒤 새로고침하세요.");
         throw new Error(`포트 ${this.port}의 Agent-Uplink Hub 버전(v${hello.version})이 관리 도구(v${HUB_PROTOCOL_VERSION})와 맞지 않습니다.`);
       }
+      await this.authenticate(conn, hello.nonce);
       const r = await conn.request(op, { token: this.readToken(), ...params }).catch((e: unknown) => {
         if (e instanceof DisconnectedError) throw new Error("요청 도중 Hub 연결이 끊겼습니다. 작업이 적용됐는지 새로고침으로 확인하세요.");
         if (e instanceof TimeoutError) throw new Error(`${e.message} 작업이 Hub에서 이미 처리됐을 수 있습니다. 새로고침으로 확인하세요.`);
@@ -134,6 +147,16 @@ export class AdminClient {
     } finally {
       conn.close();
     }
+  }
+
+  /** v3 핸드셰이크. Hub 증명을 확인하기 전에는 admin 토큰을 보내지 않는다(가짜 Hub에 새지 않게). */
+  private async authenticate(conn: Connection, hubNonce: unknown): Promise<void> {
+    const key = readClientKeyFile(this.clientKeyPath);
+    const notOurs = `포트 ${this.port}의 Hub가 이 Windows 사용자의 Hub가 아닙니다(인증 실패). 다른 사용자가 포트를 점유했거나 UPLINK_DATA_DIR가 Hub와 다를 수 있습니다.`;
+    if (!isNonce(hubNonce)) throw new Error(notOurs);
+    const nonce = newNonce();
+    const r = await conn.request("auth", { nonce, proof: clientProof(key, hubNonce, nonce) }).catch(() => { throw new Error(notOurs); });
+    if (!r.ok || !proofEquals(hubProof(key, hubNonce, nonce), r.proof)) throw new Error(notOurs);
   }
 
   /** 매 호출 다시 읽는다(Hub가 키를 재생성했을 수 있음). */

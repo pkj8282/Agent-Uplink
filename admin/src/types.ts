@@ -59,4 +59,5 @@ export interface AdminApi {
   deleteAccount(uuid: string): Promise<IpcResult<void>>;
   restoreTrash(id: string, confirmRename: boolean): Promise<IpcResult<RestoreReport>>;
   emptyTrash(): Promise<IpcResult<{ removed: number }>>;
+  openViewer(): Promise<IpcResult<void>>;
 }

@@ -236,6 +236,12 @@ for (const b of document.querySelectorAll<HTMLButtonElement>("[data-tab]")) {
 
 byId("refresh").addEventListener("click", () => void refresh());
 
+byId("open-viewer").addEventListener("click", async () => {
+  showOpMsg(null);
+  const r = await window.admin.openViewer();
+  if (!r.ok) showOpMsg({ text: `뷰어를 열지 못했습니다: ${r.error}`, kind: "err" });
+});
+
 function showFormMessage(m: FormMessage): void {
   const msg = byId("config-msg");
   msg.textContent = m.text;

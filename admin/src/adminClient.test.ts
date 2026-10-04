@@ -4,36 +4,17 @@ import net from "node:net";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Hub } from "../../hub/server.js";
+import { startTestHub, TestClient as Raw } from "../../hub/testing.js";
+import { hubProof } from "../../shared/auth.js";
 import { encodeFrame, FrameDecoder } from "./framing.js";
 import { AdminClient, HubNotRunningError, HUB_DOWN_MESSAGE, resolveAdminTarget, toResult } from "./adminClient.js";
 
 function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-admin-")); }
 
-async function startHub(dataDir = tmp()) {
-  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0 });
-  await hub.startTcp();
-  const port = hub.tcpAddress.port;
-  const client = new AdminClient({ port, keyPath: path.join(dataDir, "admin.key"), timeoutMs: 2000 });
-  return { hub, port, dataDir, client };
-}
-
-/** 에이전트 op로 데이터를 심는 원시 클라이언트(연결당 로그인 1개). */
-class Raw {
-  private sock: net.Socket;
-  private dec = new FrameDecoder();
-  private waiters = new Map<number, (r: any) => void>();
-  private id = 0;
-  constructor(port: number) {
-    this.sock = net.connect(port, "127.0.0.1");
-    this.sock.on("data", (d) => this.dec.push(d, (r: any) => this.waiters.get(r.id)?.(r)));
-  }
-  ready(): Promise<void> { return new Promise((res) => this.sock.once("connect", () => res())); }
-  req(op: string, params: object = {}): Promise<any> {
-    const id = ++this.id;
-    return new Promise((resolve) => { this.waiters.set(id, resolve); this.sock.write(encodeFrame({ op, id, ...params })); });
-  }
-  close(): void { this.sock.destroy(); }
+async function startHub(dataDir?: string) {
+  const t = await startTestHub({ dataDir, http: true });
+  const client = new AdminClient({ port: t.port, keyPath: path.join(t.dataDir, "admin.key"), clientKeyPath: path.join(t.dataDir, "client.key"), timeoutMs: 2000 });
+  return { ...t, client };
 }
 
 async function seed(port: number) {
@@ -58,10 +39,12 @@ test("resolveAdminTarget은 Hub와 같은 env 규칙을 따른다", () => {
   assert.deepEqual(resolveAdminTarget({ PROGRAMDATA: "C:\\PD" }), {
     port: 47800,
     keyPath: path.join("C:\\PD", "AgentUplink", "admin.key"),
+    clientKeyPath: path.join("C:\\PD", "AgentUplink", "client.key"),
   });
   assert.deepEqual(resolveAdminTarget({ PROGRAMDATA: "C:\\PD", UPLINK_DATA_DIR: "D:\\data", UPLINK_TCP_PORT: "47900" }), {
     port: 47900,
     keyPath: path.join("D:\\data", "admin.key"),
+    clientKeyPath: path.join("D:\\data", "client.key"),
   });
 });
 
@@ -120,23 +103,24 @@ test("Hub 미실행(접속 거부)과 사용 중 Hub 종료는 HubNotRunningErro
 
 test("admin.key 없음/빈 파일/불일치는 크래시 없이 명확한 에러", async () => {
   const { hub, port, dataDir } = await startHub();
-  const missing = new AdminClient({ port, keyPath: path.join(tmp(), "admin.key"), timeoutMs: 2000 });
+  const clientKeyPath = path.join(dataDir, "client.key"); // 인증은 통과시키고 admin.key 문제만 본다
+  const missing = new AdminClient({ port, clientKeyPath, keyPath: path.join(tmp(), "admin.key"), timeoutMs: 2000 });
   await assert.rejects(missing.snapshot(), /admin\.key/);
   await assert.rejects(missing.snapshot(), /관리 기능이 있는 버전/);
 
   const emptyKey = path.join(tmp(), "admin.key");
   fs.writeFileSync(emptyKey, "  \n");
-  await assert.rejects(new AdminClient({ port, keyPath: emptyKey, timeoutMs: 2000 }).snapshot(), /admin\.key/);
+  await assert.rejects(new AdminClient({ port, clientKeyPath, keyPath: emptyKey, timeoutMs: 2000 }).snapshot(), /admin\.key/);
 
   const wrongKey = path.join(tmp(), "admin.key");
   fs.writeFileSync(wrongKey, "f".repeat(64));
-  const r = await toResult(() => new AdminClient({ port, keyPath: wrongKey, timeoutMs: 2000 }).snapshot());
+  const r = await toResult(() => new AdminClient({ port, clientKeyPath, keyPath: wrongKey, timeoutMs: 2000 }).snapshot());
   assert.deepEqual(r, { ok: false, error: "admin 인증 실패", hubDown: false });
 
   // 키 파일의 앞뒤 공백/개행은 무시한다
   const padded = path.join(tmp(), "admin.key");
   fs.writeFileSync(padded, `\n${fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim()}\r\n`);
-  assert.equal((await new AdminClient({ port, keyPath: padded, timeoutMs: 2000 }).snapshot()).servers.length, 0);
+  assert.equal((await new AdminClient({ port, clientKeyPath, keyPath: padded, timeoutMs: 2000 }).snapshot()).servers.length, 0);
   hub.stop();
 });
 
@@ -176,14 +160,14 @@ test("toResult는 성공은 data로, 일반 에러는 hubDown:false로 감싼다
 });
 
 /** 요청 프레임마다 onFrame을 부르는 가짜 서버(소켓 추적·정리). */
-async function fakeServer(onFrame: (req: any, sock: net.Socket) => void, onConnect?: (sock: net.Socket) => void) {
+async function fakeServer(onFrame: (req: any, sock: net.Socket) => void, onConnect?: (sock: net.Socket) => void, seen?: Buffer[]) {
   const socks = new Set<net.Socket>();
   const srv = net.createServer((s) => {
     socks.add(s);
     s.on("error", () => { /* 무시 */ });
     if (onConnect) { onConnect(s); return; }
     const dec = new FrameDecoder();
-    s.on("data", (d) => dec.push(d, (req: any) => onFrame(req, s)));
+    s.on("data", (d) => { seen?.push(d); dec.push(d, (req: any) => onFrame(req, s)); });
   });
   await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
   return {
@@ -192,17 +176,27 @@ async function fakeServer(onFrame: (req: any, sock: net.Socket) => void, onConne
   };
 }
 
+/** 가짜 Hub용 데이터 폴더: admin.key와 테스트 client.key를 같은 폴더에 둔다(clientKeyPath 기본값 = 같은 폴더). */
+const FAKE_CLIENT_KEY = "c".repeat(64);
+const FAKE_NONCE = "1".repeat(64);
 function keyFile(): string {
-  const p = path.join(tmp(), "admin.key");
+  const d = tmp();
+  fs.writeFileSync(path.join(d, "client.key"), FAKE_CLIENT_KEY);
+  const p = path.join(d, "admin.key");
   fs.writeFileSync(p, "a".repeat(64));
   return p;
 }
 
-const HELLO_OK = { magic: "agent-uplink", version: 2 };
+/** 같은 사용자의 Hub처럼 v3 hello·auth에 답한다(op 단계 동작을 시험하기 위해). 처리했으면 true. */
+function answerHandshake(req: any, s: net.Socket): boolean {
+  if (req.op === "hello") { s.write(encodeFrame({ ok: true, id: req.id, magic: "agent-uplink", version: 3, nonce: FAKE_NONCE })); return true; }
+  if (req.op === "auth") { s.write(encodeFrame({ ok: true, id: req.id, proof: hubProof(FAKE_CLIENT_KEY, FAKE_NONCE, req.nonce) })); return true; }
+  return false;
+}
 
 test("요청 도중 Hub가 끊기면 적용 여부 확인 안내", async () => {
   const f = await fakeServer((req, s) => {
-    if (req.op === "hello") s.write(encodeFrame({ ok: true, id: req.id, ...HELLO_OK }));
+    if (answerHandshake(req, s)) { /* hello·auth */ }
     else s.destroy();
   });
   const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 2000 });
@@ -226,7 +220,7 @@ test("hello 단계 끊김 문구는 종료 중인 Hub 가능성과 새로고침�
 
 test("op 단계 응답 시간 초과는 '이미 처리됐을 수 있음·새로고침' 안내를 붙인다", async () => {
   const f = await fakeServer((req, s) => {
-    if (req.op === "hello") s.write(encodeFrame({ ok: true, id: req.id, ...HELLO_OK }));
+    if (answerHandshake(req, s)) { /* hello·auth */ }
     // op에는 응답하지 않는다
   });
   const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 300 });
@@ -236,7 +230,7 @@ test("op 단계 응답 시간 초과는 '이미 처리됐을 수 있음·새로�
 
 test("구버전 Hub(스냅샷에 trash 없음)면 snapshot.trash는 undefined", async () => {
   const f = await fakeServer((req, s) => {
-    if (req.op === "hello") s.write(encodeFrame({ ok: true, id: req.id, ...HELLO_OK }));
+    if (answerHandshake(req, s)) { /* hello·auth */ }
     else s.write(encodeFrame({ ok: true, id: req.id, config: { maxChannelsPerServer: 30, allowDevDelete: false, inboxMaxBatch: 200 }, snapshotServers: [], snapshotAccounts: [], snapshotDms: [] }));
   });
   const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 1000 });
@@ -248,7 +242,7 @@ test("휴지통: snapshot에 trash가 오고, restoreTrash의 name_conflict는 c
   const { hub, port, client } = await startHub();
   const a = new Raw(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
   const srv = (await a.req("create_server", { name: "S" })).serverId;
-  const ch = (await a.req("create_channel", { serverId: srv, name: "c" })).channelId;
+  const ch = (await a.req("create_channel", { serverId: srv, name: "c" })).channelId!;
   await client.deleteChannel(ch);
   await a.req("create_channel", { serverId: srv, name: "c" });
   const snap = await client.snapshot();
@@ -266,15 +260,50 @@ test("휴지통: snapshot에 trash가 오고, restoreTrash의 name_conflict는 c
 });
 
 test("버전만 다른 Hub는 버전 불일치로 안내", async () => {
-  const f = await fakeServer((req, s) => s.write(encodeFrame({ ok: true, id: req.id, magic: "agent-uplink", version: 3 })));
+  const f = await fakeServer((req, s) => s.write(encodeFrame({ ok: true, id: req.id, magic: "agent-uplink", version: 4 })));
   const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 2000 });
-  await assert.rejects(c.snapshot(), /버전\(v3\)이 관리 도구\(v2\)와 맞지 않습니다/);
+  await assert.rejects(c.snapshot(), /버전\(v4\)이 관리 도구\(v3\)와 맞지 않습니다/);
   f.close();
+});
+
+test("v2 Hub에는 재시작 안내", async () => {
+  const f = await fakeServer((req, s) => s.write(encodeFrame({ ok: true, id: req.id, magic: "agent-uplink", version: 2 })));
+  const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 2000 });
+  await assert.rejects(c.snapshot(), /구버전\(v2\.0\.1 이하\)/);
+  f.close();
+});
+
+test("가짜 Hub(증명 위조)에는 admin 토큰을 보내지 않는다", async () => {
+  const seen: Buffer[] = [];
+  const f = await fakeServer((req, s) => s.write(encodeFrame(req.op === "hello"
+    ? { ok: true, id: req.id, magic: "agent-uplink", version: 3, nonce: "d".repeat(64) }
+    : { ok: true, id: req.id, proof: "e".repeat(64) })), undefined, seen);
+  const keyPath = keyFile();
+  fs.writeFileSync(keyPath, "secret-admin-token");
+  const c = new AdminClient({ port: f.port, keyPath, timeoutMs: 2000 });
+  await assert.rejects(c.snapshot(), /이 Windows 사용자의 Hub가 아닙니다/);
+  assert.equal(Buffer.concat(seen).toString("utf8").includes("secret-admin-token"), false);
+  f.close();
+});
+
+test("보안 준비 실패한 Hub의 사유를 그대로 보여준다", async () => {
+  const f = await fakeServer((req, s) => s.write(encodeFrame({ ok: false, id: req.id, code: "secure_setup_failed", error: "다른 사용자가 만든 항목" })));
+  const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 2000 });
+  await assert.rejects(c.snapshot(), /Hub를 시작할 수 없습니다: 다른 사용자가 만든 항목/);
+  f.close();
+});
+
+test("viewerTicket은 열 수 있는 뷰어 URL을 준다", async () => {
+  const { hub, client } = await startHub();
+  try {
+    const url = await client.viewerTicket();
+    assert.match(url, /^http:\/\/127\.0\.0\.1:\d+\/\?t=[0-9a-f]{64}$/);
+  } finally { hub.stop(); }
 });
 
 test("구버전 Hub(admin op 없음)는 재배포 안내", async () => {
   const f = await fakeServer((req, s) => {
-    if (req.op === "hello") s.write(encodeFrame({ ok: true, id: req.id, ...HELLO_OK }));
+    if (answerHandshake(req, s)) { /* hello·auth */ }
     else s.write(encodeFrame({ ok: false, id: req.id, error: "알 수 없는 op" }));
   });
   const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 2000 });
