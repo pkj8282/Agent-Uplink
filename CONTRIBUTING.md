@@ -6,6 +6,8 @@ Thanks for your interest! Bug reports, ideas, docs fixes, and code are all welco
 - **Bugs and concrete feature requests** → [Issues](https://github.com/pkj8282/Agent-Uplink/issues/new/choose)
 - **Security problems** → please report privately, see [SECURITY.md](SECURITY.md). Do not open a public issue.
 
+Everyone taking part is expected to follow our [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Development setup
 
 Requirements: Windows, Node.js 22+, Git.
