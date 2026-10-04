@@ -331,3 +331,38 @@ test("RT16: wait의 timeoutMs가 숫자가 아니면 기본 대기로 처리한�
     }
   } finally { c.close(); hub.stop(); }
 });
+
+test("RT15: 상한이 무인증 연결로 찼어도 새 연결은 받고, 가장 오래된 무인증 연결을 끊는다(인증된 연결은 유지)", async () => {
+  const { hub, port } = await startTestHub({ limits: { maxConnections: 3 } });
+  try {
+    const authed = new TestClient(port); await authed.ready();
+    const idle1 = new TestClient(port); await idle1.connected();
+    const idle1Closed = idle1.onClose();
+    await new Promise((r) => setTimeout(r, 30));
+    const idle2 = new TestClient(port); await idle2.connected();
+    await new Promise((r) => setTimeout(r, 30));
+    const legit = new TestClient(port); await legit.ready(); // 상한(3) 초과 — 가장 오래된 무인증(idle1)을 밀어낸다
+    await idle1Closed;
+    assert.equal((await legit.req("login", { uuid: "l", name: "L" })).ok, true);
+    assert.equal((await authed.req("login", { uuid: "a", name: "A" })).ok, true);
+    authed.close(); idle2.close(); legit.close();
+  } finally { hub.stop(); }
+});
+
+test("RT15: 연결이 한꺼번에 몰려도 Hub가 들고 있는 연결 수는 상한을 넘지 않는다", async () => {
+  const { hub, port } = await startTestHub({ limits: { maxConnections: 10 } });
+  const socks: net.Socket[] = [];
+  try {
+    for (let i = 0; i < 150; i++) {
+      const s = net.connect(port, "127.0.0.1");
+      s.on("error", () => {});
+      socks.push(s);
+    }
+    await new Promise((r) => setTimeout(r, 800));
+    const open = socks.filter((s) => s.readyState === "open").length;
+    assert.ok(open <= 10, `열린 연결 ${open}개`);
+    const legit = new TestClient(port); await legit.ready(); // 몰린 뒤에도 정상 클라이언트는 들어온다
+    assert.equal((await legit.req("login", { uuid: "z", name: "Z" })).ok, true);
+    legit.close();
+  } finally { for (const s of socks) s.destroy(); hub.stop(); }
+});

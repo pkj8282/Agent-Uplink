@@ -92,6 +92,7 @@ export class Hub {
   private waiters = new Map<string, Set<Waiter>>(); // uuid → 대기자들
   private idleTimer: NodeJS.Timeout | null = null;
   private connStates = new Set<ConnState>();
+  private stateBySock = new Map<net.Socket, ConnState>(); // 삽입 순 = 오래된 순
 
   constructor(opts: HubOptions) {
     this.ready = new Promise<void>((res, rej) => { this.markReady = res; this.markFailed = rej; });
@@ -274,14 +275,24 @@ export class Hub {
 
   private onConnection(sock: net.Socket): void {
     if (this.connections.size >= this.limits.maxConnections) {
-      sock.destroy();
-      return;
+      // 상한이 찼으면 가장 오래된 무인증 연결을 끊고 새 연결을 받는다 — 무인증 연결을 쌓아(웹페이지 포함)
+      // 정상 클라이언트를 막지 못하게. 모두 인증된 연결이면 새 연결을 거부한다.
+      const victim = [...this.stateBySock].find(([v, st]) => !st.authed && !v.destroyed)?.[0];
+      if (!victim) {
+        sock.destroy();
+        return;
+      }
+      // close 이벤트는 비동기라, 기다리지 않고 바로 셈에서 뺀다(몰린 연결이 같은 대상을 거듭 고르지 않게).
+      victim.destroy();
+      this.stateBySock.delete(victim);
+      this.connections.delete(victim);
     }
     this.cancelIdle();
     this.connections.add(sock);
     const dec = new FrameDecoder({ maxFrame: MAX_REQUEST_FRAME });
     const state: ConnState = { uuid: null, waiter: null, sessionToken: null, hubNonce: null, authed: false, closed: false };
     this.connStates.add(state);
+    this.stateBySock.set(sock, state);
     // 인증하지 않은 연결이 자리를 오래 차지하지 못하게 한다. 보안 준비가 늦어도 정상 클라이언트가 잘리지 않도록 준비 완료 시점부터 센다.
     let authTimer: NodeJS.Timeout | null = null;
     this.ready.then(() => {
@@ -310,6 +321,7 @@ export class Hub {
     });
     sock.on("close", () => {
       if (authTimer) clearTimeout(authTimer);
+      this.stateBySock.delete(sock);
       this.connections.delete(sock);
       this.connStates.delete(state);
       if (state.uuid && state.waiter) this.removeWaiter(state.uuid, state.waiter);
