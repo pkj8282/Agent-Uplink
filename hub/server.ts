@@ -3,7 +3,9 @@ import http from "node:http";
 import { encodeFrame, FrameDecoder, FrameTooLargeError } from "../shared/framing.js";
 import { renderViewerHtml, isAllowedHost } from "./viewer.js";
 import { loadConfig, saveConfig, Config } from "./config.js";
-import { loadOrCreateAdminKey, verifyAdminToken } from "./adminKey.js";
+import { verifyAdminToken } from "./adminKey.js";
+import { secureDataDir, SecureDeps } from "./secure.js";
+import { newNonce, isNonce, clientProof, hubProof, proofEquals } from "../shared/auth.js";
 import { ChannelStore } from "./channels.js";
 import { AccountStore } from "./accounts.js";
 import { InboxStore } from "./inbox.js";
@@ -41,6 +43,9 @@ interface ConnState {
   uuid: string | null;
   waiter: Waiter | null;
   sessionToken: string | null;
+  hubNonce: string | null; // hello가 준 nonce(auth 1회에 소진)
+  authed: boolean; // v3 핸드셰이크 통과
+  closed: boolean; // auth 실패로 닫는 중 — 이후 요청 무시
 }
 
 // Hub가 받는 요청 프레임 상한(정상 요청은 수 KB, 메시지 본문 상한 64K자 ≈ 최대 192KB).
@@ -60,7 +65,13 @@ export class Hub {
   protected servers: ServerStore;
   protected trash: TrashStore;
   protected trashOps: TrashOps;
-  private adminKey: string;
+  private adminKey: string | null = null;
+  private clientKey: string | null = null;
+  private isReady = false;
+  /** 보안 준비(secure()) 완료. 실패하면 reject — hello가 사유를 돌려준다. */
+  readonly ready: Promise<void>;
+  private markReady!: () => void;
+  private markFailed!: (e: Error) => void;
   private tcp: net.Server;
   private http: http.Server;
   private sseClients = new Set<http.ServerResponse>();
@@ -70,6 +81,8 @@ export class Hub {
   private connStates = new Set<ConnState>();
 
   constructor(opts: HubOptions) {
+    this.ready = new Promise<void>((res, rej) => { this.markReady = res; this.markFailed = rej; });
+    this.ready.catch(() => { /* 실패는 hello 응답과 index.ts가 다룬다 */ });
     this.opts = opts;
     this.config = loadConfig(opts.dataDir);
     this.channels = new ChannelStore({ dir: opts.dataDir });
@@ -102,9 +115,22 @@ export class Hub {
     }
     // 이전 버전 삭제·크래시로 남은 로그를 휴지통으로(손상된 서버 인덱스면 서버 쪽은 건너뜀 — 손으로 되살릴 여지)
     this.trashOps.sweepOrphans({ servers: !this.servers.sweepBlocked, dm: true });
-    this.adminKey = loadOrCreateAdminKey(opts.dataDir);
     this.tcp = net.createServer((sock) => this.onConnection(sock));
     this.http = http.createServer((req, res) => this.onHttp(req, res));
+  }
+
+  /** 데이터 폴더를 잠그고 키를 준비한다. 끝나야 hello에 답한다. 실패하면 던지고 hello는 secure_setup_failed. */
+  async secure(deps?: SecureDeps): Promise<void> {
+    try {
+      const k = await secureDataDir(this.opts.dataDir, deps);
+      this.clientKey = k.clientKey;
+      this.adminKey = k.adminKey;
+      this.isReady = true;
+      this.markReady();
+    } catch (e) {
+      this.markFailed(e as Error);
+      throw e;
+    }
   }
 
   startTcp(): Promise<void> {
@@ -198,7 +224,7 @@ export class Hub {
     this.cancelIdle();
     this.connections.add(sock);
     const dec = new FrameDecoder({ maxFrame: MAX_REQUEST_FRAME });
-    const state: ConnState = { uuid: null, waiter: null, sessionToken: null };
+    const state: ConnState = { uuid: null, waiter: null, sessionToken: null, hubNonce: null, authed: false, closed: false };
     this.connStates.add(state);
     sock.on("data", (chunk) => {
       try {
@@ -253,17 +279,37 @@ export class Hub {
     };
     const adminAuth = (): boolean => {
       const token = (req as { token?: unknown }).token;
-      if (!verifyAdminToken(this.adminKey, token)) {
+      if (!this.adminKey || !verifyAdminToken(this.adminKey, token)) {
         reply({ ok: false, error: "admin 인증 실패" });
         return false;
       }
       return true;
     };
 
+    if (state.closed) return;
+    if (req.op === "hello") {
+      this.ready.then(
+        () => {
+          if (sock.destroyed || state.closed) return;
+          if (!state.authed) state.hubNonce = newNonce();
+          reply({ ok: true, magic: MAGIC, version: PROTOCOL_VERSION, nonce: state.hubNonce ?? undefined });
+        },
+        (e: Error) => {
+          if (!sock.destroyed) reply({ ok: false, code: "secure_setup_failed", error: e.message });
+        },
+      );
+      return;
+    }
+    if (req.op === "auth") {
+      this.handleAuth(sock, state, req as { nonce?: unknown; proof?: unknown }, reply);
+      return;
+    }
+    if (!state.authed) {
+      reply({ ok: false, code: "auth_required", error: "먼저 인증하세요(Hub 프로토콜 v3)." });
+      return;
+    }
+
     switch (req.op) {
-      case "hello":
-        reply({ ok: true, magic: MAGIC, version: PROTOCOL_VERSION });
-        return;
 
       case "login": {
         if (typeof req.uuid !== "string" || req.uuid.length === 0) {
@@ -320,7 +366,7 @@ export class Hub {
       }
 
       case "list_accounts": {
-        // 역할 선택 전에도 누가 있는지 볼 수 있도록 로그인 불필요(로컬 전용).
+        // 역할 선택 전에도 누가 있는지 볼 수 있도록 로그인은 불필요(인증된 연결만).
         reply({ ok: true, accounts: this.accounts.list().map((a) => ({ ...a, online: this.isOnline(a.uuid) })) });
         return;
       }
@@ -656,6 +702,29 @@ export class Hub {
         reply({ ok: false, error: "알 수 없는 op" });
         return;
     }
+  }
+
+  /** v3 핸드셰이크 2단계. 연결당 1회 — 틀리면 응답 후 연결을 끊는다. */
+  private handleAuth(sock: net.Socket, state: ConnState, q: { nonce?: unknown; proof?: unknown }, reply: (res: Omit<Response, "id">) => void): void {
+    if (state.authed) {
+      reply({ ok: false, code: "already_authed", error: "이미 인증된 연결입니다." });
+      return;
+    }
+    const hubNonce = state.hubNonce;
+    if (!hubNonce || !this.clientKey) {
+      reply({ ok: false, code: "auth_required", error: "먼저 hello를 보내세요." });
+      return;
+    }
+    state.hubNonce = null;
+    if (!isNonce(q.nonce) || !proofEquals(clientProof(this.clientKey, hubNonce, q.nonce), q.proof)) {
+      reply({ ok: false, code: "auth_failed", error: "인증 실패" });
+      state.closed = true;
+      sock.end();
+      setTimeout(() => sock.destroy(), 1000).unref();
+      return;
+    }
+    state.authed = true;
+    reply({ ok: true, proof: hubProof(this.clientKey, hubNonce, q.nonce) });
   }
 
   /** 계정 인박스에서 커서 이후를 상한까지 꺼내고 커서를 전진시킨다. */

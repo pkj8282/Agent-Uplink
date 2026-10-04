@@ -10,27 +10,11 @@ import { Response } from "../shared/protocol.js";
 
 function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-tops-")); }
 
-class Client {
-  private sock: net.Socket;
-  private dec = new FrameDecoder();
-  private waiters = new Map<number, (r: Response) => void>();
-  private id = 0;
-  constructor(port: number) {
-    this.sock = net.connect(port, "127.0.0.1");
-    this.sock.on("data", (d) => this.dec.push(d, (r: Response) => this.waiters.get(r.id)?.(r)));
-  }
-  ready(): Promise<void> { return new Promise((res) => this.sock.once("connect", () => res())); }
-  req(op: string, params: object = {}): Promise<Response> {
-    const id = ++this.id;
-    return new Promise((resolve) => { this.waiters.set(id, resolve); this.sock.write(encodeFrame({ op, id, ...params })); });
-  }
-  close(): void { this.sock.destroy(); }
-}
+import { startTestHub, TestClient as Client } from "./testing.js";
 
 async function startHub(dataDir = tmp()) {
-  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0 });
-  await hub.startTcp();
-  return { hub, port: hub.tcpAddress.port, dataDir, token: fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim() };
+  const { hub, port } = await startTestHub({ dataDir });
+  return { hub, port, dataDir, token: fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim() };
 }
 
 function trashMetas(dataDir: string): any[] {

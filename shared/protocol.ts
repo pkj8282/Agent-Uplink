@@ -1,6 +1,6 @@
 // v2 프로토콜 상수와 타입.
 export const MAGIC = "agent-uplink";
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 export const DEFAULT_TCP_PORT = 47800;
 export const DEFAULT_HTTP_PORT = 47801;
 export const LOBBY_CHANNEL_ID = "lobby";
@@ -79,6 +79,8 @@ export interface RestoreReport {
 
 export type Request =
   | { op: "hello"; id: number }
+  | { op: "auth"; id: number; nonce: string; proof: string }
+  | { op: "viewer_ticket"; id: number }
   | { op: "login"; id: number; uuid: string; name?: string; exclusive?: boolean; sessionToken?: string }
   | { op: "set_profile"; id: number; description: string }
   | { op: "account_status"; id: number; uuids: string[] }
@@ -110,6 +112,9 @@ export interface Response {
   id: number;
   magic?: string;
   version?: number;
+  nonce?: string; // hello
+  proof?: string; // auth
+  url?: string; // viewer_ticket
   uuid?: string;
   name?: string;
   accounts?: AccountInfo[];

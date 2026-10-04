@@ -5,23 +5,18 @@ import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
-import { Hub } from "./server.js";
+import { startTestHub, TestClient } from "./testing.js";
 
 function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-rec-")); }
 
-function client(port: number): Promise<(op: string, p?: object) => Promise<any>> {
-  return new Promise((resolve) => {
-    const sock = net.connect(port, "127.0.0.1");
-    const dec = new FrameDecoder(); const waiters = new Map<number, (r: any) => void>(); let id = 0;
-    sock.on("data", (d) => dec.push(d, (r: any) => waiters.get(r.id)?.(r)));
-    sock.once("connect", () => resolve((op, p = {}) => new Promise((res) => { const i = ++id; waiters.set(i, res); sock.write(encodeFrame({ op, id: i, ...p })); })));
-  });
+async function client(port: number): Promise<(op: string, p?: object) => Promise<any>> {
+  const c = new TestClient(port); await c.ready();
+  return (op, p = {}) => c.req(op, p);
 }
 
 async function boot(dataDir: string) {
-  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0 });
-  await hub.startTcp();
-  return { hub, port: hub.tcpAddress.port };
+  const { hub, port } = await startTestHub({ dataDir });
+  return { hub, port };
 }
 
 const A = "aaaaaaaa-0000-4000-8000-000000000001";

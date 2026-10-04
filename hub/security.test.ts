@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { Hub } from "./server.js";
+import { startTestHub, TestClient } from "./testing.js";
 import { isAllowedHost, renderViewerHtml } from "./viewer.js";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 
@@ -31,8 +32,7 @@ function get(port: number, urlPath: string, host: string | null): Promise<{ stat
 }
 
 test("RT1: DNS rebinding — 공격자 Host로는 /accounts·/events·/ 를 읽을 수 없다(403)", async () => {
-  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir: tmp(), idleShutdownMs: 0 });
-  await hub.startTcp(); await hub.startHttp();
+  const { hub } = await startTestHub({ http: true });
   const port = hub.httpAddress.port;
   try {
     for (const p of ["/accounts", "/events", "/"]) {
@@ -53,9 +53,7 @@ test("RT1: DNS rebinding — 공격자 Host로는 /accounts·/events·/ 를 읽�
 });
 
 test("RT2: HTTP 요청 바이트로는 TCP op가 실행되지 않는다(교차 프로토콜)", async () => {
-  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir: tmp(), idleShutdownMs: 0 });
-  await hub.startTcp();
-  const port = hub.tcpAddress.port;
+  const { hub, port } = await startTestHub();
   try {
     const body = Buffer.concat([
       encodeFrame({ op: "login", id: 1, uuid: "rt2-attacker", name: "공격자" }),
@@ -65,20 +63,17 @@ test("RT2: HTTP 요청 바이트로는 TCP op가 실행되지 않는다(교차 �
     await new Promise<void>((resolve) => {
       const s = net.connect(port, "127.0.0.1", () => { s.write(Buffer.concat([head, body])); setTimeout(() => { s.destroy(); resolve(); }, 300); });
     });
-    const list = await new Promise<any>((resolve) => {
-      const s = net.connect(port, "127.0.0.1", () => s.write(encodeFrame({ op: "list_accounts", id: 1 })));
-      const dec = new FrameDecoder();
-      s.on("data", (d) => dec.push(d, (r: any) => { resolve(r); s.destroy(); }));
-    });
-    assert.equal(list.accounts.some((a: any) => a.uuid === "rt2-attacker"), false);
+    const c = new TestClient(port); await c.ready();
+    const list = await c.req("list_accounts");
+    c.close();
+    assert.equal(list.accounts!.some((a: any) => a.uuid === "rt2-attacker"), false);
   } finally {
     hub.stop();
   }
 });
 
 test("RT3: 뷰어 응답에 CORS 허용 헤더가 없다(다른 출처 페이지가 읽을 수 없음)", async () => {
-  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir: tmp(), idleShutdownMs: 0 });
-  await hub.startTcp(); await hub.startHttp();
+  const { hub } = await startTestHub({ http: true });
   const port = hub.httpAddress.port;
   try {
     for (const p of ["/accounts", "/"]) {
@@ -97,21 +92,19 @@ test("RT4: 뷰어는 사용자 데이터를 HTML로 해석해 넣지 않는다",
 });
 
 test("RT6: junction 항목에 대한 restore/empty op는 바깥 폴더를 건드리지 않는다", async () => {
-  const dataDir = tmp();
-  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0 });
-  await hub.startTcp();
-  const port = hub.tcpAddress.port;
+  const { hub, port, dataDir } = await startTestHub();
   try {
     const token = fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim();
     const victim = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-victim-"));
     const id = "1759500000000-channel-deadbeef";
     fs.writeFileSync(path.join(victim, "meta.json"), JSON.stringify({ v: 1, id, kind: "channel", state: "done", deletedAt: 1, deletedBy: "admin", name: "x", files: [] }));
     fs.symlinkSync(victim, path.join(dataDir, "trash", id), "junction");
-    const call = (op: string, p: object) => new Promise<any>((resolve) => {
-      const s = net.connect(port, "127.0.0.1", () => s.write(encodeFrame({ op, id: 1, token, ...p })));
-      const dec = new FrameDecoder();
-      s.on("data", (d) => dec.push(d, (r: any) => { resolve(r); s.destroy(); }));
-    });
+    const call = async (op: string, p: object) => {
+      const c = new TestClient(port); await c.ready();
+      const r = await c.req(op, { token, ...p });
+      c.close();
+      return r;
+    };
     assert.equal((await call("admin_restore_trash", { trashId: id })).code, "trash_missing");
     await call("admin_empty_trash", {});
     assert.equal(fs.existsSync(path.join(victim, "meta.json")), true);
@@ -121,9 +114,7 @@ test("RT6: junction 항목에 대한 restore/empty op는 바깥 폴더를 건드
 });
 
 test("RT7: 1 MiB를 넘는 길이를 선언한 연결(HTTP POST 바이트)은 즉시 끊기고 Hub는 계속 응답한다", async () => {
-  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir: tmp(), idleShutdownMs: 0 });
-  await hub.startTcp();
-  const port = hub.tcpAddress.port;
+  const { hub, port } = await startTestHub();
   try {
     const closed = await new Promise<boolean>((resolve) => {
       const s = net.connect(port, "127.0.0.1", () => s.write(["POST / HTTP/1.1", "Host: x", "", ""].join(CRLF)));
@@ -144,20 +135,14 @@ test("RT7: 1 MiB를 넘는 길이를 선언한 연결(HTTP POST 바이트)은 �
 });
 
 test("send는 65536자를 넘는 메시지를 거부한다", async () => {
-  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir: tmp(), idleShutdownMs: 0 });
-  await hub.startTcp();
-  const port = hub.tcpAddress.port;
+  const { hub, port } = await startTestHub();
   try {
+    const c = new TestClient(port); await c.ready();
     const replies: any[] = [];
-    await new Promise<void>((resolve) => {
-      const s = net.connect(port, "127.0.0.1", () => {
-        s.write(encodeFrame({ op: "login", id: 1, uuid: "u-long", name: "L" }));
-        s.write(encodeFrame({ op: "send", id: 2, channelId: "lobby", text: "가".repeat(65537) }));
-        s.write(encodeFrame({ op: "send", id: 3, channelId: "lobby", text: "가".repeat(65536) }));
-      });
-      const dec = new FrameDecoder();
-      s.on("data", (d) => dec.push(d, (r: any) => { replies.push(r); if (replies.length === 3) { s.destroy(); resolve(); } }));
-    });
+    replies.push(await c.req("login", { uuid: "u-long", name: "L" }));
+    replies.push(await c.req("send", { channelId: "lobby", text: "가".repeat(65537) }));
+    replies.push(await c.req("send", { channelId: "lobby", text: "가".repeat(65536) }));
+    c.close();
     assert.equal(replies[1].ok, false);
     assert.match(replies[1].error, /65536/);
     assert.equal(replies[2].ok, true);
@@ -167,20 +152,13 @@ test("send는 65536자를 넘는 메시지를 거부한다", async () => {
 });
 
 test("login uuid에 경로 조작이 있으면 거부하고 데이터 폴더 밖에 계정 파일을 만들지 않는다", async () => {
-  const dataDir = tmp();
-  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0 });
-  await hub.startTcp();
-  const port = hub.tcpAddress.port;
+  const { hub, port, dataDir } = await startTestHub();
   try {
+    const c = new TestClient(port); await c.ready();
     const replies: any[] = [];
-    await new Promise<void>((resolve) => {
-      const s = net.connect(port, "127.0.0.1", () => {
-        s.write(encodeFrame({ op: "login", id: 1, uuid: "../../escaped-account", name: "x" }));
-        s.write(encodeFrame({ op: "login", id: 2, uuid: "ok-account_1.a", name: "y" }));
-      });
-      const dec = new FrameDecoder();
-      s.on("data", (d) => dec.push(d, (r: any) => { replies.push(r); if (replies.length === 2) { s.destroy(); resolve(); } }));
-    });
+    replies.push(await c.req("login", { uuid: "../../escaped-account", name: "x" }));
+    replies.push(await c.req("login", { uuid: "ok-account_1.a", name: "y" }));
+    c.close();
     assert.equal(replies[0].ok, false);
     assert.equal(fs.existsSync(path.join(dataDir, "..", "escaped-account.json")), false);
     assert.equal(replies[1].ok, true); // 기존 형식(영숫자·-·_·.)은 그대로 허용

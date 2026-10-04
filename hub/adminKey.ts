@@ -1,20 +1,6 @@
-import fs from "node:fs";
-import path from "node:path";
-import { randomBytes, timingSafeEqual } from "node:crypto";
-import { writeFileAtomic } from "./fsutil.js";
+import { timingSafeEqual } from "node:crypto";
 
-export function loadOrCreateAdminKey(dir: string): string {
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, "admin.key");
-  if (fs.existsSync(file)) {
-    const t = fs.readFileSync(file, "utf8").trim();
-    if (t) return t;
-  }
-  const key = randomBytes(32).toString("hex");
-  writeFileAtomic(file, key);
-  return key;
-}
-
+// admin.key 생성은 secure.ts(보안 준비)가 맡는다. 여기서는 토큰 비교만.
 export function verifyAdminToken(expected: string, got: unknown): boolean {
   if (typeof got !== "string") return false;
   const a = Buffer.from(expected, "utf8");

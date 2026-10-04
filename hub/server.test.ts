@@ -10,35 +10,102 @@ import { Response } from "../shared/protocol.js";
 
 function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-hub-")); }
 
-class Client {
-  private sock: net.Socket;
-  private dec = new FrameDecoder();
-  private waiters = new Map<number, (r: Response) => void>();
-  private id = 0;
-  constructor(port: number) {
-    this.sock = net.connect(port, "127.0.0.1");
-    this.sock.on("data", (d) => this.dec.push(d, (r: Response) => this.waiters.get(r.id)?.(r)));
-  }
-  ready(): Promise<void> { return new Promise((res) => this.sock.once("connect", () => res())); }
-  req(op: string, params: object = {}): Promise<Response> {
-    const id = ++this.id;
-    return new Promise((resolve) => { this.waiters.set(id, resolve); this.sock.write(encodeFrame({ op, id, ...params })); });
-  }
-  close(): void { this.sock.destroy(); }
-}
+import { startTestHub, TestClient as Client, TEST_SECURE_DEPS } from "./testing.js";
+import { newNonce, clientProof, hubProof, proofEquals } from "../shared/auth.js";
+import { readClientKey } from "../shared/clientKey.js";
 
-async function startHub(dataDir = tmp()) {
-  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0 });
-  await hub.startTcp();
-  return { hub, port: hub.tcpAddress.port, dataDir };
-}
+async function startHub(dataDir?: string) { return startTestHub({ dataDir }); }
 
-test("hello는 매직과 버전2를 준다", async () => {
+test("hello는 매직·버전3·nonce를 준다(인증 전에도)", async () => {
   const { hub, port } = await startHub();
-  const c = new Client(port); await c.ready();
+  const c = new Client(port); await c.connected();
   const r = await c.req("hello");
   assert.equal(r.magic, "agent-uplink");
-  assert.equal(r.version, 2);
+  assert.equal(r.version, 3);
+  assert.match(r.nonce!, /^[0-9a-f]{64}$/);
+  c.close(); hub.stop();
+});
+
+test("RT10: 인증 전에는 hello·auth 외 모든 op가 auth_required", async () => {
+  const { hub, port } = await startHub();
+  const c = new Client(port); await c.connected();
+  for (const op of ["list_accounts", "account_status", "login", "check", "read", "send", "viewer_ticket", "admin_snapshot", "없는op"]) {
+    const r = await c.req(op, { uuid: "u1", uuids: ["u1"], channelId: "lobby", text: "x" });
+    assert.equal(r.ok, false, op);
+    assert.equal(r.code, "auth_required", op);
+  }
+  c.close(); hub.stop();
+});
+
+test("hello 전에 auth하면 auth_required, hello 없이 보낸 login도 auth_required(파이프라이닝)", async () => {
+  const { hub, port } = await startHub();
+  const c = new Client(port); await c.connected();
+  const [a, b] = await Promise.all([c.req("auth", { nonce: newNonce(), proof: newNonce() }), c.req("login", { uuid: "u1" })]);
+  assert.equal(a.code, "auth_required");
+  assert.equal(b.code, "auth_required");
+  c.close(); hub.stop();
+});
+
+test("올바른 증명이면 Hub 증명을 돌려주고 op가 열린다", async () => {
+  const { hub, port, dataDir } = await startHub();
+  const c = new Client(port); await c.connected();
+  const h = await c.req("hello");
+  const key = readClientKey(dataDir); const n = newNonce();
+  const r = await c.req("auth", { nonce: n, proof: clientProof(key, h.nonce!, n) });
+  assert.equal(r.ok, true);
+  assert.ok(proofEquals(hubProof(key, h.nonce!, n), r.proof));
+  assert.equal((await c.req("login", { uuid: "u1", name: "A" })).ok, true);
+  assert.equal((await c.req("auth", { nonce: n, proof: "0".repeat(64) })).code, "already_authed");
+  c.close(); hub.stop();
+});
+
+test("틀린 증명은 auth_failed 후 연결을 끊는다", async () => {
+  const { hub, port } = await startHub();
+  const c = new Client(port); await c.connected();
+  await c.req("hello");
+  const closed = c.onClose();
+  const r = await c.req("auth", { nonce: newNonce(), proof: "0".repeat(64) });
+  assert.equal(r.code, "auth_failed");
+  await closed;
+  hub.stop();
+});
+
+test("다른 연결의 증명을 재전송해도 통하지 않는다(nonce가 연결마다 다름)", async () => {
+  const { hub, port, dataDir } = await startHub();
+  const key = readClientKey(dataDir);
+  const a = new Client(port); await a.connected();
+  const ha = await a.req("hello"); const n = newNonce(); const proof = clientProof(key, ha.nonce!, n);
+  const b = new Client(port); await b.connected();
+  await b.req("hello");
+  assert.equal((await b.req("auth", { nonce: n, proof })).code, "auth_failed");
+  a.close(); b.close(); hub.stop();
+});
+
+test("보안 준비 전 hello는 준비가 끝날 때까지 기다렸다 답한다", async () => {
+  const dataDir = tmp();
+  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0 });
+  await hub.startTcp();
+  const c = new Client(hub.tcpAddress.port, dataDir); await c.connected();
+  let answered = false;
+  const p = c.req("hello").then((r) => { answered = true; return r; });
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(answered, false);
+  await hub.secure(TEST_SECURE_DEPS);
+  assert.equal((await p).version, 3);
+  c.close(); hub.stop();
+});
+
+test("보안 준비 실패 시 hello는 secure_setup_failed와 사유를 준다", async () => {
+  const dataDir = tmp();
+  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0 });
+  await hub.startTcp();
+  const c = new Client(hub.tcpAddress.port, dataDir); await c.connected();
+  const p = c.req("hello");
+  await assert.rejects(hub.secure({ ...TEST_SECURE_DEPS, platform: "win32", restrictAcl: async () => ({ ok: false, error: "막힘" }) }));
+  const r = await p;
+  assert.equal(r.ok, false);
+  assert.equal(r.code, "secure_setup_failed");
+  assert.match(r.error!, /막힘/);
   c.close(); hub.stop();
 });
 

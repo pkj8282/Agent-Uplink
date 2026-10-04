@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import { Hub } from "./server.js";
 import { resolveOptions, explainStartupError } from "./options.js";
-import { restrictDataDirAcl } from "./acl.js";
 
 async function main(): Promise<void> {
   const opts = resolveOptions(process.env);
   let hub: Hub;
   try {
+    fs.mkdirSync(opts.dataDir, { recursive: true });
     hub = new Hub(opts);
   } catch (e) {
     process.stderr.write(`${explainStartupError(e, opts.dataDir)}\n`);
@@ -24,21 +24,19 @@ async function main(): Promise<void> {
   }
   await hub.startHttp();
 
-  // 같은 PC의 다른 Windows 사용자가 admin.key·대화 로그를 읽지 못하게 데이터 폴더를 현재 사용자 전용으로(멱등).
-  // 포트를 연 뒤 비동기로 실행해 MCP의 접속 재시도 한도 안에 기동이 끝나게 한다.
-  void restrictDataDirAcl(opts.dataDir).then((acl) => {
-    if (!acl.ok) process.stderr.write(`경고: 데이터 폴더 권한을 제한하지 못했습니다: ${acl.error}\n`);
-  });
+  // 포트는 먼저 열어 MCP 접속 재시도 한도를 지키고, hello는 보안 준비(권한 잠금·소유자 검사·키)가 끝난 뒤에만 답한다.
+  try {
+    await hub.secure();
+  } catch (e) {
+    process.stderr.write(`Hub 보안 준비 실패(종료합니다): ${(e as Error).message}\n`);
+    setTimeout(() => process.exit(1), 1000); // 대기 중인 hello에 사유를 보낼 시간
+    return;
+  }
 
   try {
-    fs.mkdirSync(opts.dataDir, { recursive: true });
     fs.writeFileSync(
       opts.infoPath,
-      JSON.stringify(
-        { tcpPort: opts.tcpPort, httpPort: opts.httpPort, pid: process.pid, startedAt: Date.now() },
-        null,
-        2,
-      ),
+      JSON.stringify({ tcpPort: opts.tcpPort, httpPort: opts.httpPort, pid: process.pid, startedAt: Date.now() }, null, 2),
     );
   } catch {
     // 정보 파일 실패는 치명적이지 않다
