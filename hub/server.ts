@@ -643,7 +643,9 @@ export class Hub {
           reply({ ok: true, items: now });
           return;
         }
-        const timeoutMs = Math.min(Math.max(req.timeoutMs ?? 30000, 1000), 120000);
+        // 숫자가 아닌 값(문자열·null·NaN·무한대)이면 기본 30초 — Math.max(NaN)이 즉시 응답이 되지 않게.
+        const asked = typeof req.timeoutMs === "number" && Number.isFinite(req.timeoutMs) ? req.timeoutMs : 30000;
+        const timeoutMs = Math.min(Math.max(asked, 1000), 120000);
         if (state.waiter) {
           this.removeWaiter(uuid, state.waiter);
           state.waiter = null;

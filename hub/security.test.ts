@@ -294,3 +294,40 @@ test("알 수 없는 경로는 404", async () => {
     assert.equal((await httpGet(hub.httpAddress.port, "/nope", { Cookie: cookie })).status, 404);
   } finally { hub.stop(); }
 });
+
+test("RT16: 인증된 연결에서 모든 op에 이상한 값을 넣어도 Hub는 죽지 않고 각 요청에 답한다", async () => {
+  const { hub, port } = await startTestHub({ http: true });
+  const OPS = ["login", "set_profile", "account_status", "whoami", "set_name", "list_accounts", "send", "read", "check",
+    "open_dm", "list_dms", "create_server", "list_servers", "create_channel", "list_channels", "delete_channel", "delete_server",
+    "viewer_ticket", "admin_snapshot", "admin_set_config", "admin_delete_channel", "admin_delete_server", "admin_delete_account",
+    "admin_restore_trash", "admin_empty_trash", "auth", "hello"];
+  const FIELDS = ["uuid", "name", "description", "uuids", "channelId", "text", "limit", "peer", "serverId", "token", "patch", "trashId", "confirmRename", "exclusive", "sessionToken", "nonce", "proof"];
+  const VALUES: unknown[] = [null, 0, -1, 1e308, "", "x".repeat(100000), [], [1, "a"], {}, true, "../../x", "lobby"];
+  const c = new TestClient(port); await c.ready();
+  await c.req("login", { uuid: "fuzz", name: "F" });
+  const timeout = (ms: number) => new Promise<"timeout">((r) => setTimeout(() => r("timeout"), ms));
+  const silent: string[] = [];
+  try {
+    for (const op of OPS) for (const f of FIELDS) for (const v of VALUES) {
+      const r = await Promise.race([c.req(op, { [f]: v }), timeout(2000)]);
+      if (r === "timeout") silent.push(`${op}.${f}=${typeof v}`);
+      else assert.equal(typeof (r as any).ok, "boolean", `${op}.${f}`);
+    }
+    assert.deepEqual(silent, []);
+    const probe = new TestClient(port); await probe.ready();
+    assert.equal((await probe.req("whoami")).ok, false); // 로그인 안 한 새 연결 — Hub 생존 확인
+    probe.close();
+  } finally { c.close(); hub.stop(); }
+});
+
+test("RT16: wait의 timeoutMs가 숫자가 아니면 기본 대기로 처리한다(즉시 빈 응답이 아님)", async () => {
+  const { hub, port } = await startTestHub();
+  const c = new TestClient(port); await c.ready();
+  await c.req("login", { uuid: "w", name: "W" });
+  try {
+    for (const bad of ["x", null, {}, 1e308, -5]) {
+      const r = await Promise.race([c.req("wait", { timeoutMs: bad }), new Promise<"pending">((res) => setTimeout(() => res("pending"), 300))]);
+      assert.equal(r, "pending", String(bad)); // 최소 1초 이상 기다린다
+    }
+  } finally { c.close(); hub.stop(); }
+});
