@@ -8,6 +8,8 @@ import type { ConfigPatch, IpcResult } from "./types.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const indexFile = path.join(here, "renderer", "index.html");
+// 창·작업 표시줄 아이콘(logo.svg → build/icon.png, 빌드 때 dist로 복사됨). exe 아이콘은 electron-builder의 win.icon.
+const windowIcon = path.join(here, "icon.png");
 const client = new AdminClient(resolveAdminTarget(process.env));
 let mainWindow: BrowserWindow | null = null;
 
@@ -45,6 +47,7 @@ handle("admin:emptyTrash", () => toResult(() => client.emptyTrash()));
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
+    icon: windowIcon,
     width: 980,
     height: 700,
     minWidth: 720,
@@ -137,6 +140,9 @@ function runSmoke(win: BrowserWindow, outFile: string): void {
     }
   });
 }
+
+// 작업 표시줄이 이 앱 창을 같은 앱(같은 아이콘)으로 묶도록 appId와 같은 값을 쓴다.
+app.setAppUserModelId("dev.agentuplink.admin");
 
 void app.whenReady().then(() => {
   const win = createWindow();

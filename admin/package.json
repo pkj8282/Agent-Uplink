@@ -31,6 +31,7 @@
     ],
     "win": {
       "target": "portable",
+      "icon": "build/icon.ico",
       "signAndEditExecutable": true
     },
     "portable": {
