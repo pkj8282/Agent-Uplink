@@ -17,12 +17,13 @@ const ADMINS_SID = "*S-1-5-32-544";
 // 명시적으로 남아 있을 수 있는 넓은 그룹: Users, Authenticated Users, Everyone
 const BROAD_SIDS = ["*S-1-5-32-545", "*S-1-5-11", "*S-1-1-0"];
 
-async function currentUserSid(): Promise<string> {
+/** 현재 Windows 사용자 SID("S-1-5-21-..."). */
+export async function currentUserSid(): Promise<string> {
   // "도메인\사용자","S-1-5-21-..." 형태(CSV, 머리글 없음)
   const { stdout } = await run(WHOAMI, ["/user", "/fo", "csv", "/nh"], { encoding: "utf8", timeout: 10000, windowsHide: true });
   const m = stdout.match(/"(S-1-[0-9-]+)"/);
   if (!m) throw new Error(`현재 사용자 SID를 알 수 없습니다: ${stdout.trim()}`);
-  return `*${m[1]}`;
+  return m[1];
 }
 
 /**
@@ -34,7 +35,7 @@ export async function restrictDataDirAcl(dir: string): Promise<{ ok: boolean; er
   if (process.platform !== "win32") return { ok: true };
   try {
     if (!fs.statSync(dir).isDirectory()) return { ok: false, error: `폴더가 아닙니다: ${dir}` };
-    const user = await currentUserSid();
+    const user = `*${await currentUserSid()}`;
     await run(
       ICACLS,
       [
