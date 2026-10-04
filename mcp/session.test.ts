@@ -6,21 +6,30 @@ import path from "node:path";
 import net from "node:net";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 import { Hub } from "../hub/server.js";
+import { TEST_SECURE_DEPS, registerTestHub, TestClient } from "../hub/testing.js";
+import { hubProof } from "../shared/auth.js";
 import { HubClient } from "./hubClient.js";
 import { RoleStore } from "./roles.js";
 import { AccountSession } from "./session.js";
 
 function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-sess-")); }
 
+/** 포트 → 그 Hub의 데이터 폴더(client.key 위치). 세션 클라이언트가 같은 키로 인증하게 한다. */
+const hubDirs = new Map<number, string>();
+
 async function startHub(tcpPort = 0, dataDir = tmp()) {
   const hub = new Hub({ tcpPort, httpPort: 0, dataDir, idleShutdownMs: 0 });
   await hub.startTcp();
-  return { hub, port: hub.tcpAddress.port, dataDir };
+  await hub.secure(TEST_SECURE_DEPS);
+  const port = hub.tcpAddress.port;
+  hubDirs.set(port, dataDir);
+  registerTestHub(port, dataDir);
+  return { hub, port, dataDir };
 }
 
 /** 역할 세션 하나(= MCP 프로세스 하나). Hub는 이미 떠 있으므로 spawn하지 않는다. */
 function session(port: number, roleDir: string, cwd = "C:\\Proj", env?: string) {
-  const client = new HubClient({ port, hubEntry: "nonexistent-should-not-spawn.js" });
+  const client = new HubClient({ port, dataDir: hubDirs.get(port), hubEntry: "nonexistent-should-not-spawn.js" });
   return { client, s: new AccountSession(client, new RoleStore({ dataDir: roleDir, cwd, env })) };
 }
 
@@ -104,7 +113,7 @@ test("잘못된 역할 이름은 거부되고 env 고정 역할은 env UUID를 �
 
 test("UPLINK_ACCOUNT 고정 세션은 guard 없이 동작하고 역할 전환을 거부한다", async () => {
   const { hub, port } = await startHub();
-  const client = new HubClient({ port, accountUuid: "pinned-1", accountName: "P", hubEntry: "nonexistent.js" });
+  const client = new HubClient({ port, dataDir: hubDirs.get(port), accountUuid: "pinned-1", accountName: "P", hubEntry: "nonexistent.js" });
   const s = new AccountSession(client, null, "pinned-1");
   assert.equal(await s.guard(), null);
   assert.equal(s.pinned, true);
@@ -154,34 +163,40 @@ test("Hub 재시작 사이 역할을 빼앗겨도 곧바로 다른 역할을 고
   p1.client.close(); p2.client.close(); hub.stop();
 });
 
-/** 요청 op별로 응답을 정하는 가짜 Hub(구버전·연결 끊김 흉내). handler가 null을 돌려주면 연결을 끊는다. */
+/**
+ * 요청 op별로 응답을 정하는 가짜 Hub(역할 기능 없는 구버전·연결 끊김 흉내). handler가 null을 돌려주면 연결을 끊는다.
+ * 같은 사용자의 Hub처럼 v3 핸드셰이크는 테스트 키로 통과시킨다(연결 단계가 아닌 op 단계의 동작을 시험하기 위해).
+ */
 async function fakeHub(handler: (req: any) => object | null) {
+  const keyDir = tmp();
+  const key = "f".repeat(64);
+  fs.writeFileSync(path.join(keyDir, "client.key"), key);
   const socks = new Set<net.Socket>();
   const srv = net.createServer((s) => {
     socks.add(s);
     s.on("error", () => {});
     const dec = new FrameDecoder();
+    const hubNonce = "1".repeat(64);
     s.on("data", (d) => dec.push(d, (req: any) => {
-      if (req.op === "hello") { s.write(encodeFrame({ ok: true, id: req.id, magic: "agent-uplink", version: 2 })); return; }
+      if (req.op === "hello") { s.write(encodeFrame({ ok: true, id: req.id, magic: "agent-uplink", version: 3, nonce: hubNonce })); return; }
+      if (req.op === "auth") { s.write(encodeFrame({ ok: true, id: req.id, proof: hubProof(key, hubNonce, req.nonce) })); return; }
       const res = handler(req);
       if (res === null) { s.destroy(); return; }
       s.write(encodeFrame({ id: req.id, ...res }));
     }));
   });
   await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
-  return { port: (srv.address() as net.AddressInfo).port, close: () => { for (const s of socks) s.destroy(); srv.close(); } };
+  const port = (srv.address() as net.AddressInfo).port;
+  hubDirs.set(port, keyDir);
+  return { port, close: () => { for (const s of socks) s.destroy(); srv.close(); } };
 }
 
 /** admin.key 토큰으로 admin op를 한 번 보낸다. */
 async function adminOp(port: number, dataDir: string, op: string, params: object): Promise<any> {
   const token = fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim();
-  const sock = net.connect(port, "127.0.0.1");
-  await new Promise((r) => sock.once("connect", r));
-  const dec = new FrameDecoder();
-  const res = new Promise<any>((resolve) => sock.on("data", (d) => dec.push(d, (r: any) => resolve(r))));
-  sock.write(encodeFrame({ op, id: 1, token, ...params }));
-  const r = await res;
-  sock.destroy();
+  const c = new TestClient(port, dataDir); await c.ready();
+  const r = await c.req(op, { token, ...params });
+  c.close();
   return r;
 }
 

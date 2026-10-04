@@ -5,6 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 import { MAGIC, PROTOCOL_VERSION, DEFAULT_TCP_PORT, Response } from "../shared/protocol.js";
+import { newNonce, isNonce, clientProof, hubProof, proofEquals } from "../shared/auth.js";
+import { readClientKey, resolveDataDir } from "../shared/clientKey.js";
 
 export interface HubClientOptions {
   port?: number;
@@ -15,6 +17,8 @@ export interface HubClientOptions {
   exclusive?: boolean;
   hubEntry?: string;
   nodeArgs?: string[];
+  /** client.key가 있는 데이터 폴더. 기본: Hub와 같은 env 규칙. */
+  dataDir?: string;
 }
 
 interface Pending {
@@ -25,6 +29,13 @@ interface Pending {
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+export const OLD_PROTOCOL_HUB_MESSAGE =
+  "실행 중인 Hub가 구버전(프로토콜 v2)입니다. 실행 중인 Hub를 종료(재시작)하거나 재배포한 뒤 다시 시도하세요.";
+
+export function notOurHubMessage(port: number): string {
+  return `포트 ${port}의 Hub가 이 Windows 사용자의 Hub가 아닙니다(인증 실패). 같은 PC의 다른 사용자가 포트를 점유했거나, 이 MCP와 Hub의 UPLINK_DATA_DIR가 다를 수 있습니다 — MCP 설정 env의 UPLINK_TCP_PORT·UPLINK_DATA_DIR를 확인하세요.`;
+}
+
 export class HubClient {
   private readonly port: number;
   /** MCP 프로세스 1개 = 세션 1개. 같은 프로세스의 재연결은 독점 검사를 통과한다. */
@@ -32,6 +43,7 @@ export class HubClient {
   private account: { uuid: string; name?: string; exclusive: boolean } | null;
   private readonly hubEntry: string;
   private readonly nodeArgs: string[];
+  private readonly dataDir: string;
   private sock: net.Socket | null = null;
   private dec = new FrameDecoder();
   private nextId = 1;
@@ -46,6 +58,7 @@ export class HubClient {
     this.hubEntry =
       opts.hubEntry ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "hub", "index.js");
     this.nodeArgs = opts.nodeArgs ?? [];
+    this.dataDir = opts.dataDir ?? resolveDataDir(process.env);
   }
 
   /** 재연결 때 독점 재로그인이 거부되면(다른 세션이 계정을 가져감) 호출된다. */
@@ -64,6 +77,7 @@ export class HubClient {
   async whoami(): Promise<Response> { await this.ensureConnected(); return this.request("whoami", {}); }
   async setName(name: string): Promise<Response> { await this.ensureConnected(); return this.request("set_name", { name }); }
   async listAccounts(): Promise<Response> { await this.ensureLink(); return this.request("list_accounts", {}); }
+  async viewerTicket(): Promise<Response> { await this.ensureLink(); return this.request("viewer_ticket", {}); }
 
   /**
    * 로그인 없이 쓸 수 있는 op용 연결 보장. 이전 계정의 독점 재로그인만 거부된 경우(역할을 빼앗김)
@@ -173,13 +187,25 @@ export class HubClient {
   }
 
   private async handshake(): Promise<void> {
-    let r: Response;
-    try { r = await this.request("hello", {}, 5000); }
+    let h: Response;
+    try { h = await this.request("hello", {}, 15000); } // 보안 준비(권한·소유자 검사) 동안 기다린다
     catch (e) { this.close(); throw new Error(`포트 ${this.port}가 응답하지 않습니다(Agent-Uplink Hub가 아닐 수 있음): ${(e as Error).message}`); }
-    if (r.magic !== MAGIC || r.version !== PROTOCOL_VERSION) {
+    if (!h.ok && h.code === "secure_setup_failed") { this.close(); throw new Error(`Hub를 시작할 수 없습니다: ${h.error}`); }
+    if (h.magic !== MAGIC) { this.close(); throw new Error(`포트 ${this.port}가 Agent-Uplink Hub가 아닙니다.`); }
+    if (h.version !== PROTOCOL_VERSION) {
       this.close();
-      throw new Error(`포트 ${this.port}가 Agent-Uplink Hub(v${PROTOCOL_VERSION})가 아닙니다.`);
+      throw new Error(h.version === 2 ? OLD_PROTOCOL_HUB_MESSAGE : `포트 ${this.port}의 Hub 프로토콜(v${h.version})이 이 MCP(v${PROTOCOL_VERSION})와 다릅니다. 같은 버전으로 재배포하세요.`);
     }
+    let key: string;
+    try { key = readClientKey(this.dataDir); } catch (e) { this.close(); throw e; }
+    const hubNonce = h.nonce;
+    if (!isNonce(hubNonce)) { this.close(); throw new Error(notOurHubMessage(this.port)); }
+    const nonce = newNonce();
+    let r: Response;
+    try { r = await this.request("auth", { nonce, proof: clientProof(key, hubNonce, nonce) }, 15000); }
+    catch { this.close(); throw new Error(notOurHubMessage(this.port)); }
+    // Hub 증명을 확인하기 전에는 login 등 아무것도 보내지 않는다(가짜 Hub에 계정·메시지를 넘기지 않음).
+    if (!r.ok || !proofEquals(hubProof(key, hubNonce, nonce), r.proof)) { this.close(); throw new Error(notOurHubMessage(this.port)); }
   }
 
   private request(op: string, params: object, timeoutMs = 60000): Promise<Response> {

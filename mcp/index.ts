@@ -1,5 +1,4 @@
 // Agent Uplink v2 — 계정/채널 기반 세션 간 통신 MCP 서버(stdio).
-import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -7,17 +6,19 @@ import { HubClient } from "./hubClient.js";
 import { RoleStore, resolveRoleCwd } from "./roles.js";
 import { AccountSession } from "./session.js";
 import { oneLine } from "./text.js";
+import { resolveDataDir } from "../shared/clientKey.js";
 import { InboxItem, Message } from "../shared/protocol.js";
 
 // --- 계정 부트스트랩 ---
 // UPLINK_ACCOUNT가 있으면 그 계정으로 고정(기존 동작). 없으면 use_account로 역할을 고를 때까지 로그인하지 않는다.
 const pinnedUuid = process.env.UPLINK_ACCOUNT || undefined;
-const dataDir = process.env.UPLINK_DATA_DIR ?? path.join(process.env.PROGRAMDATA ?? ".", "AgentUplink");
+const dataDir = resolveDataDir(process.env);
 const roles = pinnedUuid ? null : new RoleStore({ dataDir, cwd: resolveRoleCwd(process.env, process.cwd()), env: process.env.UPLINK_ACCOUNTS });
 const client = new HubClient({
   port: Number(process.env.UPLINK_TCP_PORT ?? 47800),
   accountUuid: pinnedUuid,
   accountName: process.env.UPLINK_ACCOUNT_NAME,
+  dataDir,
 });
 const session = new AccountSession(client, roles, pinnedUuid);
 
