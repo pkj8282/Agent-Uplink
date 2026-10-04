@@ -21,6 +21,7 @@ import {
   MAGIC,
   PROTOCOL_VERSION,
   LOBBY_CHANNEL_ID,
+  MAX_TEXT_LENGTH,
   Channel,
   InboxItem,
   Request,
@@ -60,7 +61,6 @@ interface ConnState {
 
 // Hub가 받는 요청 프레임 상한(정상 요청은 수 KB, 메시지 본문 상한 64K자 ≈ 최대 192KB).
 export const MAX_REQUEST_FRAME = 1024 * 1024;
-export const MAX_TEXT_LENGTH = 65536;
 
 // 계정 인박스가 이 수를 넘으면 소비분을 압축한다(무한 증가 방지, 재작성 빈도 억제).
 const INBOX_COMPACT_THRESHOLD = 1000;

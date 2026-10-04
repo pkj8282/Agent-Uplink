@@ -6,6 +6,8 @@ export const DEFAULT_HTTP_PORT = 47801;
 export const LOBBY_CHANNEL_ID = "lobby";
 /** 서버·채널·계정 표시 이름 최대 길이(코드포인트). */
 export const NAME_MAX = 64;
+/** 메시지 본문 최대 길이(UTF-16 길이 기준 — JS 문자열 length). */
+export const MAX_TEXT_LENGTH = 65536;
 
 export type ChannelKind = "dm" | "server";
 
