@@ -111,8 +111,10 @@ export class HubClient {
   dropConnectionForTest(): void { this.close(); }
 
   private async ensureConnected(): Promise<void> {
-    if (this.sock && !this.sock.destroyed) return;
+    // 연결 중(핸드셰이크·재로그인 진행 중)이면 소켓이 이미 붙었어도 기다린다 — Hub 증명을 확인하기 전에
+    // 다른 도구 호출의 op가 나가지 않게(가짜 Hub에 메시지가 넘어가거나 진짜 Hub에서 auth_required가 나지 않게).
     if (this.connecting) return this.connecting;
+    if (this.sock && !this.sock.destroyed) return;
     this.connecting = this.doConnect().finally(() => { this.connecting = null; });
     return this.connecting;
   }

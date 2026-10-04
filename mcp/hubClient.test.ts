@@ -100,13 +100,20 @@ test("서버·채널을 만들고 전체 공개 채널로 메시지를 주고받
 });
 
 /** hello·auth에 정해진 대로 답하는 가짜 서버. 받은 바이트를 모은다. */
-async function fakeHub(onReq: (r: any) => object | null): Promise<{ port: number; bytes: () => string; close: () => void }> {
+/** helloDelayMs를 주면 onReq가 null을 돌려준 hello에 그만큼 늦게 v3 hello로 답한다. */
+async function fakeHub(onReq: (r: any) => object | null, helloDelayMs?: number): Promise<{ port: number; bytes: () => string; close: () => void }> {
   const seen: Buffer[] = [];
   const socks = new Set<net.Socket>();
   const srv = net.createServer((s) => {
     socks.add(s);
     const dec = new FrameDecoder();
-    s.on("data", (d) => { seen.push(d); dec.push(d, (r: any) => { const res = onReq(r); if (res) s.write(encodeFrame({ id: r.id, ...res })); }); });
+    s.on("data", (d) => { seen.push(d); dec.push(d, (r: any) => {
+      const res = onReq(r);
+      if (res) s.write(encodeFrame({ id: r.id, ...res }));
+      else if (r.op === "hello" && helloDelayMs !== undefined) {
+        setTimeout(() => { if (!s.destroyed) s.write(encodeFrame({ ok: true, id: r.id, magic: "agent-uplink", version: 3, nonce: randomBytes(32).toString("hex") })); }, helloDelayMs);
+      }
+    }); });
     s.on("error", () => {});
   });
   await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
@@ -165,4 +172,23 @@ test("Hub 재시작(같은 데이터 폴더) 뒤 자동 재인증·재로그인"
   await hub2.startTcp(); await hub2.secure(TEST_SECURE_DEPS);
   assert.equal((await c.whoami()).uuid, "u1");
   c.close(); hub2.stop();
+});
+
+test("RT12: 핸드셰이크 도중 들어온 동시 호출도 Hub 증명 확인 전에는 아무것도 보내지 않는다", async () => {
+  const { dir } = keyDir();
+  const f = await fakeHub((r) => {
+    if (r.op === "hello") {
+      // hello 응답을 늦춰 핸드셰이크 틈을 넓힌다(가짜 Hub는 마음대로 늦출 수 있다).
+      return null;
+    }
+    return r.op === "auth" ? { ok: true, proof: randomBytes(32).toString("hex") } : { ok: true, seq: 1, uuid: "u", name: "x" };
+  }, 500);
+  const c = new HubClient({ port: f.port, dataDir: dir, accountUuid: "victim", accountName: "피해자", hubEntry: "nonexistent.js" });
+  const first = c.whoami(); // 연결·핸드셰이크 시작(소켓은 붙었고 hello 응답 대기 중)
+  await new Promise((r) => setTimeout(r, 100));
+  const second = c.send("lobby", "SECRET-MESSAGE-TEXT"); // 그 틈에 들어온 다른 도구 호출
+  const results = await Promise.allSettled([first, second]);
+  assert.deepEqual(results.map((r) => r.status), ["rejected", "rejected"]);
+  assert.doesNotMatch(f.bytes(), /SECRET-MESSAGE-TEXT|"op":"send"|"op":"login"/);
+  c.close(); f.close();
 });
