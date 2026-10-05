@@ -57,6 +57,7 @@ interface ConnState {
   hubNonce: string | null; // hello가 준 nonce(auth 1회에 소진)
   authed: boolean; // v3 핸드셰이크 통과
   closed: boolean; // auth 실패로 닫는 중 — 이후 요청 무시
+  helloPending: boolean; // 보안 준비 전 응답을 기다리는 hello가 있음(연결당 하나만)
 }
 
 // Hub가 받는 요청 프레임 상한(정상 요청은 수 KB, 메시지 본문 상한 64K자 ≈ 최대 192KB).
@@ -67,15 +68,15 @@ const INBOX_COMPACT_THRESHOLD = 1000;
 
 export class Hub {
   protected opts: HubOptions;
-  protected config: Config;
+  protected config!: Config;
   protected limits: HubLimits;
-  protected channels: ChannelStore;
-  protected accounts: AccountStore;
-  protected inbox: InboxStore;
-  protected dm: DmStore;
-  protected servers: ServerStore;
-  protected trash: TrashStore;
-  protected trashOps: TrashOps;
+  protected channels!: ChannelStore;
+  protected accounts!: AccountStore;
+  protected inbox!: InboxStore;
+  protected dm!: DmStore;
+  protected servers!: ServerStore;
+  protected trash!: TrashStore;
+  protected trashOps!: TrashOps;
   private adminKey: string | null = null;
   private clientKey: string | null = null;
   private isReady = false;
@@ -99,15 +100,36 @@ export class Hub {
     this.ready.catch(() => { /* 실패는 hello 응답과 index.ts가 다룬다 */ });
     this.opts = opts;
     this.limits = { ...DEFAULT_LIMITS, ...opts.limits };
-    this.config = loadConfig(opts.dataDir);
-    this.channels = new ChannelStore({ dir: opts.dataDir });
-    this.accounts = new AccountStore({ dir: opts.dataDir });
-    this.inbox = new InboxStore({ dir: opts.dataDir });
-    this.dm = new DmStore({ dir: opts.dataDir });
-    this.servers = new ServerStore({ dir: opts.dataDir });
-    this.trash = new TrashStore({ dir: opts.dataDir });
+    this.tcp = net.createServer((sock) => this.onConnection(sock));
+    this.http = http.createServer((req, res) => this.onHttp(req, res));
+  }
+
+  /** 데이터 폴더를 잠그고 키를 준비한 뒤 데이터를 적재한다. 끝나야 hello에 답한다. 실패하면 던지고 hello는 secure_setup_failed. */
+  async secure(deps?: SecureDeps): Promise<void> {
+    try {
+      const k = await secureDataDir(this.opts.dataDir, deps);
+      this.clientKey = k.clientKey;
+      this.adminKey = k.adminKey;
+      // 데이터 폴더를 읽고 쓰는 일은 권한 잠금·소유자 검사가 끝난 뒤에만 한다(남의 폴더를 건드리지 않게).
+      this.loadData();
+      this.isReady = true;
+      this.markReady();
+    } catch (e) {
+      this.markFailed(e as Error);
+      throw e;
+    }
+  }
+
+  private loadData(): void {
+    this.config = loadConfig(this.opts.dataDir);
+    this.channels = new ChannelStore({ dir: this.opts.dataDir });
+    this.accounts = new AccountStore({ dir: this.opts.dataDir });
+    this.inbox = new InboxStore({ dir: this.opts.dataDir });
+    this.dm = new DmStore({ dir: this.opts.dataDir });
+    this.servers = new ServerStore({ dir: this.opts.dataDir });
+    this.trash = new TrashStore({ dir: this.opts.dataDir });
     this.trashOps = new TrashOps({
-      dataDir: opts.dataDir, servers: this.servers, dm: this.dm, accounts: this.accounts,
+      dataDir: this.opts.dataDir, servers: this.servers, dm: this.dm, accounts: this.accounts,
       channels: this.channels, inbox: this.inbox, trash: this.trash,
       maxChannelsPerServer: () => this.config.maxChannelsPerServer,
     });
@@ -130,22 +152,6 @@ export class Hub {
     }
     // 이전 버전 삭제·크래시로 남은 로그를 휴지통으로(손상된 서버 인덱스면 서버 쪽은 건너뜀 — 손으로 되살릴 여지)
     this.trashOps.sweepOrphans({ servers: !this.servers.sweepBlocked, dm: true });
-    this.tcp = net.createServer((sock) => this.onConnection(sock));
-    this.http = http.createServer((req, res) => this.onHttp(req, res));
-  }
-
-  /** 데이터 폴더를 잠그고 키를 준비한다. 끝나야 hello에 답한다. 실패하면 던지고 hello는 secure_setup_failed. */
-  async secure(deps?: SecureDeps): Promise<void> {
-    try {
-      const k = await secureDataDir(this.opts.dataDir, deps);
-      this.clientKey = k.clientKey;
-      this.adminKey = k.adminKey;
-      this.isReady = true;
-      this.markReady();
-    } catch (e) {
-      this.markFailed(e as Error);
-      throw e;
-    }
   }
 
   startTcp(): Promise<void> {
@@ -189,6 +195,11 @@ export class Hub {
       return;
     }
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (url.pathname === "/favicon.ico") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
     if (url.pathname === "/") {
       // 뷰어 껍데기(데이터 없음). 페이지 스크립트가 #t= 티켓을 /session으로 바꾸고, 세션이 없으면 여는 법을 안내한다.
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
@@ -290,7 +301,7 @@ export class Hub {
     this.cancelIdle();
     this.connections.add(sock);
     const dec = new FrameDecoder({ maxFrame: MAX_REQUEST_FRAME });
-    const state: ConnState = { uuid: null, waiter: null, sessionToken: null, hubNonce: null, authed: false, closed: false };
+    const state: ConnState = { uuid: null, waiter: null, sessionToken: null, hubNonce: null, authed: false, closed: false, helloPending: false };
     this.connStates.add(state);
     this.stateBySock.set(sock, state);
     // 인증하지 않은 연결이 자리를 오래 차지하지 못하게 한다. 보안 준비가 늦어도 정상 클라이언트가 잘리지 않도록 준비 완료 시점부터 센다.
@@ -364,13 +375,23 @@ export class Hub {
 
     if (state.closed) return;
     if (req.op === "hello") {
+      if (!this.isReady) {
+        // 준비 전 hello 반복으로 대기 콜백이 쌓이지 않게 연결당 하나만 기다린다.
+        if (state.helloPending) {
+          reply({ ok: false, code: "hello_pending", error: "Hub 보안 준비 중입니다. 앞선 hello 응답을 기다리세요." });
+          return;
+        }
+        state.helloPending = true;
+      }
       this.ready.then(
         () => {
+          state.helloPending = false;
           if (sock.destroyed || state.closed) return;
           if (!state.authed) state.hubNonce = newNonce();
           reply({ ok: true, magic: MAGIC, version: PROTOCOL_VERSION, nonce: state.hubNonce ?? undefined });
         },
         (e: Error) => {
+          state.helloPending = false;
           if (!sock.destroyed) reply({ ok: false, code: "secure_setup_failed", error: e.message });
         },
       );
@@ -398,7 +419,8 @@ export class Hub {
           return;
         }
         let loginName: string | undefined;
-        if (req.name !== undefined) {
+        // 이름 힌트는 새 계정을 만들 때만 쓴다 — 기존 계정은 힌트를 무시한다(긴 UPLINK_ACCOUNT_NAME으로 업그레이드 뒤 막히지 않게).
+        if (req.name !== undefined && !this.accounts.get(req.uuid)) {
           const v = validateName(req.name, "계정");
           if (!v.ok) {
             reply({ ok: false, error: v.error });

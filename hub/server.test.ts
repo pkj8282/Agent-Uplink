@@ -672,3 +672,44 @@ test("allowDevDelete가 꺼져 있으면 MCP 삭제 거부 문구가 관리 앱 
   assert.match(r.error!, /관리 앱 설정/);
   c.close(); hub.stop();
 });
+
+test("Minor10: 보안 준비 전에는 데이터 폴더에 아무것도 만들거나 쓰지 않는다", async () => {
+  const dataDir = tmp();
+  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0 });
+  await hub.startTcp();
+  try {
+    assert.deepEqual(fs.readdirSync(dataDir), []);
+    await hub.secure(TEST_SECURE_DEPS);
+    assert.ok(fs.readdirSync(dataDir).includes("config.json")); // 준비 뒤에 데이터 적재
+  } finally { hub.stop(); }
+});
+
+test("Minor11: 보안 준비 전 같은 연결의 hello 반복은 하나만 기다리고 나머지는 hello_pending", async () => {
+  const dataDir = tmp();
+  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0 });
+  await hub.startTcp();
+  const c = new Client(hub.tcpAddress.port, dataDir); await c.connected();
+  try {
+    const first = c.req("hello");
+    const second = await c.req("hello");
+    const third = await c.req("hello");
+    assert.equal(second.code, "hello_pending");
+    assert.equal(third.code, "hello_pending");
+    await hub.secure(TEST_SECURE_DEPS);
+    assert.equal((await first).version, 3);
+    assert.equal((await c.req("hello")).version, 3); // 준비 뒤에는 다시 받는다
+  } finally { c.close(); hub.stop(); }
+});
+
+test("Minor9: 기존 계정 login은 이름 힌트가 길어도 무시하고 통과, 새 계정만 길이 검사", async () => {
+  const { hub, port } = await startHub();
+  const a = new Client(port); await a.ready();
+  assert.equal((await a.req("login", { uuid: "u1", name: "A" })).ok, true);
+  a.close();
+  const b = new Client(port); await b.ready();
+  const r = await b.req("login", { uuid: "u1", name: "x".repeat(65) });
+  assert.equal(r.ok, true);
+  assert.equal(r.name, "A");
+  assert.equal((await b.req("login", { uuid: "u-new", name: "x".repeat(65) })).ok, false);
+  b.close(); hub.stop();
+});

@@ -369,3 +369,10 @@ test("RT15: 연결이 한꺼번에 몰려도 Hub가 들고 있는 연결 수는 
     legit.close();
   } finally { for (const s of socks) s.destroy(); hub.stop(); }
 });
+
+test("뷰어 favicon 요청은 204(콘솔 404 오류 없음)", async () => {
+  const { hub } = await startTestHub({ http: true });
+  try {
+    assert.equal((await httpGet(hub.httpAddress.port, "/favicon.ico")).status, 204);
+  } finally { hub.stop(); }
+});
