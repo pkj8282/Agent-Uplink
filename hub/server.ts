@@ -280,6 +280,9 @@ export class Hub {
     this.http.close();
     for (const res of this.sseClients) res.end();
     this.sseClients.clear();
+    // close()는 그 순간 쉬는 연결만 닫는다 — 방금 끝낸 SSE 연결은 keep-alive로 남아, 뷰어의 재접속·주기 요청이
+    // 그 연결을 재사용하면 닫힌 Hub가 계속 응답하고 프로세스도 끝나지 않는다. 남은 연결을 모두 닫는다.
+    this.http.closeAllConnections();
     for (const s of this.connections) s.destroy();
     this.connections.clear();
   }

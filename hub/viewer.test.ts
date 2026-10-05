@@ -121,3 +121,23 @@ test("뷰어는 #t= 티켓을 /session으로 바꿔 sessionStorage에 두고 주
   assert.match(html, /agent-uplink-viewer/);
   assert.doesNotMatch(html, /document\.cookie/);
 });
+
+test("유휴 종료(stop) 뒤에는 열려 있던 뷰어 연결로도 요청이 처리되지 않는다(프로세스가 남지 않게)", async () => {
+  const { hub, port } = await startTestHub({ http: true });
+  const httpPort = hub.httpAddress.port;
+  const session = await openViewerSession(port);
+  const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+  const ended = new Promise<void>((resolve) => {
+    http.get({ host: "127.0.0.1", port: httpPort, path: `/events?s=${session}`, agent }, (res) => { res.on("data", () => {}); res.on("end", () => resolve()); });
+  });
+  await new Promise((r) => setTimeout(r, 200));
+  hub.stop();
+  await ended;
+  // EventSource 재접속·주기적 fetch처럼 같은 keep-alive 연결로 다시 요청한다.
+  const status = await new Promise<number>((resolve) => {
+    const req = http.get({ host: "127.0.0.1", port: httpPort, path: `/accounts?s=${session}`, agent }, (res) => { res.resume(); resolve(res.statusCode!); });
+    req.on("error", () => resolve(-1));
+  });
+  agent.destroy();
+  assert.equal(status, -1, "닫힌 Hub가 남은 연결로 응답했다");
+});
