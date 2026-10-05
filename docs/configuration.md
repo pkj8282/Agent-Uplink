@@ -9,7 +9,7 @@ Set these in the MCP server's `env` (and, where relevant, for the admin app). Th
 | `UPLINK_TCP_PORT` | `47800` | Hub port for MCP servers and the admin app |
 | `UPLINK_HTTP_PORT` | `47801` | Log viewer port |
 | `UPLINK_DATA_DIR` | `%ProgramData%\AgentUplink` | Where the hub and MCP servers keep their data |
-| `UPLINK_IDLE_MINUTES` | `10` | Minutes after the last session leaves before the hub exits; `0` keeps it running |
+| `UPLINK_IDLE_MINUTES` | `10` | Minutes after the last session leaves (and the last log viewer closes) before the hub exits; `0` keeps it running |
 | `UPLINK_PROJECT_DIR` | the MCP server's working directory | Folder whose saved roles this session uses — set it for hosts that do not start the MCP server in the project folder ([Role accounts](roles.md)) |
 | `UPLINK_ACCOUNTS` | — | Pinned roles: `role=<uuid>;role=<uuid>` ([Role accounts](roles.md#pinning-roles-in-configuration)) |
 | `UPLINK_ACCOUNT` | — | Bind the session to one account UUID; disables roles |

@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { startTestHub, TestClient, openViewerSession } from "./testing.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { Hub } from "./server.js";
+import { startTestHub, TestClient, openViewerSession, registerTestHub, TEST_SECURE_DEPS, httpGet } from "./testing.js";
 import { renderViewerHtml } from "./viewer.js";
 
 test("뷰어 HTML은 외부 CDN 없이 EventSource를 쓴다", () => {
@@ -140,4 +144,22 @@ test("유휴 종료(stop) 뒤에는 열려 있던 뷰어 연결로도 요청이 
   });
   agent.destroy();
   assert.equal(status, -1, "닫힌 Hub가 남은 연결로 응답했다");
+});
+
+test("열린 뷰어(실시간 연결)가 있으면 유휴 종료하지 않고, 뷰어를 닫으면 유휴 종료한다", async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-vw-idle-"));
+  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 300 });
+  await hub.startTcp(); await hub.startHttp(); await hub.secure(TEST_SECURE_DEPS);
+  registerTestHub(hub.tcpAddress.port, dataDir);
+  const httpPort = hub.httpAddress.port;
+  try {
+    const session = await openViewerSession(hub.tcpAddress.port); // TCP는 닫힘 → 유휴 타이머 시작
+    const sse = http.get({ host: "127.0.0.1", port: httpPort, path: `/events?s=${session}` });
+    await new Promise((r) => sse.once("response", r));
+    await new Promise((r) => setTimeout(r, 800)); // 유휴 시간(300ms)을 충분히 넘김
+    assert.equal((await httpGet(httpPort, `/accounts?s=${session}`)).status, 200); // 뷰어가 Hub를 살려 둠
+    sse.destroy(); // 뷰어 탭 닫음
+    await new Promise((r) => setTimeout(r, 800));
+    await assert.rejects(httpGet(httpPort, `/accounts?s=${session}`)); // 유휴 종료됨(연결 거부)
+  } finally { hub.stop(); }
 });

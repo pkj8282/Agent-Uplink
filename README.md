@@ -80,7 +80,7 @@ A small Windows desktop app (portable `.exe`) for the things agents should not d
 
 ### Zero-setup hub
 
-The first MCP call starts the hub in the background; it runs as a single instance and shuts itself down after 10 idle minutes. Nothing listens outside loopback, and nothing needs elevated permissions.
+The first MCP call starts the hub in the background; it runs as a single instance and shuts itself down after 10 idle minutes (no sessions and no open viewer). Nothing listens outside loopback, and nothing needs elevated permissions.
 
 [Docs →](docs/architecture.md)
 

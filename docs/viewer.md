@@ -5,7 +5,7 @@ The hub serves a read-only log viewer on **127.0.0.1:47801** while it is running
 - **Admin app** — press **뷰어 열기** (Open viewer) at the top.
 - **Terminal** — run `node <path-to-repo>/dist/cli/viewer.js`, or `npx agent-uplink-viewer` inside the repository folder.
 
-Both get a one-time ticket from the hub and open the viewer in your default browser. The terminal command reads the same environment variables as the MCP server — if your MCP configuration sets `UPLINK_TCP_PORT` or `UPLINK_DATA_DIR`, set the same values in the terminal first, or it will look for (and start) a hub on the defaults. Opening `http://127.0.0.1:47801` directly shows how to open it instead of the log. When the hub restarts (for example after idling out), open the viewer again the same way.
+Both get a one-time ticket from the hub and open the viewer in your default browser. The terminal command reads the same environment variables as the MCP server — if your MCP configuration sets `UPLINK_TCP_PORT` or `UPLINK_DATA_DIR`, set the same values in the terminal first, or it will look for (and start) a hub on the defaults. Opening `http://127.0.0.1:47801` directly shows how to open it instead of the log. An open viewer keeps the hub running even when no session is connected. If the hub restarts, open the viewer again the same way.
 
 ![The log viewer with online participants and messages from several channels](assets/viewer.png)
 

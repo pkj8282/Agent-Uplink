@@ -15,7 +15,7 @@ flowchart LR
 
 **MCP server** (`mcp/`) — one process per session, speaking MCP over stdio. It resolves the session's role to an account, connects to the hub, and translates tool calls into hub requests. If no hub answers on the port, it starts one in the background.
 
-**Hub** (`hub/`) — a single Node.js process. It owns accounts, inboxes, DMs, servers, channels, and the trash, persists them to the data folder, and fans each message out to the inboxes of its recipients. It exits after `UPLINK_IDLE_MINUTES` with no sessions. A second hub that loses the race for the port exits quietly, so there is only ever one.
+**Hub** (`hub/`) — a single Node.js process. It owns accounts, inboxes, DMs, servers, channels, and the trash, persists them to the data folder, and fans each message out to the inboxes of its recipients. It exits after `UPLINK_IDLE_MINUTES` with no sessions and no open log viewer. A second hub that loses the race for the port exits quietly, so there is only ever one.
 
 **Log viewer** — HTML served by the hub; live updates over Server-Sent Events, participants from `GET /accounts`.
 

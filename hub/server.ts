@@ -92,6 +92,7 @@ export class Hub {
   private connections = new Set<net.Socket>();
   private waiters = new Map<string, Set<Waiter>>(); // uuid → 대기자들
   private idleTimer: NodeJS.Timeout | null = null;
+  private stopped = false;
   private connStates = new Set<ConnState>();
   private stateBySock = new Map<net.Socket, ConnState>(); // 삽입 순 = 오래된 순
 
@@ -239,7 +240,11 @@ export class Hub {
         .map((m) => ({ ts: m.ts, channelId: m.channelId, fromUuid: m.from, fromName: m.fromName, text: m.text, channelLabel: lobbyLabel }));
       res.write(`event: init\ndata: ${JSON.stringify(history)}\n\n`);
       this.sseClients.add(res);
-      const drop = () => this.sseClients.delete(res);
+      this.cancelIdle();
+      const drop = () => {
+        this.sseClients.delete(res);
+        this.maybeIdle(); // 이미 다른 경로(pushSse)가 지웠어도 유휴 여부는 다시 판단한다
+      };
       req.on("close", drop);
       res.on("error", drop);
     } else {
@@ -276,6 +281,8 @@ export class Hub {
   }
 
   stop(): void {
+    this.stopped = true;
+    this.cancelIdle();
     this.tcp.close();
     this.http.close();
     for (const res of this.sseClients) res.end();
@@ -952,8 +959,10 @@ export class Hub {
   }
 
   private maybeIdle(): void {
-    if (this.opts.idleShutdownMs <= 0) return;
-    if (this.connections.size > 0) return;
+    if (this.opts.idleShutdownMs <= 0 || this.stopped) return;
+    // 세션(TCP)도 열린 뷰어(SSE)도 없을 때만 유휴 종료를 센다 — 뷰어 탭이 열려 있으면 Hub를 살려 둔다.
+    if (this.connections.size > 0 || this.sseClients.size > 0) return;
+    this.cancelIdle();
     this.idleTimer = setTimeout(() => this.stop(), this.opts.idleShutdownMs);
     this.idleTimer.unref();
   }
