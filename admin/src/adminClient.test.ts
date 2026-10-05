@@ -129,7 +129,7 @@ test("무응답 서버(포트 점유)는 무한 대기 없이 타임아웃 에�
   const silent = net.createServer((s) => { socks.add(s); }); // 받기만 하고 응답 안 함
   await new Promise<void>((r) => silent.listen(0, "127.0.0.1", () => r()));
   const port = (silent.address() as net.AddressInfo).port;
-  const c = new AdminClient({ port, keyPath: path.join(tmp(), "admin.key"), timeoutMs: 300 });
+  const c = new AdminClient({ port, keyPath: path.join(tmp(), "admin.key"), timeoutMs: 300, helloTimeoutMs: 300 });
   const t0 = Date.now();
   await assert.rejects(c.snapshot(), /응답하지 않습니다/);
   assert.ok(Date.now() - t0 < 3000);
@@ -328,4 +328,33 @@ test("연결 단계가 멈춰도 무한 대기하지 않는다", async () => {
   const t0 = Date.now();
   await assert.rejects(c.snapshot(), /연결 시간이 초과|Hub 연결 실패|Hub가 실행 중이 아닙니다/);
   assert.ok(Date.now() - t0 < 1500, `${Date.now() - t0}ms`);
+});
+
+test("Minor4: v3 Hub가 답했는데 client.key가 없으면 '이 사용자의 Hub가 아님'", async () => {
+  const f = await fakeServer((req, s) => { if (req.op === "hello") s.write(encodeFrame({ ok: true, id: req.id, magic: "agent-uplink", version: 3, nonce: FAKE_NONCE })); });
+  const d = tmp(); fs.writeFileSync(path.join(d, "admin.key"), "a".repeat(64)); // client.key 없음
+  const c = new AdminClient({ port: f.port, keyPath: path.join(d, "admin.key"), timeoutMs: 2000 });
+  await assert.rejects(c.snapshot(), (e: Error) => /이 Windows 사용자의 Hub가 아닙니다/.test(e.message) && !/client\.key를 읽을 수 없습니다/.test(e.message));
+  f.close();
+});
+
+test("Minor5: 인증 중 끊기면 끊김 안내(다른 사용자 문구 아님)", async () => {
+  const f = await fakeServer((req, s) => {
+    if (req.op === "hello") s.write(encodeFrame({ ok: true, id: req.id, magic: "agent-uplink", version: 3, nonce: FAKE_NONCE }));
+    else s.destroy();
+  });
+  const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 2000 });
+  await assert.rejects(c.snapshot(), (e: Error) => /인증 중 Hub 연결이 끊기거나 응답이 없습니다/.test(e.message) && !/다른 사용자/.test(e.message));
+  f.close();
+});
+
+test("Minor6: hello는 보안 준비 시간만큼 기다린다(op 응답 한도보다 길게)", async () => {
+  const f = await fakeServer((req, s) => {
+    if (req.op === "hello") setTimeout(() => answerHandshake(req, s), 800); // 보안 준비 중인 Hub
+    else if (answerHandshake(req, s)) { /* auth */ }
+    else s.write(encodeFrame({ ok: true, id: req.id, config: { maxChannelsPerServer: 30, allowDevDelete: false, inboxMaxBatch: 200 }, snapshotServers: [], snapshotAccounts: [], snapshotDms: [], trash: [] }));
+  });
+  const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 300 });
+  assert.deepEqual((await c.snapshot()).servers, []);
+  f.close();
 });

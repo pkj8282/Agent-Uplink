@@ -32,6 +32,8 @@ export function resolveAdminTarget(env: NodeJS.ProcessEnv): AdminTarget {
 export interface AdminClientOptions extends AdminTarget {
   /** 응답 1건 대기 한도(ms). 기본 5000. */
   timeoutMs?: number;
+  /** hello 응답 대기 한도(ms). 기본 15000 — Hub는 보안 준비(권한 잠금·소유자 검사)가 끝난 뒤에야 hello에 답한다. */
+  helloTimeoutMs?: number;
   /** 접속 대상 호스트. 기본 127.0.0.1(Hub는 로컬 전용). */
   host?: string;
   /** 연결 수립 대기 한도(ms). 기본 10000 — Windows 루프백 거부(~2초)보다 길게. */
@@ -73,6 +75,7 @@ export class AdminClient {
   private readonly keyPath: string;
   private readonly clientKeyPath: string;
   private readonly timeoutMs: number;
+  private readonly helloTimeoutMs: number;
   private readonly host: string;
   private readonly connectTimeoutMs: number;
 
@@ -81,6 +84,7 @@ export class AdminClient {
     this.keyPath = opts.keyPath;
     this.clientKeyPath = opts.clientKeyPath ?? path.join(path.dirname(opts.keyPath), "client.key");
     this.timeoutMs = opts.timeoutMs ?? 5000;
+    this.helloTimeoutMs = opts.helloTimeoutMs ?? 15000;
     this.host = opts.host ?? "127.0.0.1";
     this.connectTimeoutMs = opts.connectTimeoutMs ?? 10000;
   }
@@ -120,7 +124,7 @@ export class AdminClient {
   private async call(op: string, params: object): Promise<Reply> {
     const conn = await this.connect();
     try {
-      const hello = await conn.request("hello", {}).catch((e: unknown) => {
+      const hello = await conn.request("hello", {}, this.helloTimeoutMs).catch((e: unknown) => {
         if (e instanceof DisconnectedError) {
           throw new Error(`포트 ${this.port}의 프로그램이 Hub 응답 없이 연결을 끊었습니다. Hub가 종료 중이거나 Agent-Uplink Hub가 아닐 수 있습니다. 잠시 후 새로고침하세요.`);
         }
@@ -151,11 +155,15 @@ export class AdminClient {
 
   /** v3 핸드셰이크. Hub 증명을 확인하기 전에는 admin 토큰을 보내지 않는다(가짜 Hub에 새지 않게). */
   private async authenticate(conn: Connection, hubNonce: unknown): Promise<void> {
-    const key = readClientKeyFile(this.clientKeyPath);
     const notOurs = `포트 ${this.port}의 Hub가 이 Windows 사용자의 Hub가 아닙니다(인증 실패). 다른 사용자가 포트를 점유했거나 UPLINK_DATA_DIR가 Hub와 다를 수 있습니다.`;
+    // v3 Hub는 키를 만든 뒤에야 hello에 답한다 → 답했는데 이 폴더에 키가 없으면 이 데이터 폴더의 Hub가 아니다.
+    if (!fs.existsSync(this.clientKeyPath)) throw new Error(notOurs);
+    const key = readClientKeyFile(this.clientKeyPath);
     if (!isNonce(hubNonce)) throw new Error(notOurs);
     const nonce = newNonce();
-    const r = await conn.request("auth", { nonce, proof: clientProof(key, hubNonce, nonce) }).catch(() => { throw new Error(notOurs); });
+    const r = await conn.request("auth", { nonce, proof: clientProof(key, hubNonce, nonce) }).catch(() => {
+      throw new Error("인증 중 Hub 연결이 끊기거나 응답이 없습니다(Hub가 종료 중이거나 연결이 너무 많을 수 있습니다). 잠시 후 새로고침하세요.");
+    });
     if (!r.ok || !proofEquals(hubProof(key, hubNonce, nonce), r.proof)) throw new Error(notOurs);
   }
 
@@ -212,14 +220,14 @@ class Connection {
     sock.on("error", () => { /* close가 뒤따른다 */ });
   }
 
-  request(op: string, params: object): Promise<Reply> {
+  request(op: string, params: object, timeoutMs = this.timeoutMs): Promise<Reply> {
     return new Promise((resolve, reject) => {
       if (this.sock.destroyed) { reject(new DisconnectedError("Hub 연결이 끊겼습니다.")); return; }
       const id = this.nextId++;
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new TimeoutError(`Hub가 응답하지 않습니다(op=${op}, ${this.timeoutMs}ms).`));
-      }, this.timeoutMs);
+        reject(new TimeoutError(`Hub가 응답하지 않습니다(op=${op}, ${timeoutMs}ms).`));
+      }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       this.sock.write(encodeFrame({ op, id, ...params }));
     });

@@ -100,8 +100,8 @@ test("서버·채널을 만들고 전체 공개 채널로 메시지를 주고받
 });
 
 /** hello·auth에 정해진 대로 답하는 가짜 서버. 받은 바이트를 모은다. */
-/** helloDelayMs를 주면 onReq가 null을 돌려준 hello에 그만큼 늦게 v3 hello로 답한다. */
-async function fakeHub(onReq: (r: any) => object | null, helloDelayMs?: number): Promise<{ port: number; bytes: () => string; close: () => void }> {
+/** onReq가 "drop"이면 연결을 끊는다. helloDelayMs를 주면 onReq가 null을 돌려준 hello에 그만큼 늦게 v3 hello로 답한다. */
+async function fakeHub(onReq: (r: any) => object | "drop" | null, helloDelayMs?: number): Promise<{ port: number; bytes: () => string; close: () => void }> {
   const seen: Buffer[] = [];
   const socks = new Set<net.Socket>();
   const srv = net.createServer((s) => {
@@ -109,7 +109,8 @@ async function fakeHub(onReq: (r: any) => object | null, helloDelayMs?: number):
     const dec = new FrameDecoder();
     s.on("data", (d) => { seen.push(d); dec.push(d, (r: any) => {
       const res = onReq(r);
-      if (res) s.write(encodeFrame({ id: r.id, ...res }));
+      if (res === "drop") s.destroy();
+      else if (res) s.write(encodeFrame({ id: r.id, ...res }));
       else if (r.op === "hello" && helloDelayMs !== undefined) {
         setTimeout(() => { if (!s.destroyed) s.write(encodeFrame({ ok: true, id: r.id, magic: "agent-uplink", version: 3, nonce: randomBytes(32).toString("hex") })); }, helloDelayMs);
       }
@@ -191,4 +192,25 @@ test("RT12: 핸드셰이크 도중 들어온 동시 호출도 Hub 증명 확인 
   assert.deepEqual(results.map((r) => r.status), ["rejected", "rejected"]);
   assert.doesNotMatch(f.bytes(), /SECRET-MESSAGE-TEXT|"op":"send"|"op":"login"/);
   c.close(); f.close();
+});
+
+test("Minor4: v3 Hub가 답했는데 이 데이터 폴더에 client.key가 없으면 '이 사용자의 Hub가 아님'으로 안내", async () => {
+  const dir = tmp(); // client.key 없음
+  const f = await fakeHub((r) => r.op === "hello" ? { ok: true, magic: "agent-uplink", version: 3, nonce: randomBytes(32).toString("hex") } : null);
+  const c = new HubClient({ port: f.port, dataDir: dir, hubEntry: "nonexistent.js" });
+  await assert.rejects(c.listAccounts(), (e: Error) => /이 Windows 사용자의 Hub가 아닙니다/.test(e.message) && !/ENOENT/.test(e.message));
+  c.close(); f.close();
+});
+
+test("Minor5: 인증 중 연결이 끊기면 '다른 사용자' 대신 끊김 안내, auth_failed는 그대로 '이 사용자의 Hub가 아님'", async () => {
+  const { dir } = keyDir();
+  const hello = { ok: true, magic: "agent-uplink", version: 3, nonce: randomBytes(32).toString("hex") };
+  const drop = await fakeHub((r) => (r.op === "hello" ? hello : "drop")); // auth를 받으면 끊는다(상한 밀어내기·Hub 종료 흉내)
+  const c1 = new HubClient({ port: drop.port, dataDir: dir, hubEntry: "nonexistent.js" });
+  await assert.rejects(c1.listAccounts(), (e: Error) => /인증 중 Hub 연결이 끊기거나 응답이 없습니다/.test(e.message) && !/다른 사용자/.test(e.message));
+  c1.close(); drop.close();
+  const failed = await fakeHub((r) => (r.op === "hello" ? hello : { ok: false, code: "auth_failed", error: "인증 실패" }));
+  const c2 = new HubClient({ port: failed.port, dataDir: dir, hubEntry: "nonexistent.js" });
+  await assert.rejects(c2.listAccounts(), /이 Windows 사용자의 Hub가 아닙니다/);
+  c2.close(); failed.close();
 });
