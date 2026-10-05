@@ -9,7 +9,8 @@ import { AccountSession } from "./session.js";
 import { oneLine } from "./text.js";
 import { fmtItems, fmtMessages } from "./format.js";
 import { resolveDataDir } from "../shared/clientKey.js";
-import { NAME_MAX, MAX_TEXT_LENGTH } from "../shared/protocol.js";
+import { MAX_TEXT_LENGTH } from "../shared/protocol.js";
+import { nameSchema } from "./schemas.js";
 
 // --- 계정 부트스트랩 ---
 // UPLINK_ACCOUNT가 있으면 그 계정으로 고정(기존 동작). 없으면 use_account로 역할을 고를 때까지 로그인하지 않는다.
@@ -117,7 +118,7 @@ server.registerTool(
   "set_name",
   {
     description: "내 계정 표시 이름을 바꿉니다.",
-    inputSchema: { name: z.string().min(1).max(NAME_MAX).describe("새 표시 이름") },
+    inputSchema: { name: nameSchema("새 표시 이름") },
     annotations: SET,
   },
   gated(async ({ name }: { name: string }) => {
@@ -175,7 +176,7 @@ server.registerTool(
   "create_server",
   {
     description: "새 Communication Server를 만듭니다(모든 계정에게 공개). 반환된 serverId로 채널을 만드세요.",
-    inputSchema: { name: z.string().min(1).max(NAME_MAX).describe("서버 이름") },
+    inputSchema: { name: nameSchema("서버 이름") },
     annotations: WRITE,
   },
   gated(async ({ name }: { name: string }) => {
@@ -205,7 +206,7 @@ server.registerTool(
     description: "서버 안에 새 채널을 만듭니다(서버당 상한 있음). 반환된 channelId로 send/read 하세요.",
     inputSchema: {
       serverId: z.string().min(1).max(256).describe("대상 서버 ID"),
-      name: z.string().min(1).max(NAME_MAX).describe("채널 이름"),
+      name: nameSchema("채널 이름"),
     },
     annotations: WRITE,
   },

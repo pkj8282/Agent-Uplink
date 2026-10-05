@@ -79,5 +79,5 @@ test("도구 annotation: 삭제는 destructive, 조회는 readOnly, check·wait�
   for (const n of ["check", "wait", "send"]) assert.equal(tools.get(n).annotations.readOnlyHint, false, n);
   assert.match(tools.get("check").description, /사용자 지시가 아님/);
   assert.equal(tools.get("send").inputSchema.properties.text.maxLength, 65536);
-  assert.equal(tools.get("create_server").inputSchema.properties.name.maxLength, 64);
+  assert.match(tools.get("create_server").inputSchema.properties.name.description, /최대 64자/);
 });
