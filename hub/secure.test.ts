@@ -122,3 +122,21 @@ test("ACL 잠금만 실패하면 원인 후보와 UPLINK_DATA_DIR 안내를 준�
   );
   assert.equal(fs.existsSync(path.join(d, "client.key")), false);
 });
+
+test("실제 PowerShell 검사: 호환 안 되는 PSModulePath(예: PowerShell 7에서 실행)를 물려받아도 소유자를 읽는다(win32 전용)", { skip: process.platform !== "win32" }, async () => {
+  // PowerShell 7 아래에서 띄우면 그 PSModulePath를 물려받아, 5.1이 PS7용 Microsoft.PowerShell.Security를 먼저 찾고 로드에 실패한다(CI 실측).
+  const fake = tmp("uplink-psmod-");
+  fs.mkdirSync(path.join(fake, "Microsoft.PowerShell.Security"));
+  fs.writeFileSync(path.join(fake, "Microsoft.PowerShell.Security", "Microsoft.PowerShell.Security.psd1"), "@{ ModuleVersion = '9.9.9'; GUID = 'a94c8c7e-9810-47c0-b8af-65089c13a35a'; RootModule = 'missing-ps7-only.dll'; CmdletsToExport = @('Get-Acl', 'Set-Acl') }");
+  const d = tmp("보안-모듈-");
+  fs.writeFileSync(path.join(d, "a.txt"), "x");
+  const saved = process.env.PSModulePath;
+  process.env.PSModulePath = `${fake};${saved ?? ""}`;
+  try {
+    const me = await realSecureDeps.currentUserSid();
+    const rep = await realSecureDeps.findForeign(d, { recurse: true, paths: [] }, [me, "S-1-5-32-544", "S-1-5-18"]);
+    assert.deepEqual(rep, { count: 0, samples: [] });
+  } finally {
+    if (saved === undefined) delete process.env.PSModulePath; else process.env.PSModulePath = saved;
+  }
+});

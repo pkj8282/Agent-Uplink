@@ -73,6 +73,17 @@ ConvertTo-Json -Compress -Depth 4 @{ count = $script:count; samples = @($samples
 
 const POWERSHELL = path.join(process.env.SystemRoot ?? "C:/Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 
+/**
+ * PowerShell 7(pwsh) 아래에서 실행되면 PSModulePath에 PS7 모듈 경로가 들어 있어, Windows PowerShell 5.1이
+ * PS7용 Microsoft.PowerShell.Security를 먼저 찾고 로드에 실패한다(Get-Acl 실패 → 모든 소유자 '확인 불가' → 시작 거부).
+ * 5.1이 자기 기본 모듈 경로를 쓰도록 이 변수를 넘기지 않는다(env 키는 대소문자 무관하게 비교).
+ */
+export function withoutPsModulePath(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(env)) if (k.toLowerCase() !== "psmodulepath") out[k] = v;
+  return out;
+}
+
 async function findForeignPs(root: string, opts: { recurse: boolean; paths: string[] }, allowed: string[]): Promise<ForeignReport> {
   const encoded = Buffer.from(SCAN_SCRIPT, "utf16le").toString("base64");
   const { stdout } = await run(POWERSHELL, ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded], {
@@ -81,7 +92,7 @@ async function findForeignPs(root: string, opts: { recurse: boolean; paths: stri
     windowsHide: true,
     maxBuffer: 4 * 1024 * 1024,
     env: {
-      ...process.env,
+      ...withoutPsModulePath(process.env),
       UPLINK_SCAN_ROOT: root,
       UPLINK_SCAN_PATHS: JSON.stringify(opts.paths),
       UPLINK_SCAN_ALLOWED: JSON.stringify(allowed),
