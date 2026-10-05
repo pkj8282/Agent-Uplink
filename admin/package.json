@@ -1,6 +1,6 @@
 {
   "name": "agent-uplink-admin",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "private": true,
   "description": "Agent-Uplink 관리 도구(설정·삭제·조회)",
   "author": "Hello, System!",
