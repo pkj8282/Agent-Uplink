@@ -98,7 +98,8 @@ test("실제 PowerShell 검사: 한글 경로에서도 내 폴더는 0건(win32 
   const rep3 = await realSecureDeps.findForeign(d, { recurse: false, paths: [file, path.join(d, "없음.key")] }, ["S-1-5-21-nobody"]);
   assert.equal(rep3.count, 2, JSON.stringify(rep3));
   assert.ok(rep3.samples.some((s) => s.path === file), JSON.stringify(rep3.samples));
-  const rep4 = await realSecureDeps.findForeign(d, { recurse: false, paths: [file] }, [me]);
+  // 허용 목록은 제품과 같게(관리자 권한으로 실행되면 소유자가 Administrators — CI runner 실측).
+  const rep4 = await realSecureDeps.findForeign(d, { recurse: false, paths: [file] }, [me, "S-1-5-32-544", "S-1-5-18"]);
   assert.equal(rep4.count, 0, JSON.stringify(rep4));
 });
 
