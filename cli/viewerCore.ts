@@ -16,7 +16,8 @@ export async function openViewer(deps: ViewerDeps): Promise<void> {
 }
 
 export function browserCommand(platform: NodeJS.Platform, url: string): { cmd: string; args: string[] } {
-  if (platform === "win32") return { cmd: path.join(process.env.SystemRoot ?? "C:/Windows", "explorer.exe"), args: [url] };
+  // explorer.exe는 #조각이 든 URL을 기본 브라우저에 넘기지 못한다(실측: 브라우저 요청 없음) → url.dll의 프로토콜 처리기로 연다.
+  if (platform === "win32") return { cmd: path.join(process.env.SystemRoot ?? "C:/Windows", "System32", "rundll32.exe"), args: ["url.dll,FileProtocolHandler", url] };
   if (platform === "darwin") return { cmd: "open", args: [url] };
   return { cmd: "xdg-open", args: [url] };
 }

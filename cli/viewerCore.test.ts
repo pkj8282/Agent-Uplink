@@ -34,10 +34,11 @@ test("Hub가 이상한 URL을 주면 열지 않는다", async () => {
   assert.equal(opened, false);
 });
 
-test("브라우저 명령: win32는 explorer.exe 절대 경로", () => {
-  const w = browserCommand("win32", "http://127.0.0.1:1/?t=x");
-  assert.match(w.cmd, /explorer\.exe$/i);
-  assert.deepEqual(w.args, ["http://127.0.0.1:1/?t=x"]);
+test("브라우저 명령: win32는 rundll32 url.dll(explorer.exe는 #조각이 든 URL을 브라우저에 넘기지 못함)", () => {
+  const url = "http://127.0.0.1:1/#t=x";
+  const w = browserCommand("win32", url);
+  assert.match(w.cmd, /System32.rundll32.exe$/i);
+  assert.deepEqual(w.args, ["url.dll,FileProtocolHandler", url]);
   assert.equal(browserCommand("darwin", "u").cmd, "open");
   assert.equal(browserCommand("linux", "u").cmd, "xdg-open");
 });
