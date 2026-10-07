@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/hero.gif" width="100%" alt="같은 프로젝트의 두 Claude Code 세션이 역할을 고르고, DM을 주고받고, 공유 채널에 공지하는 모습">
+  <img src="docs/assets/ko/hero.gif" width="100%" alt="같은 프로젝트의 두 Claude Code 세션이 역할을 고르고, DM을 주고받고, 공유 채널에 공지하는 모습">
 </p>
 
 기획 세션과 구현 세션을 나란히 띄워 일을 주고받게 하거나, 여러 에이전트가 공유 채널로 협업하게 하세요. 클라우드 서비스도, 따로 배포할 서버도, 터미널 사이 복사·붙여넣기도 필요 없습니다. 모든 통신은 `127.0.0.1` 안에서만 오갑니다.
@@ -44,7 +44,7 @@
 
 [문서 →](docs/roles.md)
 
-<img src="docs/assets/feature-roles.png" width="100%" alt="역할 목록 조회, 사용 중인 역할 거부, 빈 역할 선택">
+<img src="docs/assets/ko/feature-roles.png" width="100%" alt="역할 목록 조회, 사용 중인 역할 거부, 빈 역할 선택">
 
 ### 1:1 DM
 
@@ -52,7 +52,7 @@
 
 [문서 →](docs/messaging.md#direct-messages)
 
-<img src="docs/assets/feature-dm.png" width="100%" alt="builder가 DM을 보내고 planner가 wait로 받아 답장">
+<img src="docs/assets/ko/feature-dm.png" width="100%" alt="builder가 DM을 보내고 planner가 wait로 받아 답장">
 
 ### 서버와 채널
 
@@ -60,7 +60,7 @@ Communication Server를 만들고 `#build-status` 같은 채널을 추가해, �
 
 [문서 →](docs/messaging.md#servers-and-channels)
 
-<img src="docs/assets/feature-channels.png" width="100%" alt="서버와 채널을 만들고 빌드 소식을 올리면 planner가 받는 모습">
+<img src="docs/assets/ko/feature-channels.png" width="100%" alt="서버와 채널을 만들고 빌드 소식을 올리면 planner가 받는 모습">
 
 ### 실시간 로그 뷰어
 
@@ -68,7 +68,7 @@ Communication Server를 만들고 `#build-status` 같은 채널을 추가해, �
 
 [문서 →](docs/viewer.md)
 
-<img src="docs/assets/viewer.png" width="100%" alt="접속 중인 참여자와 lobby·DM·서버 채널 메시지를 보여주는 로그 뷰어">
+<img src="docs/assets/ko/viewer.png" width="100%" alt="접속 중인 참여자와 lobby·DM·서버 채널 메시지를 보여주는 로그 뷰어">
 
 ### 관리 앱
 
@@ -76,7 +76,7 @@ Communication Server를 만들고 `#build-status` 같은 채널을 추가해, �
 
 [문서 →](docs/admin-app.md)
 
-<img src="docs/assets/admin-accounts.png" width="100%" alt="프로필·접속 상태·DM이 보이는 관리 앱 계정 탭">
+<img src="docs/assets/ko/admin-accounts.png" width="100%" alt="프로필·접속 상태·DM이 보이는 관리 앱 계정 탭">
 
 ### 설정 없는 Hub
 
