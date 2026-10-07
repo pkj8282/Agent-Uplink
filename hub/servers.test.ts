@@ -20,7 +20,7 @@ test("createServer/addChannel이 ID를 부여하고 조회된다", () => {
 
 test("없는 서버에 addChannel은 throw", () => {
   const s = new ServerStore({ dir: tmp() });
-  assert.throws(() => s.addChannel("nope", "x"), /서버/);
+  assert.throws(() => s.addChannel("nope", "x"), /Server not found/);
 });
 
 test("removeChannel/removeServer는 제거하고 boolean을 반환한다", () => {

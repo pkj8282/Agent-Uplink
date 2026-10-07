@@ -10,14 +10,16 @@ import { InboxStore } from "./inbox.js";
 import { TrashStore, TrashMeta, isTrashId, isUuidLogName, parseAccountRecord } from "./trash.js";
 import { uniqueName } from "./names.js";
 import { NameConflict, RestoreReport } from "../shared/protocol.js";
+import type { HubKey } from "./messages.js";
 
 export type TrashErrorCode = "trash_missing" | "trash_not_restorable" | "trash_bad_id" | "channel_limit" | "trash_busy" | "name_conflict";
 export type RestoreResult =
   | { ok: true; report: RestoreReport }
-  | { ok: false; code: TrashErrorCode; error: string; conflicts?: NameConflict[] };
+  | { ok: false; code: TrashErrorCode; key: HubKey; params?: object; conflicts?: NameConflict[] };
 
-const fail = (code: TrashErrorCode, error: string, conflicts?: NameConflict[]): RestoreResult =>
-  conflicts ? { ok: false, code, error, conflicts } : { ok: false, code, error };
+// 언어 중립: 판단용 code와 문구 키만 돌려준다(문구는 Hub가 현재 언어로 만든다).
+const fail = (code: TrashErrorCode, key: HubKey, params?: object, conflicts?: NameConflict[]): RestoreResult =>
+  ({ ok: false, code, key, ...(params ? { params } : {}), ...(conflicts ? { conflicts } : {}) });
 
 export interface TrashDeps {
   dataDir: string;
@@ -200,14 +202,14 @@ export class TrashOps {
    * 통과하면 plan(최종 이름)을 저널에 기록한 뒤 finishRestore로 실행한다.
    */
   restore(id: unknown, confirmRename: boolean): RestoreResult {
-    if (!isTrashId(id)) return fail("trash_bad_id", "잘못된 휴지통 항목 ID입니다.");
+    if (!isTrashId(id)) return fail("trash_bad_id", "trash_bad_id");
     const meta = this.d.trash.readMeta(id);
-    if (!meta) return fail("trash_missing", "휴지통 항목 파일이 없습니다(이미 지워진 것 같습니다).");
+    if (!meta) return fail("trash_missing", "trash_missing");
     // 이전 복원이 중간에 실패해 restoring으로 남았으면 기록된 plan대로 이어서 끝낸다(일부 파일은 이미 옮겨져 있음).
     if (meta.state === "restoring") return { ok: true, report: this.finishRestore(meta) };
-    if (!this.d.trash.isIntact(meta)) return fail("trash_missing", "휴지통 항목 파일이 없거나 손상됐습니다(이미 지워진 것 같습니다).");
-    if (meta.state !== "done") return fail("trash_busy", "이 항목은 삭제를 마무리하는 중입니다. 같은 대상을 다시 삭제하거나 Hub를 재시작하세요.");
-    if (meta.kind === "orphan") return fail("trash_not_restorable", "고아 로그는 복원할 위치 정보가 없습니다.");
+    if (!this.d.trash.isIntact(meta)) return fail("trash_missing", "trash_missing_or_damaged");
+    if (meta.state !== "done") return fail("trash_busy", "trash_finishing");
+    if (meta.kind === "orphan") return fail("trash_not_restorable", "trash_not_restorable");
 
     const renamed: RestoreReport["renamed"] = [];
     if (meta.kind === "channel" || meta.kind === "server") {
@@ -222,7 +224,7 @@ export class TrashOps {
       const taken = (existing?.channels ?? []).map((c) => c.name);
       const channelNames: Record<string, string> = {};
       for (const ch of meta.channels ?? []) {
-        if (existing?.channels.some((c) => c.id === ch.id)) return fail("trash_busy", "같은 채널이 이미 있습니다.");
+        if (existing?.channels.some((c) => c.id === ch.id)) return fail("trash_busy", "trash_channel_exists");
         const to = uniqueName(ch.name, taken);
         taken.push(to);
         channelNames[ch.id] = to;
@@ -230,9 +232,9 @@ export class TrashOps {
       }
       const total = (existing?.channels.length ?? 0) + (meta.channels?.length ?? 0);
       if (total > this.d.maxChannelsPerServer()) {
-        return fail("channel_limit", `복원하면 서버당 채널 수 한계(${this.d.maxChannelsPerServer()})를 넘습니다.`);
+        return fail("channel_limit", "restore_channel_limit", { max: this.d.maxChannelsPerServer() });
       }
-      if (conflicts.length && !confirmRename) return fail("name_conflict", "같은 이름이 이미 있습니다.", conflicts);
+      if (conflicts.length && !confirmRename) return fail("name_conflict", "name_conflict", undefined, conflicts);
       for (const c of conflicts) renamed.push({ kind: c.kind, from: c.name, to: c.to });
       meta.plan = { serverName, channelNames };
     }

@@ -9,7 +9,7 @@ export function encodeFrame(obj: unknown): Buffer {
 /** 선언된 프레임 길이가 상한을 넘었다(받는 쪽은 연결을 끊어야 한다). */
 export class FrameTooLargeError extends Error {
   constructor(readonly length: number, readonly max: number) {
-    super(`프레임이 너무 큽니다(${length} > ${max} bytes).`);
+    super(`Frame too large (${length} > ${max} bytes).`);
     this.name = "FrameTooLargeError";
   }
 }

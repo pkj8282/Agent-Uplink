@@ -47,7 +47,7 @@ test("채널 삭제: 로그가 휴지통으로 이동, meta는 done·소속 서�
   assert.equal(m.serverId, s.srv); assert.equal(m.serverName, "Main");
   assert.deepEqual(m.files, [`${s.ch1}.jsonl`]);
   const r = await s.a.req("send", { channelId: s.ch1, text: "삭제 후" });
-  assert.equal(r.ok, false); assert.match(r.error!, /채널이 없습니다/);
+  assert.equal(r.ok, false); assert.equal(r.code, "channel_not_found");
   assert.equal(fs.existsSync(path.join(dataDir, "servers", `${s.ch1}.jsonl`)), false); // 로그 재생성 없음
   s.a.close(); s.b.close(); hub.stop();
 });

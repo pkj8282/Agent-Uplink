@@ -42,7 +42,7 @@ test("register는 JSONL에서 seq와 메시지를 복원한다", () => {
 
 test("없는 채널에 append하면 예외를 던진다", () => {
   const s = new ChannelStore({ dir: tmp() });
-  assert.throws(() => s.append("nope", "u1", "A", "x"), /채널/);
+  assert.throws(() => s.append("nope", "u1", "A", "x"), /Channel not found/);
 });
 
 test("unregister한 채널은 getChannel에서 사라지고 append가 거부된다", () => {
@@ -51,5 +51,5 @@ test("unregister한 채널은 getChannel에서 사라지고 append가 거부된�
   s.append("c1", "u1", "A", "x");
   assert.equal(s.unregister("c1"), true);
   assert.equal(s.getChannel("c1"), undefined);
-  assert.throws(() => s.append("c1", "u1", "A", "y"), /채널/);
+  assert.throws(() => s.append("c1", "u1", "A", "y"), /Channel not found/);
 });

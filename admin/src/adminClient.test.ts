@@ -115,7 +115,7 @@ test("admin.key 없음/빈 파일/불일치는 크래시 없이 명확한 에러
   const wrongKey = path.join(tmp(), "admin.key");
   fs.writeFileSync(wrongKey, "f".repeat(64));
   const r = await toResult(() => new AdminClient({ port, clientKeyPath, keyPath: wrongKey, timeoutMs: 2000 }).snapshot());
-  assert.deepEqual(r, { ok: false, error: "admin 인증 실패", hubDown: false });
+  assert.deepEqual(r, { ok: false, error: "admin 인증 실패", hubDown: false, code: "admin_auth_failed" });
 
   // 키 파일의 앞뒤 공백/개행은 무시한다
   const padded = path.join(tmp(), "admin.key");

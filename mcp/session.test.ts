@@ -6,7 +6,7 @@ import path from "node:path";
 import net from "node:net";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 import { Hub } from "../hub/server.js";
-import { TEST_SECURE_DEPS, registerTestHub, TestClient } from "../hub/testing.js";
+import { TEST_SECURE_DEPS, registerTestHub, TestClient, seedLanguage } from "../hub/testing.js";
 import { hubProof } from "../shared/auth.js";
 import { HubClient } from "./hubClient.js";
 import { RoleStore } from "./roles.js";
@@ -18,6 +18,7 @@ function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-se
 const hubDirs = new Map<number, string>();
 
 async function startHub(tcpPort = 0, dataDir = tmp()) {
+  seedLanguage(dataDir, "ko"); // MCP 안내 문구 단정(한국어)을 유지한다 — 영어 경로는 따로 시험한다
   const hub = new Hub({ tcpPort, httpPort: 0, dataDir, idleShutdownMs: 0 });
   await hub.startTcp();
   await hub.secure(TEST_SECURE_DEPS);

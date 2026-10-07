@@ -78,7 +78,7 @@ export class ServerStore {
 
   addChannel(serverId: string, name: string): ServerChannel {
     const srv = this.servers.get(serverId);
-    if (!srv) throw new Error(`서버가 없습니다: ${serverId}`);
+    if (!srv) throw new Error(`Server not found: ${serverId}`);
     const ch: ServerChannel = { id: randomUUID(), name };
     srv.channels.push(ch);
     this.save();
@@ -98,7 +98,7 @@ export class ServerStore {
   /** 복원: 지정 id의 채널을 추가한다(이미 있으면 무시). */
   addChannelWithId(serverId: string, ch: ServerChannel): void {
     const srv = this.servers.get(serverId);
-    if (!srv) throw new Error(`서버가 없습니다: ${serverId}`);
+    if (!srv) throw new Error(`Server not found: ${serverId}`);
     if (srv.channels.some((c) => c.id === ch.id)) return;
     srv.channels.push({ id: ch.id, name: ch.name });
     this.save();

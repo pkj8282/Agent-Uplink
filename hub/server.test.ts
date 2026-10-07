@@ -10,7 +10,7 @@ import { Response } from "../shared/protocol.js";
 
 function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-hub-")); }
 
-import { startTestHub, TestClient as Client, TEST_SECURE_DEPS } from "./testing.js";
+import { startTestHub, TestClient as Client, TEST_SECURE_DEPS, hasHangul } from "./testing.js";
 import { newNonce, clientProof, hubProof, proofEquals } from "../shared/auth.js";
 import { readClientKey } from "../shared/clientKey.js";
 
@@ -358,7 +358,7 @@ test("allowDevDelete가 false면 삭제는 거부된다", async () => {
   const ch = await a.req("create_channel", { serverId: srv.serverId, name: "c1" });
   const del = await a.req("delete_channel", { channelId: ch.channelId });
   assert.equal(del.ok, false);
-  assert.match(del.error!, /삭제|허용|불가/);
+  assert.equal(del.code, "dev_delete_disabled");
   assert.equal((await a.req("delete_server", { serverId: srv.serverId })).ok, false);
   a.close(); hub.stop();
 });
@@ -728,4 +728,106 @@ test("Minor9: 기존 계정 login은 이름 힌트가 길어도 무시하고 통
   assert.equal(r.name, "A");
   assert.equal((await b.req("login", { uuid: "u-new", name: "x".repeat(65) })).ok, false);
   b.close(); hub.stop();
+});
+
+for (const [language, expected] of [["N/A", "Log in first (no account context)."], ["en", "Log in first (no account context)."], ["ko", "먼저 login 하세요(계정 맥락 없음)."]] as const) {
+  test(`login 전 send 오류는 언어를 따른다: language=${language}`, async () => {
+    const { hub, port } = await startTestHub({ language });
+    const c = new Client(port); await c.ready();
+    const r = await c.req("send", { channelId: "lobby", text: "x" });
+    assert.equal(r.ok, false);
+    assert.equal(r.code, "login_required");
+    assert.equal(r.error, expected);
+    c.close(); hub.stop();
+  });
+}
+
+test("admin_set_config로 언어를 바꾸면 같은 연결의 다음 오류부터 그 언어", async () => {
+  const { hub, port, dataDir } = await startTestHub({ language: "ko" });
+  const token = fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim();
+  const c = new Client(port); await c.ready();
+  assert.equal((await c.req("send", { channelId: "lobby", text: "x" })).error, "먼저 login 하세요(계정 맥락 없음).");
+  assert.equal((await c.req("admin_set_config", { token, patch: { language: "en" } })).ok, true);
+  assert.equal((await c.req("send", { channelId: "lobby", text: "x" })).error, "Log in first (no account context).");
+  c.close(); hub.stop();
+});
+
+/** 언어 중립 확인용: 같은 작업 순서를 실행해 {ok, code} 목록을 돌려준다. */
+async function neutralScenario(language: "ko" | "en"): Promise<{ results: [boolean, string | null][]; dataDir: string; errors: string[] }> {
+  const { hub, port, dataDir } = await startTestHub({ language });
+  const token = fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim();
+  const a = new Client(port); await a.ready();
+  const b = new Client(port); await b.ready();
+  const results: [boolean, string | null][] = [];
+  const errors: string[] = [];
+  const rec = async (p: Promise<Response>) => {
+    const r = await p;
+    results.push([r.ok, r.code ?? null]);
+    if (!r.ok) errors.push(r.error ?? "");
+    return r;
+  };
+  await rec(a.req("login", { uuid: "u1", name: "A" }));
+  await rec(b.req("login", { uuid: "u2", name: "B" }));
+  const srv = await rec(a.req("create_server", { name: "S" }));
+  await rec(a.req("create_server", { name: "S" }));
+  const ch = await rec(a.req("create_channel", { serverId: srv.serverId, name: "c" }));
+  await rec(a.req("create_channel", { serverId: srv.serverId, name: "c" }));
+  await rec(a.req("create_channel", { serverId: "nope", name: "c" }));
+  await rec(a.req("create_server", { name: "" }));
+  await rec(a.req("send", { channelId: "lobby", text: "hello" }));
+  await rec(a.req("send", { channelId: "lobby", text: "" }));
+  await rec(a.req("send", { channelId: "nope", text: "x" }));
+  await rec(a.req("open_dm", { peer: "zzz" }));
+  await rec(a.req("open_dm", { peer: "u1" }));
+  await rec(a.req("open_dm", { peer: "u2" }));
+  await rec(a.req("delete_channel", { channelId: ch.channelId }));
+  await rec(a.req("admin_set_config", { token: "wrong", patch: { language: "en" } }));
+  await rec(a.req("admin_delete_channel", { token, channelId: ch.channelId }));
+  const snap = await a.req("admin_snapshot", { token });
+  await rec(a.req("admin_restore_trash", { token, trashId: snap.trash![0].id }));
+  await rec(a.req("admin_restore_trash", { token, trashId: "../x" }));
+  await rec(a.req("admin_delete_account", { token, uuid: "nobody" }));
+  await rec(a.req("set_profile", { description: 5 }));
+  await rec(a.req("account_status", { uuids: "x" }));
+  await rec(a.req("no_such_op"));
+  a.close(); b.close(); hub.stop();
+  return { results, dataDir, errors };
+}
+
+/** config.json·키 파일을 뺀 데이터 파일 전체. */
+function dataFiles(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (d: string) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const f = path.join(d, e.name);
+      if (e.isDirectory()) walk(f);
+      else if (e.name !== "config.json" && !e.name.endsWith(".key")) out.push(f);
+    }
+  };
+  walk(dir);
+  return out;
+}
+
+test("언어 중립: 같은 작업 순서는 ko/en에서 같은 성공 여부·code를 내고, 데이터 파일에 번역 문구를 남기지 않는다", async () => {
+  const ko = await neutralScenario("ko");
+  const en = await neutralScenario("en");
+  assert.deepEqual(ko.results, en.results);
+  assert.ok(ko.results.every(([ok, code]) => ok || code !== null), "실패 응답에는 모두 code");
+  assert.deepEqual(en.errors.filter(hasHangul), []);
+  for (const run of [ko, en]) for (const f of dataFiles(run.dataDir)) assert.equal(hasHangul(fs.readFileSync(f, "utf8")), false, f);
+});
+
+test("언어를 바꿔도 config.json 외 데이터 파일은 바뀌지 않는다", async () => {
+  const { hub, port, dataDir } = await startTestHub({ language: "ko" });
+  const token = fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim();
+  const a = new Client(port); await a.ready();
+  await a.req("login", { uuid: "u1", name: "A" });
+  await a.req("create_server", { name: "S" });
+  await a.req("send", { channelId: "lobby", text: "hello" });
+  const snapshot = () => dataFiles(dataDir).sort().map((f) => [f, fs.readFileSync(f, "utf8")]);
+  const before = snapshot();
+  assert.equal((await a.req("admin_set_config", { token, patch: { language: "en" } })).ok, true);
+  assert.equal((await a.req("admin_set_config", { token, patch: { language: "ko" } })).ok, true);
+  assert.deepEqual(snapshot(), before);
+  a.close(); hub.stop();
 });

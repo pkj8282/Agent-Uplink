@@ -58,7 +58,7 @@ export class ChannelStore {
 
   append(channelId: string, from: string, fromName: string, text: string): Message {
     const e = this.entries.get(channelId);
-    if (!e) throw new Error(`채널이 없습니다: ${channelId}`);
+    if (!e) throw new Error(`Channel not found: ${channelId}`);
     const msg: Message = { seq: ++e.seq, ts: Date.now(), channelId, from, fromName, text };
     e.ring.push(msg);
     if (e.ring.length > this.ringSize) e.ring.shift();

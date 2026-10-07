@@ -43,13 +43,13 @@ function hangulLiterals(rel: string): string[] {
 
 // 아직 변환하지 않은 파일. 각 Task가 자기 파일을 지운다 — 최종에는 비어 있어야 한다.
 const PENDING = new Set<string>([
-  "admin/src/adminClient.ts", "admin/src/auth.ts", "admin/src/framing.ts", "admin/src/main.ts",
+  "admin/src/adminClient.ts", "admin/src/auth.ts", "admin/src/main.ts",
   "admin/src/renderer/renderer.ts", "admin/src/renderer/view.ts",
   "cli/viewer.ts", "cli/viewerCore.ts",
-  "hub/acl.ts", "hub/channels.ts", "hub/index.ts", "hub/names.ts", "hub/options.ts", "hub/secure.ts",
-  "hub/server.ts", "hub/servers.ts", "hub/trash.ts", "hub/trashOps.ts", "hub/viewer.ts",
+  "hub/index.ts", "hub/options.ts", "hub/secure.ts",
+  "hub/trashOps.ts", "hub/viewer.ts",
   "mcp/format.ts", "mcp/hubClient.ts", "mcp/index.ts", "mcp/roles.ts", "mcp/schemas.ts", "mcp/session.ts",
-  "shared/clientKey.ts", "shared/framing.ts",
+  "shared/clientKey.ts",
 ]);
 const PENDING_HTML = new Set<string>(["admin/src/renderer/index.html"]);
 
@@ -68,4 +68,22 @@ test("관리 앱 index.html에 한글이 없다", () => {
     if (PENDING_HTML.has(f)) continue;
     assert.equal(hasHangul(fs.readFileSync(path.join(root, f), "utf8")), false, f);
   }
+});
+
+test("Hub의 ok:false 응답 객체에는 모두 code가 있다", () => {
+  const offenders: string[] = [];
+  for (const rel of ["hub/server.ts", "hub/trashOps.ts"]) {
+    const text = fs.readFileSync(path.join(root, rel), "utf8");
+    const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.ES2022, true);
+    const visit = (n: ts.Node) => {
+      if (ts.isObjectLiteralExpression(n)) {
+        const okFalse = n.properties.some((p) => ts.isPropertyAssignment(p) && p.name.getText(sf) === "ok" && p.initializer.kind === ts.SyntaxKind.FalseKeyword);
+        const hasCode = n.properties.some((p) => ts.isSpreadAssignment(p) || (p.name !== undefined && p.name.getText(sf) === "code"));
+        if (okFalse && !hasCode) offenders.push(`${rel}:${sf.getLineAndCharacterOfPosition(n.getStart()).line + 1}`);
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+  }
+  assert.deepEqual(offenders, []);
 });

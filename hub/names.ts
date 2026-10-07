@@ -32,10 +32,15 @@ export function uniqueName(base: string, taken: string[]): string {
   }
 }
 
-/** 서버·채널·계정 이름: 앞뒤 공백을 지운 뒤 1~NAME_MAX 코드포인트. 통과하면 trim된 이름. */
-export function validateName(raw: unknown, what: string): { ok: true; name: string } | { ok: false; error: string } {
+export type NameKind = "account" | "server" | "channel";
+
+/** 서버·채널·계정 이름: 앞뒤 공백을 지운 뒤 1~NAME_MAX 코드포인트. 통과하면 trim된 이름. 실패는 언어 중립 값(문구는 Hub가 만든다). */
+export function validateName(
+  raw: unknown,
+  kind: NameKind,
+): { ok: true; name: string } | { ok: false; code: "name_invalid"; params: { kind: NameKind; max: number } } {
   const name = typeof raw === "string" ? raw.trim() : "";
   const len = [...name].length;
-  if (len === 0 || len > NAME_MAX) return { ok: false, error: `${what} 이름은 1~${NAME_MAX}자여야 합니다.` };
+  if (len === 0 || len > NAME_MAX) return { ok: false, code: "name_invalid", params: { kind, max: NAME_MAX } };
   return { ok: true, name };
 }

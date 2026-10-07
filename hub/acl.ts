@@ -22,7 +22,7 @@ export async function currentUserSid(): Promise<string> {
   // "도메인\사용자","S-1-5-21-..." 형태(CSV, 머리글 없음)
   const { stdout } = await run(WHOAMI, ["/user", "/fo", "csv", "/nh"], { encoding: "utf8", timeout: 10000, windowsHide: true });
   const m = stdout.match(/"(S-1-[0-9-]+)"/);
-  if (!m) throw new Error(`현재 사용자 SID를 알 수 없습니다: ${stdout.trim()}`);
+  if (!m) throw new Error(`Cannot determine current user SID: ${stdout.trim()}`);
   return m[1];
 }
 
@@ -34,7 +34,7 @@ export async function currentUserSid(): Promise<string> {
 export async function restrictDataDirAcl(dir: string): Promise<{ ok: boolean; error?: string }> {
   if (process.platform !== "win32") return { ok: true };
   try {
-    if (!fs.statSync(dir).isDirectory()) return { ok: false, error: `폴더가 아닙니다: ${dir}` };
+    if (!fs.statSync(dir).isDirectory()) return { ok: false, error: `Not a folder: ${dir}` };
     const user = `*${await currentUserSid()}`;
     await run(
       ICACLS,
@@ -51,6 +51,6 @@ export async function restrictDataDirAcl(dir: string): Promise<{ ok: boolean; er
   } catch (e) {
     // icacls 출력은 시스템 코드 페이지라 깨질 수 있다 → 종료 코드만 알린다(실행 자체 실패면 메시지).
     const code = (e as { code?: unknown }).code;
-    return { ok: false, error: typeof code === "number" ? `icacls 종료 코드 ${code}` : (e as Error).message };
+    return { ok: false, error: typeof code === "number" ? `icacls exit code ${code}` : (e as Error).message };
   }
 }

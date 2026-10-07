@@ -17,6 +17,9 @@ import { isSafeAccountId } from "./ids.js";
 import { TrashStore } from "./trash.js";
 import { TrashOps } from "./trashOps.js";
 import { rebuildDmIndex } from "./recovery.js";
+import { HUB_MESSAGES, type HubKey } from "./messages.js";
+import { effectiveLang, type Lang } from "../shared/i18n.js";
+import { currentLang } from "../shared/langConfig.js";
 import {
   MAGIC,
   PROTOCOL_VERSION,
@@ -103,6 +106,22 @@ export class Hub {
     this.limits = { ...DEFAULT_LIMITS, ...opts.limits };
     this.tcp = net.createServer((sock) => this.onConnection(sock));
     this.http = http.createServer((req, res) => this.onHttp(req, res));
+  }
+
+  /** 표시 언어. 데이터 적재 전(보안 준비 중)에는 파일에서 읽는다 — 값은 ko/en 선택에만 쓰인다. */
+  protected lang(): Lang {
+    return this.config ? effectiveLang(this.config.language) : currentLang(this.opts.dataDir);
+  }
+
+  /** 현재 언어의 문구. params는 키별 함수 인자. */
+  protected msg(key: HubKey, params?: object): string {
+    const e = HUB_MESSAGES[this.lang()][key] as string | ((p: object | undefined) => string);
+    return typeof e === "function" ? e(params) : e;
+  }
+
+  /** 오류 응답: 판단용 code와 표시용 문구. */
+  protected err(code: string, key: HubKey, params?: object): { ok: false; code: string; error: string } {
+    return { ok: false, code, error: this.msg(key, params) };
   }
 
   /** 데이터 폴더를 잠그고 키를 준비한 뒤 데이터를 적재한다. 끝나야 hello에 답한다. 실패하면 던지고 hello는 secure_setup_failed. */
@@ -192,7 +211,7 @@ export class Hub {
     }
     if (!this.isReady) {
       res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "1" });
-      res.end("Hub 준비 중");
+      res.end(this.msg("http_not_ready"));
       return;
     }
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -229,7 +248,7 @@ export class Hub {
     if (url.pathname === "/events") {
       if (this.sseClients.size >= this.limits.maxSse) {
         res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
-        res.end("뷰어 연결이 너무 많습니다.");
+        res.end(this.msg("http_too_many_viewers"));
         return;
       }
       res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
@@ -330,7 +349,7 @@ export class Hub {
             // 파일 잠김·손상 등 처리 중 예외가 Hub 프로세스를 죽이지 않게 한다(휴지통 저널은 남아 재시도·재시작 때 마무리).
             const id = (req as { id?: unknown } | null)?.id;
             if (typeof id === "number" && !sock.destroyed) {
-              sock.write(encodeFrame({ ok: false, id, code: "io_error", error: `처리 중 오류가 났습니다: ${(e as Error).message}` }));
+              sock.write(encodeFrame({ ...this.err("io_error", "io_error", { detail: (e as Error).message }), id }));
             }
           }
         });
@@ -363,12 +382,12 @@ export class Hub {
     const reply = (res: Omit<Response, "id">) => sock.write(encodeFrame({ ...res, id: req.id }));
     const needLogin = (): string | null => {
       if (!state.uuid) {
-        reply({ ok: false, error: "먼저 login 하세요(계정 맥락 없음)." });
+        reply(this.err("login_required", "login_required"));
         return null;
       }
       // 로그인 이후 계정이 admin에 의해 삭제됐을 수 있다 → 크래시 대신 재로그인 요구.
       if (!this.accounts.get(state.uuid)) {
-        reply({ ok: false, error: "이 계정은 더 이상 존재하지 않습니다. 다시 login 하세요." });
+        reply(this.err("account_gone", "account_gone"));
         state.uuid = null;
         return null;
       }
@@ -377,7 +396,7 @@ export class Hub {
     const adminAuth = (): boolean => {
       const token = (req as { token?: unknown }).token;
       if (!this.adminKey || !verifyAdminToken(this.adminKey, token)) {
-        reply({ ok: false, error: "admin 인증 실패" });
+        reply(this.err("admin_auth_failed", "admin_auth_failed"));
         return false;
       }
       return true;
@@ -388,7 +407,7 @@ export class Hub {
       if (!this.isReady) {
         // 준비 전 hello 반복으로 대기 콜백이 쌓이지 않게 연결당 하나만 기다린다.
         if (state.helloPending) {
-          reply({ ok: false, code: "hello_pending", error: "Hub 보안 준비 중입니다. 앞선 hello 응답을 기다리세요." });
+          reply(this.err("hello_pending", "hello_pending"));
           return;
         }
         state.helloPending = true;
@@ -412,7 +431,7 @@ export class Hub {
       return;
     }
     if (!state.authed) {
-      reply({ ok: false, code: "auth_required", error: "먼저 인증하세요(Hub 프로토콜 v3)." });
+      reply(this.err("auth_required", "auth_required"));
       return;
     }
 
@@ -420,20 +439,20 @@ export class Hub {
 
       case "login": {
         if (typeof req.uuid !== "string" || req.uuid.length === 0) {
-          reply({ ok: false, error: "login에는 uuid가 필요합니다." });
+          reply(this.err("uuid_required", "uuid_required"));
           return;
         }
         // uuid는 계정 파일 이름이 된다 → 경로 조작 문자를 거부한다.
         if (!isSafeAccountId(req.uuid)) {
-          reply({ ok: false, error: "uuid에는 영숫자와 '-', '_', '.'만 쓸 수 있습니다(128자 이하)." });
+          reply(this.err("uuid_invalid", "uuid_invalid"));
           return;
         }
         let loginName: string | undefined;
         // 이름 힌트는 새 계정을 만들 때만 쓴다 — 기존 계정은 힌트를 무시한다(긴 UPLINK_ACCOUNT_NAME으로 업그레이드 뒤 막히지 않게).
         if (req.name !== undefined && !this.accounts.get(req.uuid)) {
-          const v = validateName(req.name, "계정");
+          const v = validateName(req.name, "account");
           if (!v.ok) {
-            reply({ ok: false, error: v.error });
+            reply(this.err(v.code, "name_invalid", v.params));
             return;
           }
           loginName = v.name;
@@ -443,7 +462,7 @@ export class Hub {
           // 같은 계정을 다른 세션(다른 sessionToken 또는 비독점 연결)이 쓰고 있으면 거부. 상태는 바꾸지 않는다.
           for (const other of this.connStates) {
             if (other !== state && other.uuid === req.uuid && (token === null || other.sessionToken !== token)) {
-              reply({ ok: false, error: "이미 다른 세션이 사용 중인 계정입니다." });
+              reply(this.err("account_in_use", "account_in_use"));
               return;
             }
           }
@@ -466,7 +485,7 @@ export class Hub {
       case "viewer_ticket": {
         // 뷰어 포트를 실제로 연 Hub만 티켓을 준다 → 다른 사용자가 점유한 포트로 티켓을 보내지 않는다.
         if (!this.httpListening) {
-          reply({ ok: false, code: "viewer_unavailable", error: `뷰어가 꺼져 있습니다(포트 ${this.opts.httpPort}를 열지 못함).` });
+          reply(this.err("viewer_unavailable", "viewer_unavailable", { port: this.opts.httpPort }));
           return;
         }
         // 티켓은 URL 조각(#)에 둔다 — 서버 요청줄·Referer에 실리지 않는다.
@@ -485,9 +504,9 @@ export class Hub {
       case "set_name": {
         const uuid = needLogin();
         if (!uuid) return;
-        const v = validateName(req.name, "계정");
+        const v = validateName(req.name, "account");
         if (!v.ok) {
-          reply({ ok: false, error: v.error });
+          reply(this.err(v.code, "name_invalid", v.params));
           return;
         }
         reply({ ok: true, name: this.accounts.setName(uuid, v.name) });
@@ -504,12 +523,12 @@ export class Hub {
         const uuid = needLogin();
         if (!uuid) return;
         if (typeof req.peer !== "string" || req.peer.length === 0) {
-          reply({ ok: false, error: "peer가 필요합니다." });
+          reply(this.err("peer_required", "peer_required"));
           return;
         }
         const peer = this.resolvePeer(req.peer, uuid);
-        if ("error" in peer) {
-          reply({ ok: false, error: peer.error });
+        if ("code" in peer) {
+          reply(this.err(peer.code, peer.code, peer.params));
           return;
         }
         reply({ ok: true, channelId: this.ensureDm(uuid, peer.uuid) });
@@ -534,14 +553,14 @@ export class Hub {
       case "create_server": {
         const uuid = needLogin();
         if (!uuid) return;
-        const v = validateName(req.name, "서버");
+        const v = validateName(req.name, "server");
         if (!v.ok) {
-          reply({ ok: false, error: v.error });
+          reply(this.err(v.code, "name_invalid", v.params));
           return;
         }
         const sameServer = this.servers.listServers().find((s) => nameKey(s.name) === nameKey(v.name));
         if (sameServer) {
-          reply({ ok: false, error: `이미 같은 이름의 서버가 있습니다: ${sameServer.name} (${sameServer.id})` });
+          reply(this.err("server_name_taken", "server_name_taken", { name: sameServer.name, id: sameServer.id }));
           return;
         }
         const srv = this.servers.createServer(v.name);
@@ -565,21 +584,21 @@ export class Hub {
         if (!uuid) return;
         const srv = this.servers.getServer(req.serverId);
         if (!srv) {
-          reply({ ok: false, error: `서버가 없습니다: ${req.serverId}` });
+          reply(this.err("server_not_found", "server_not_found", { id: req.serverId }));
           return;
         }
-        const v = validateName(req.name, "채널");
+        const v = validateName(req.name, "channel");
         if (!v.ok) {
-          reply({ ok: false, error: v.error });
+          reply(this.err(v.code, "name_invalid", v.params));
           return;
         }
         const sameChannel = srv.channels.find((c) => nameKey(c.name) === nameKey(v.name));
         if (sameChannel) {
-          reply({ ok: false, error: `이 서버에 이미 같은 이름의 채널이 있습니다: ${sameChannel.name} (${sameChannel.id})` });
+          reply(this.err("channel_name_taken", "channel_name_taken", { name: sameChannel.name, id: sameChannel.id }));
           return;
         }
         if (srv.channels.length >= this.config.maxChannelsPerServer) {
-          reply({ ok: false, error: `채널 수 한계(${this.config.maxChannelsPerServer})를 초과했습니다.` });
+          reply(this.err("channel_limit", "channel_limit", { max: this.config.maxChannelsPerServer }));
           return;
         }
         const ch = this.servers.addChannel(srv.id, v.name);
@@ -592,7 +611,7 @@ export class Hub {
         if (!needLogin()) return;
         const srv = this.servers.getServer(req.serverId);
         if (!srv) {
-          reply({ ok: false, error: `서버가 없습니다: ${req.serverId}` });
+          reply(this.err("server_not_found", "server_not_found", { id: req.serverId }));
           return;
         }
         reply({ ok: true, channels: srv.channels.map((c) => ({ channelId: c.id, name: c.name })) });
@@ -603,11 +622,11 @@ export class Hub {
         const uuid = needLogin();
         if (!uuid) return;
         if (!this.config.allowDevDelete) {
-          reply({ ok: false, error: "MCP 삭제가 꺼져 있습니다(allowDevDelete=false). 사용자가 관리 앱 설정에서 켤 수 있습니다." });
+          reply(this.err("dev_delete_disabled", "dev_delete_disabled"));
           return;
         }
         if (!this.trashOps.deleteChannel(req.channelId, "mcp")) {
-          reply({ ok: false, error: `채널이 없습니다: ${req.channelId}` });
+          reply(this.err("channel_not_found", "channel_not_found", { id: req.channelId }));
           return;
         }
         reply({ ok: true });
@@ -618,11 +637,11 @@ export class Hub {
         const uuid = needLogin();
         if (!uuid) return;
         if (!this.config.allowDevDelete) {
-          reply({ ok: false, error: "MCP 삭제가 꺼져 있습니다(allowDevDelete=false). 사용자가 관리 앱 설정에서 켤 수 있습니다." });
+          reply(this.err("dev_delete_disabled", "dev_delete_disabled"));
           return;
         }
         if (!this.trashOps.deleteServer(req.serverId, "mcp")) {
-          reply({ ok: false, error: `서버가 없습니다: ${req.serverId}` });
+          reply(this.err("server_not_found", "server_not_found", { id: req.serverId }));
           return;
         }
         reply({ ok: true });
@@ -633,20 +652,20 @@ export class Hub {
         const uuid = needLogin();
         if (!uuid) return;
         if (typeof req.text !== "string" || req.text.length === 0) {
-          reply({ ok: false, error: "text는 비어있지 않은 문자열이어야 합니다." });
+          reply(this.err("text_invalid", "text_invalid"));
           return;
         }
         if (req.text.length > MAX_TEXT_LENGTH) {
-          reply({ ok: false, error: `메시지는 ${MAX_TEXT_LENGTH}자 이하여야 합니다.` });
+          reply(this.err("text_too_long", "text_too_long", { max: MAX_TEXT_LENGTH }));
           return;
         }
         const ch = this.channels.getChannel(req.channelId);
         if (!ch) {
-          reply({ ok: false, error: `채널이 없습니다: ${req.channelId}` });
+          reply(this.err("channel_not_found", "channel_not_found", { id: req.channelId }));
           return;
         }
         if (ch.members && !ch.members.includes(uuid)) {
-          reply({ ok: false, error: "이 채널에 접근할 수 없습니다." });
+          reply(this.err("channel_forbidden", "channel_forbidden"));
           return;
         }
         const name = this.accounts.get(uuid)!.name;
@@ -661,11 +680,11 @@ export class Hub {
         if (!uuid) return;
         const ch = this.channels.getChannel(req.channelId);
         if (!ch) {
-          reply({ ok: false, error: `채널이 없습니다: ${req.channelId}` });
+          reply(this.err("channel_not_found", "channel_not_found", { id: req.channelId }));
           return;
         }
         if (ch.members && !ch.members.includes(uuid)) {
-          reply({ ok: false, error: "이 채널에 접근할 수 없습니다." });
+          reply(this.err("channel_forbidden", "channel_forbidden"));
           return;
         }
         const limit = typeof req.limit === "number" && req.limit > 0 ? req.limit : 50;
@@ -738,19 +757,19 @@ export class Hub {
         const patch = req.patch ?? {};
         const isPosInt = (v: unknown) => typeof v === "number" && Number.isInteger(v) && v >= 1;
         if (patch.maxChannelsPerServer !== undefined && !isPosInt(patch.maxChannelsPerServer)) {
-          reply({ ok: false, error: "maxChannelsPerServer는 1 이상 정수여야 합니다." });
+          reply(this.err("config_max_invalid", "config_max_invalid"));
           return;
         }
         if (patch.inboxMaxBatch !== undefined && !isPosInt(patch.inboxMaxBatch)) {
-          reply({ ok: false, error: "inboxMaxBatch는 1 이상 정수여야 합니다." });
+          reply(this.err("config_batch_invalid", "config_batch_invalid"));
           return;
         }
         if (patch.allowDevDelete !== undefined && typeof patch.allowDevDelete !== "boolean") {
-          reply({ ok: false, error: "allowDevDelete는 boolean이어야 합니다." });
+          reply(this.err("config_dev_delete_invalid", "config_dev_delete_invalid"));
           return;
         }
         if (patch.language !== undefined && patch.language !== "ko" && patch.language !== "en") {
-          reply({ ok: false, code: "config_language_invalid", error: "language는 ko 또는 en이어야 합니다." });
+          reply(this.err("config_language_invalid", "config_language_invalid"));
           return;
         }
         if (patch.maxChannelsPerServer !== undefined) this.config.maxChannelsPerServer = patch.maxChannelsPerServer;
@@ -765,7 +784,7 @@ export class Hub {
       case "admin_delete_channel": {
         if (!adminAuth()) return;
         if (!this.trashOps.deleteChannel(req.channelId, "admin")) {
-          reply({ ok: false, error: `채널이 없습니다: ${req.channelId}` });
+          reply(this.err("channel_not_found", "channel_not_found", { id: req.channelId }));
           return;
         }
         reply({ ok: true });
@@ -775,7 +794,7 @@ export class Hub {
       case "admin_delete_server": {
         if (!adminAuth()) return;
         if (!this.trashOps.deleteServer(req.serverId, "admin")) {
-          reply({ ok: false, error: `서버가 없습니다: ${req.serverId}` });
+          reply(this.err("server_not_found", "server_not_found", { id: req.serverId }));
           return;
         }
         reply({ ok: true });
@@ -785,7 +804,7 @@ export class Hub {
       case "admin_delete_account": {
         if (!adminAuth()) return;
         if (!this.accounts.get(req.uuid)) {
-          reply({ ok: false, error: `계정이 없습니다: ${req.uuid}` });
+          reply(this.err("account_not_found", "account_not_found", { id: req.uuid }));
           return;
         }
         this.trashOps.deleteAccount(req.uuid, "admin");
@@ -798,7 +817,7 @@ export class Hub {
         const q = req as { trashId?: unknown; confirmRename?: unknown };
         const r = this.trashOps.restore(q.trashId, q.confirmRename === true);
         if (r.ok) reply({ ok: true, restored: r.report });
-        else reply({ ok: false, error: r.error, code: r.code, ...(r.conflicts ? { conflicts: r.conflicts } : {}) });
+        else reply({ ...this.err(r.code, r.key, r.params), ...(r.conflicts ? { conflicts: r.conflicts } : {}) });
         return;
       }
 
@@ -813,7 +832,7 @@ export class Hub {
         if (!uuid) return;
         const d = (req as { description?: unknown }).description;
         if (typeof d !== "string" || d.length > 500) {
-          reply({ ok: false, error: "description은 500자 이하 문자열이어야 합니다." });
+          reply(this.err("description_invalid", "description_invalid"));
           return;
         }
         reply({ ok: true, description: this.accounts.setDescription(uuid, d) });
@@ -823,7 +842,7 @@ export class Hub {
       case "account_status": {
         const uuids = (req as { uuids?: unknown }).uuids;
         if (!Array.isArray(uuids) || uuids.length > 100 || !uuids.every((u) => typeof u === "string")) {
-          reply({ ok: false, error: "uuids는 문자열 배열(최대 100개)이어야 합니다." });
+          reply(this.err("uuids_invalid", "uuids_invalid"));
           return;
         }
         reply({
@@ -837,7 +856,7 @@ export class Hub {
       }
 
       default:
-        reply({ ok: false, error: "알 수 없는 op" });
+        reply(this.err("unknown_op", "unknown_op"));
         return;
     }
   }
@@ -845,17 +864,17 @@ export class Hub {
   /** v3 핸드셰이크 2단계. 연결당 1회 — 틀리면 응답 후 연결을 끊는다. */
   private handleAuth(sock: net.Socket, state: ConnState, q: { nonce?: unknown; proof?: unknown }, reply: (res: Omit<Response, "id">) => void): void {
     if (state.authed) {
-      reply({ ok: false, code: "already_authed", error: "이미 인증된 연결입니다." });
+      reply(this.err("already_authed", "already_authed"));
       return;
     }
     const hubNonce = state.hubNonce;
     if (!hubNonce || !this.clientKey) {
-      reply({ ok: false, code: "auth_required", error: "먼저 hello를 보내세요." });
+      reply(this.err("auth_required", "auth_hello_first"));
       return;
     }
     state.hubNonce = null;
     if (!isNonce(q.nonce) || !proofEquals(clientProof(this.clientKey, hubNonce, q.nonce), q.proof)) {
-      reply({ ok: false, code: "auth_failed", error: "인증 실패" });
+      reply(this.err("auth_failed", "auth_failed"));
       state.closed = true;
       sock.end();
       setTimeout(() => sock.destroy(), 1000).unref();
@@ -881,16 +900,16 @@ export class Hub {
   }
 
   /** peer를 UUID(우선) 또는 유일한 이름으로 해석한다. */
-  private resolvePeer(peer: string, me: string): { uuid: string } | { error: string } {
+  private resolvePeer(peer: string, me: string): { uuid: string } | { code: "dm_self" | "peer_not_found" | "peer_ambiguous"; params?: object } {
     const byId = this.accounts.get(peer);
     if (byId) {
-      if (byId.uuid === me) return { error: "자기 자신과는 DM할 수 없습니다." };
+      if (byId.uuid === me) return { code: "dm_self" };
       return { uuid: byId.uuid };
     }
     const matches = this.accounts.list().filter((a) => a.name === peer);
-    if (matches.length === 0) return { error: `그런 계정이 없습니다: ${peer}` };
-    if (matches.length > 1) return { error: `이름이 모호합니다(${matches.length}명). UUID로 지정하세요: ${peer}` };
-    if (matches[0].uuid === me) return { error: "자기 자신과는 DM할 수 없습니다." };
+    if (matches.length === 0) return { code: "peer_not_found", params: { peer } };
+    if (matches.length > 1) return { code: "peer_ambiguous", params: { count: matches.length, peer } };
+    if (matches[0].uuid === me) return { code: "dm_self" };
     return { uuid: matches[0].uuid };
   }
 

@@ -193,7 +193,7 @@ export class TrashStore {
 
   writeFile(id: string, name: string, data: string): void {
     const f = this.fileIn(id, name);
-    if (!f) throw new Error(`잘못된 휴지통 파일: ${id}/${name}`);
+    if (!f) throw new Error(`Invalid trash file: ${id}/${name}`);
     writeFileAtomic(f, data);
   }
 

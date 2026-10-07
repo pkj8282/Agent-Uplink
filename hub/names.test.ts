@@ -27,13 +27,14 @@ test("uniqueName: 관련 없는 이름·숫자 아닌 괄호는 세지 않는다
 });
 
 test("validateName: 앞뒤 공백 제거, 1~64 코드포인트", () => {
-  assert.deepEqual(validateName("  방  ", "채널"), { ok: true, name: "방" });
-  assert.deepEqual(validateName("a".repeat(64), "서버"), { ok: true, name: "a".repeat(64) });
+  assert.deepEqual(validateName("  방  ", "channel"), { ok: true, name: "방" });
+  assert.deepEqual(validateName("a".repeat(64), "server"), { ok: true, name: "a".repeat(64) });
   const emoji = String.fromCodePoint(0x1f600).repeat(64); // UTF-16으로는 128
-  assert.deepEqual(validateName(emoji, "계정"), { ok: true, name: emoji });
+  assert.deepEqual(validateName(emoji, "account"), { ok: true, name: emoji });
   for (const bad of ["", "   ", "a".repeat(65), 5, null, undefined]) {
-    const r = validateName(bad, "서버");
+    const r = validateName(bad, "server");
     assert.equal(r.ok, false, String(bad));
-    if (!r.ok) assert.match(r.error, /서버 이름은 1~64자/);
+    // 문구는 Hub가 언어에 맞춰 만든다 — 여기서는 언어 중립 값(code·params)만 돌려준다.
+    if (!r.ok) assert.deepEqual(r, { ok: false, code: "name_invalid", params: { kind: "server", max: 64 } });
   }
 });
