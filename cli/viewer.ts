@@ -4,8 +4,12 @@ import { spawn } from "node:child_process";
 import { HubClient } from "../mcp/hubClient.js";
 import { resolveDataDir } from "../shared/clientKey.js";
 import { openViewer, browserCommand } from "./viewerCore.js";
+import { currentLang } from "../shared/langConfig.js";
+import { cliMsg } from "./messages.js";
 
-const client = new HubClient({ port: Number(process.env.UPLINK_TCP_PORT ?? 47800), dataDir: resolveDataDir(process.env) });
+const dataDir = resolveDataDir(process.env);
+const client = new HubClient({ port: Number(process.env.UPLINK_TCP_PORT ?? 47800), dataDir });
+const lang = currentLang(dataDir);
 
 function launch(url: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -17,12 +21,12 @@ function launch(url: string): Promise<void> {
 }
 
 try {
-  await openViewer({ ticket: () => client.viewerTicket(), open: launch });
-  process.stdout.write("브라우저에서 뷰어를 열었습니다.\n");
+  await openViewer({ lang, ticket: () => client.viewerTicket(), open: launch });
+  process.stdout.write(`${cliMsg(lang, "opened")}\n`);
   client.close();
   process.exit(0);
 } catch (e) {
-  process.stderr.write(`뷰어를 열지 못했습니다: ${(e as Error).message}\n`);
+  process.stderr.write(`${cliMsg(lang, "open_failed", { detail: (e as Error).message })}\n`);
   client.close();
   process.exit(1);
 }

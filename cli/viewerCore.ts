@@ -2,16 +2,20 @@
 import path from "node:path";
 import { Response } from "../shared/protocol.js";
 import { isViewerUrl } from "../shared/viewerUrl.js";
+import type { Lang } from "../shared/i18n.js";
+import { cliMsg } from "./messages.js";
 
 export interface ViewerDeps {
+  /** 안내 문구 언어. */
+  lang: Lang;
   ticket(): Promise<Response>;
   open(url: string): Promise<void>;
 }
 
 export async function openViewer(deps: ViewerDeps): Promise<void> {
   const r = await deps.ticket();
-  if (!r.ok) throw new Error(r.code === "viewer_unavailable" ? (r.error ?? "뷰어가 꺼져 있습니다.") : `뷰어 주소를 받지 못했습니다: ${r.error}`);
-  if (!isViewerUrl(r.url)) throw new Error("Hub가 잘못된 뷰어 주소를 보냈습니다.");
+  if (!r.ok) throw new Error(r.code === "viewer_unavailable" ? (r.error ?? cliMsg(deps.lang, "viewer_off")) : cliMsg(deps.lang, "ticket_failed", { detail: r.error ?? "" }));
+  if (!isViewerUrl(r.url)) throw new Error(cliMsg(deps.lang, "bad_viewer_url"));
   await deps.open(r.url);
 }
 

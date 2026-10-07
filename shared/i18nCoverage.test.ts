@@ -45,7 +45,6 @@ function hangulLiterals(rel: string): string[] {
 const PENDING = new Set<string>([
   "admin/src/adminClient.ts", "admin/src/auth.ts", "admin/src/main.ts",
   "admin/src/renderer/renderer.ts", "admin/src/renderer/view.ts",
-  "cli/viewer.ts", "cli/viewerCore.ts",
 ]);
 const PENDING_HTML = new Set<string>(["admin/src/renderer/index.html"]);
 

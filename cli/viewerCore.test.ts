@@ -9,7 +9,7 @@ test("인증된 Hub에서 티켓 URL을 받아 연다(URL은 실제로 세션을
   const client = new HubClient({ port, dataDir, hubEntry: "nonexistent.js" });
   let opened = "";
   try {
-    await openViewer({ ticket: () => client.viewerTicket(), open: async (u) => { opened = u; } });
+    await openViewer({ lang: "ko", ticket: () => client.viewerTicket(), open: async (u) => { opened = u; } });
     const url = new URL(opened);
     assert.equal((await httpGet(Number(url.port), `/session?t=${url.hash.slice(3)}`)).status, 200);
   } finally { client.close(); hub.stop(); }
@@ -20,7 +20,7 @@ test("뷰어가 꺼진 Hub는 그 사유로 실패하고 열지 않는다", asyn
   const client = new HubClient({ port, dataDir, hubEntry: "nonexistent.js" });
   let opened = false;
   try {
-    await assert.rejects(openViewer({ ticket: () => client.viewerTicket(), open: async () => { opened = true; } }), /뷰어가 꺼져 있습니다/);
+    await assert.rejects(openViewer({ lang: "ko", ticket: () => client.viewerTicket(), open: async () => { opened = true; } }), /뷰어가 꺼져 있습니다/);
     assert.equal(opened, false);
   } finally { client.close(); hub.stop(); }
 });
@@ -28,7 +28,7 @@ test("뷰어가 꺼진 Hub는 그 사유로 실패하고 열지 않는다", asyn
 test("Hub가 이상한 URL을 주면 열지 않는다", async () => {
   let opened = false;
   await assert.rejects(
-    openViewer({ ticket: async () => ({ ok: true, id: 1, url: "http://evil.example/#t=" + "a".repeat(64) }), open: async () => { opened = true; } }),
+    openViewer({ lang: "ko", ticket: async () => ({ ok: true, id: 1, url: "http://evil.example/#t=" + "a".repeat(64) }), open: async () => { opened = true; } }),
     /잘못된 뷰어 주소/,
   );
   assert.equal(opened, false);
@@ -41,4 +41,19 @@ test("브라우저 명령: win32는 rundll32 url.dll(explorer.exe는 #조각이 
   assert.deepEqual(w.args, ["url.dll,FileProtocolHandler", url]);
   assert.equal(browserCommand("darwin", "u").cmd, "open");
   assert.equal(browserCommand("linux", "u").cmd, "xdg-open");
+});
+
+test("영어: 잘못된 주소·티켓 실패 문구", async () => {
+  await assert.rejects(
+    openViewer({ lang: "en", ticket: async () => ({ ok: true, id: 1, url: "http://evil.example/" }), open: async () => {} }),
+    /^Error: The hub sent an invalid viewer address\.$/,
+  );
+  await assert.rejects(
+    openViewer({ lang: "en", ticket: async () => ({ ok: false, id: 1, error: "boom" }), open: async () => {} }),
+    /Could not get the viewer address: boom/,
+  );
+  await assert.rejects(
+    openViewer({ lang: "en", ticket: async () => ({ ok: false, id: 1, code: "viewer_unavailable" }), open: async () => {} }),
+    /The viewer is off\./,
+  );
 });
