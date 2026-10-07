@@ -101,3 +101,12 @@ export async function openViewerSession(tcpPort: number): Promise<string> {
   if (r.status !== 200) throw new Error(`세션 교환 실패: ${r.status}`);
   return JSON.parse(r.body).session as string;
 }
+
+/** 한글(완성형·자모·호환 자모) 포함 여부. 정규식 이스케이프 대신 코드포인트로 판정(도구 경유 입력에서 이스케이프가 원문자로 바뀐 사례가 있음). */
+export function hasHangul(s: string): boolean {
+  for (const ch of s) {
+    const c = ch.codePointAt(0)!;
+    if ((c >= 0xac00 && c <= 0xd7a3) || (c >= 0x1100 && c <= 0x11ff) || (c >= 0x3130 && c <= 0x318f)) return true;
+  }
+  return false;
+}
