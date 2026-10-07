@@ -1,0 +1,20 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.pkj8282/agent-uplink",
+  "description": "Local messaging between AI sessions: role accounts, DMs, channels via MCP. Windows only.",
+  "repository": {
+    "url": "https://github.com/pkj8282/Agent-Uplink",
+    "source": "github"
+  },
+  "version": "2.1.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "agent-uplink",
+      "version": "2.1.1",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

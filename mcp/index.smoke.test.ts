@@ -83,7 +83,7 @@ test("도구 annotation: 삭제는 destructive, 조회는 readOnly, check·wait�
   assert.match(tools.get("create_server").inputSchema.properties.name.description, /max 64 characters/);
 });
 
-test("언어 미선택(N/A)이면 instructions·도구 설명·안내가 영어이고 버전은 2.1.0", async () => {
+test("언어 미선택(N/A)이면 instructions·도구 설명·안내가 영어이고 버전은 package.json과 같다", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-smoke-"));
   const out = await rpc([
     { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } } },
@@ -91,7 +91,7 @@ test("언어 미선택(N/A)이면 instructions·도구 설명·안내가 영어�
     { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "send", arguments: { channelId: "lobby", text: "x" } } },
   ], { UPLINK_DATA_DIR: dataDir, UPLINK_TCP_PORT: "1", UPLINK_ACCOUNT: "" });
   const init = out.find((m) => m.id === 1);
-  assert.equal(init.result.serverInfo.version, "2.1.0");
+  assert.equal(init.result.serverInfo.version, JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version);
   const hangul = (t: string) => [...t].some((ch) => { const c = ch.codePointAt(0)!; return c >= 0xac00 && c <= 0xd7a3; });
   assert.equal(hangul(init.result.instructions), false);
   assert.equal(hangul(JSON.stringify(out.find((m) => m.id === 2).result.tools)), false);

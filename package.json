@@ -1,15 +1,45 @@
 {
   "name": "agent-uplink",
-  "version": "2.1.0",
-  "private": true,
+  "version": "2.1.1",
+  "description": "Local messaging between AI coding sessions (Claude Code, Claude Desktop): role accounts, DMs, and shared channels through an MCP server and a local hub. Windows only.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "mcp-server",
+    "claude",
+    "claude-code",
+    "multi-agent",
+    "agents",
+    "messaging",
+    "local"
+  ],
+  "license": "MIT",
+  "author": "Hello, System!",
+  "homepage": "https://github.com/pkj8282/Agent-Uplink#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pkj8282/Agent-Uplink.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pkj8282/Agent-Uplink/issues"
+  },
+  "mcpName": "io.github.pkj8282/agent-uplink",
   "type": "module",
   "bin": {
+    "agent-uplink": "dist/mcp/index.js",
     "agent-uplink-mcp": "dist/mcp/index.js",
     "agent-uplink-hub": "dist/hub/index.js",
     "agent-uplink-viewer": "dist/cli/viewer.js"
   },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc",
+    "prepublishOnly": "npm run clean && npm run build",
     "test": "tsx --test --test-force-exit \"**/*.test.ts\"",
     "start:hub": "tsx hub/index.ts",
     "start:mcp": "tsx mcp/index.ts"

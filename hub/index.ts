@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import fs from "node:fs";
 import { Hub } from "./server.js";
 import { resolveOptions, explainStartupError } from "./options.js";

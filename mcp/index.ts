@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // Agent Uplink v2 — 계정/채널 기반 세션 간 통신 MCP 서버(stdio).
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -34,7 +35,7 @@ const REG_LANG = currentLang(dataDir);
 const T = toolTexts(REG_LANG);
 const m = (key: McpKey, params?: object) => mcpMsg(client.lang(), key, params);
 
-const server = new McpServer({ name: "agent-uplink", version: "2.1.0" }, { instructions: T.instructions });
+const server = new McpServer({ name: "agent-uplink", version: "2.1.1" }, { instructions: T.instructions });
 
 // 도구 성격 표시(클라이언트가 삭제 전 확인을 띄우는 등에 쓴다). 모두 로컬 전용이라 openWorld는 false.
 const READ: ToolAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
