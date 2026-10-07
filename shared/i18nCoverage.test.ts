@@ -46,8 +46,6 @@ const PENDING = new Set<string>([
   "admin/src/adminClient.ts", "admin/src/auth.ts", "admin/src/main.ts",
   "admin/src/renderer/renderer.ts", "admin/src/renderer/view.ts",
   "cli/viewer.ts", "cli/viewerCore.ts",
-  "hub/index.ts", "hub/options.ts", "hub/secure.ts",
-  "hub/trashOps.ts", "hub/viewer.ts",
   "mcp/format.ts", "mcp/hubClient.ts", "mcp/index.ts", "mcp/roles.ts", "mcp/schemas.ts", "mcp/session.ts",
   "shared/clientKey.ts",
 ]);

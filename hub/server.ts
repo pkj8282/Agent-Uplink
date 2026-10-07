@@ -17,7 +17,7 @@ import { isSafeAccountId } from "./ids.js";
 import { TrashStore } from "./trash.js";
 import { TrashOps } from "./trashOps.js";
 import { rebuildDmIndex } from "./recovery.js";
-import { HUB_MESSAGES, type HubKey } from "./messages.js";
+import { hubMsg, type HubKey } from "./messages.js";
 import { effectiveLang, type Lang } from "../shared/i18n.js";
 import { currentLang } from "../shared/langConfig.js";
 import {
@@ -115,8 +115,7 @@ export class Hub {
 
   /** 현재 언어의 문구. params는 키별 함수 인자. */
   protected msg(key: HubKey, params?: object): string {
-    const e = HUB_MESSAGES[this.lang()][key] as string | ((p: object | undefined) => string);
-    return typeof e === "function" ? e(params) : e;
+    return hubMsg(this.lang(), key, params);
   }
 
   /** 오류 응답: 판단용 code와 표시용 문구. */
@@ -127,7 +126,7 @@ export class Hub {
   /** 데이터 폴더를 잠그고 키를 준비한 뒤 데이터를 적재한다. 끝나야 hello에 답한다. 실패하면 던지고 hello는 secure_setup_failed. */
   async secure(deps?: SecureDeps): Promise<void> {
     try {
-      const k = await secureDataDir(this.opts.dataDir, deps);
+      const k = await secureDataDir(this.opts.dataDir, deps, this.lang());
       this.clientKey = k.clientKey;
       this.adminKey = k.adminKey;
       // 데이터 폴더를 읽고 쓰는 일은 권한 잠금·소유자 검사가 끝난 뒤에만 한다(남의 폴더를 건드리지 않게).
@@ -152,6 +151,7 @@ export class Hub {
       dataDir: this.opts.dataDir, servers: this.servers, dm: this.dm, accounts: this.accounts,
       channels: this.channels, inbox: this.inbox, trash: this.trash,
       maxChannelsPerServer: () => this.config.maxChannelsPerServer,
+      lang: () => this.lang(),
     });
     // 크래시로 중단된 삭제·복원을 먼저 마무리한다 — 이후 DM 재조정이 삭제 중이던 계정을 되살리지 않도록.
     this.trashOps.recoverPending();
@@ -223,7 +223,7 @@ export class Hub {
     if (url.pathname === "/") {
       // 뷰어 껍데기(데이터 없음). 페이지 스크립트가 #t= 티켓을 /session으로 바꾸고, 세션이 없으면 여는 법을 안내한다.
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-      res.end(renderViewerHtml());
+      res.end(renderViewerHtml(this.lang()));
       return;
     }
     if (url.pathname === "/session") {

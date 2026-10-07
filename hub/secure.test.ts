@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { secureDataDir, SecureDeps, MARKER_FILE, realSecureDeps } from "./secure.js";
 import { isKeyText } from "../shared/auth.js";
+import { hasHangul } from "./testing.js";
 
 function tmp(name = "uplink-sec2-"): string { return fs.mkdtempSync(path.join(os.tmpdir(), name)); }
 
@@ -48,7 +49,7 @@ test("부분 검사 경로에 키·표식이 포함되고 허용 SID에 현재 �
 test("RT13/RT18: 다른 소유자 항목이 있으면 시작 거부하고 키를 만들지 않는다", async () => {
   const d = tmp();
   await assert.rejects(
-    secureDataDir(d, deps({ findForeign: async () => ({ count: 3, samples: [{ path: path.join(d, "channels"), owner: "S-1-5-21-other" }] }) })),
+    secureDataDir(d, deps({ findForeign: async () => ({ count: 3, samples: [{ path: path.join(d, "channels"), owner: "S-1-5-21-other" }] }) }), "ko"),
     (e: Error) => e.message.includes("다른 사용자") && e.message.includes("S-1-5-21-other") && e.message.includes("UPLINK_DATA_DIR") && e.message.includes("3"),
   );
   assert.equal(fs.existsSync(path.join(d, "client.key")), false);
@@ -57,13 +58,13 @@ test("RT13/RT18: 다른 소유자 항목이 있으면 시작 거부하고 키를
 test("RT14: 선점된 키 파일(다른 소유자)도 같은 이유로 거부", async () => {
   const d = tmp();
   fs.writeFileSync(path.join(d, "client.key"), "b".repeat(64));
-  await assert.rejects(secureDataDir(d, deps({ findForeign: async () => ({ count: 1, samples: [{ path: path.join(d, "client.key"), owner: null }] }) })), /다른 사용자|소유자/);
+  await assert.rejects(secureDataDir(d, deps({ findForeign: async () => ({ count: 1, samples: [{ path: path.join(d, "client.key"), owner: null }] }) }), "ko"), /다른 사용자|소유자/);
   assert.equal(fs.readFileSync(path.join(d, "client.key"), "utf8"), "b".repeat(64));
 });
 
 test("ACL 실패는 fail-closed(경고 후 진행하지 않음)", async () => {
   const d = tmp();
-  await assert.rejects(secureDataDir(d, deps({ restrictAcl: async () => ({ ok: false, error: "icacls 실패" }) })), /권한.*icacls 실패/);
+  await assert.rejects(secureDataDir(d, deps({ restrictAcl: async () => ({ ok: false, error: "icacls 실패" }) }), "ko"), /권한.*icacls 실패/);
   assert.equal(fs.existsSync(path.join(d, "client.key")), false);
 });
 
@@ -109,7 +110,7 @@ test("RT13 실제 경로: ACL 잠금이 실패해도 남의 항목이 있으면 
     secureDataDir(d, deps({
       restrictAcl: async () => ({ ok: false, error: "icacls 종료 코드 5" }),
       findForeign: async () => ({ count: 1, samples: [{ path: d, owner: "S-1-5-21-other" }] }),
-    })),
+    }), "ko"),
     (e: Error) => e.message.includes("다른 사용자가 만든 항목") && e.message.includes("S-1-5-21-other") && e.message.includes("UPLINK_DATA_DIR"),
   );
   assert.equal(fs.existsSync(path.join(d, "client.key")), false);
@@ -118,7 +119,7 @@ test("RT13 실제 경로: ACL 잠금이 실패해도 남의 항목이 있으면 
 test("ACL 잠금만 실패하면 원인 후보와 UPLINK_DATA_DIR 안내를 준다(fail-closed)", async () => {
   const d = tmp();
   await assert.rejects(
-    secureDataDir(d, deps({ restrictAcl: async () => ({ ok: false, error: "icacls 종료 코드 5" }) })),
+    secureDataDir(d, deps({ restrictAcl: async () => ({ ok: false, error: "icacls 종료 코드 5" }) }), "ko"),
     (e: Error) => e.message.includes("icacls 종료 코드 5") && e.message.includes("UPLINK_DATA_DIR"),
   );
   assert.equal(fs.existsSync(path.join(d, "client.key")), false);
@@ -140,4 +141,20 @@ test("실제 PowerShell 검사: 호환 안 되는 PSModulePath(예: PowerShell 7
   } finally {
     if (saved === undefined) delete process.env.PSModulePath; else process.env.PSModulePath = saved;
   }
+});
+
+test("보안 준비 실패 안내는 언어를 따른다: 지정 없으면 폴더의 config.json, 이상한 값이면 영어", async () => {
+  const foreign = (d: string) => deps({ findForeign: async () => ({ count: 2, samples: [{ path: path.join(d, "x"), owner: "S-1-5-21-other" }] }) });
+  const d1 = tmp();
+  await assert.rejects(secureDataDir(d1, foreign(d1), "en"), (e: Error) =>
+    !hasHangul(e.message) && e.message.includes("created by another user") && e.message.includes("S-1-5-21-other") && e.message.includes("UPLINK_DATA_DIR"));
+  const d2 = tmp();
+  fs.writeFileSync(path.join(d2, "config.json"), JSON.stringify({ language: "ko" }));
+  await assert.rejects(secureDataDir(d2, foreign(d2)), (e: Error) => e.message.includes("다른 사용자가 만든 항목"));
+  const d3 = tmp();
+  fs.writeFileSync(path.join(d3, "config.json"), JSON.stringify({ language: "<img src=x onerror=alert(1)>" }));
+  await assert.rejects(secureDataDir(d3, foreign(d3)), (e: Error) => !hasHangul(e.message) && !e.message.includes("<img"));
+  const d4 = tmp();
+  await assert.rejects(secureDataDir(d4, deps({ restrictAcl: async () => ({ ok: false, error: "icacls exit code 5" }) }), "en"), (e: Error) =>
+    !hasHangul(e.message) && e.message.includes("icacls exit code 5") && e.message.includes("UPLINK_DATA_DIR"));
 });

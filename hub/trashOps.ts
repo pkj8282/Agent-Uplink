@@ -10,7 +10,8 @@ import { InboxStore } from "./inbox.js";
 import { TrashStore, TrashMeta, isTrashId, isUuidLogName, parseAccountRecord } from "./trash.js";
 import { uniqueName } from "./names.js";
 import { NameConflict, RestoreReport } from "../shared/protocol.js";
-import type { HubKey } from "./messages.js";
+import { hubMsg, type HubKey } from "./messages.js";
+import type { Lang } from "../shared/i18n.js";
 
 export type TrashErrorCode = "trash_missing" | "trash_not_restorable" | "trash_bad_id" | "channel_limit" | "trash_busy" | "name_conflict";
 export type RestoreResult =
@@ -30,6 +31,8 @@ export interface TrashDeps {
   inbox: InboxStore;
   trash: TrashStore;
   maxChannelsPerServer: () => number;
+  /** 콘솔 안내 언어. */
+  lang: () => Lang;
 }
 
 type By = "admin" | "mcp";
@@ -107,7 +110,7 @@ export class TrashOps {
         if (m.state === "deleting") this.finishDelete(m);
         else if (m.state === "restoring") this.finishRestore(m);
       } catch (e) {
-        process.stderr.write(`휴지통 항목 ${m.id} 복구를 미룹니다: ${(e as Error).message}\n`);
+        process.stderr.write(`${hubMsg(this.d.lang(), "log_trash_defer", { id: m.id, detail: (e as Error).message })}\n`);
       }
     }
   }
@@ -136,7 +139,7 @@ export class TrashOps {
           this.finishDelete(meta);
           n++;
         } catch (e) {
-          process.stderr.write(`고아 로그 ${name} 정리를 미룹니다: ${(e as Error).message}\n`);
+          process.stderr.write(`${hubMsg(this.d.lang(), "log_orphan_defer", { name, detail: (e as Error).message })}\n`);
         }
       }
     }

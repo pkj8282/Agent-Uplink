@@ -5,18 +5,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Hub } from "./server.js";
-import { startTestHub, TestClient, openViewerSession, registerTestHub, TEST_SECURE_DEPS, httpGet } from "./testing.js";
+import { startTestHub, TestClient, openViewerSession, registerTestHub, TEST_SECURE_DEPS, httpGet, hasHangul } from "./testing.js";
 import { renderViewerHtml } from "./viewer.js";
 
 test("뷰어 HTML은 외부 CDN 없이 EventSource를 쓴다", () => {
-  const html = renderViewerHtml();
+  const html = renderViewerHtml("ko");
   assert.match(html, /<!doctype html>/i);
   assert.doesNotMatch(html, /https?:\/\//i);
   assert.match(html, /EventSource\(/);
 });
 
 test("뷰어에 채널 필터 셀렉트와 채널별 분류 로직이 있다", () => {
-  const html = renderViewerHtml();
+  const html = renderViewerHtml("ko");
   assert.match(html, /id="chan"/); // 채널 필터 select
   assert.match(html, /addEventListener\("change"/); // 필터 변경 핸들러
   assert.match(html, /dataset\.ch|data-ch|setAttribute\("data-ch"/); // 행별 채널 표식으로 필터
@@ -81,7 +81,7 @@ test("SSE 실시간 메시지에 보낸 사람 uuid(fromUuid)가 포함된다", 
 });
 
 test("뷰어는 /accounts로 참여자 목록을 그리고 발신자에 설명 툴팁을 단다", () => {
-  const html = renderViewerHtml();
+  const html = renderViewerHtml("ko");
   assert.match(html, /id="people"/);
   assert.match(html, /fetch\("\/accounts" \+ q\(\)\)/);
   assert.match(html, /fromUuid/);
@@ -115,7 +115,7 @@ test("뷰어 초기 기록과 실시간 메시지는 같은 채널 라벨과 보
 });
 
 test("뷰어는 #t= 티켓을 /session으로 바꿔 sessionStorage에 두고 주소에서 지우며, 세션이 없거나 401이면 여는 법을 안내한다", () => {
-  const html = renderViewerHtml();
+  const html = renderViewerHtml("ko");
   assert.match(html, /location\.hash/);
   assert.match(html, /\/session\?t=/);
   assert.match(html, /sessionStorage/);
@@ -162,4 +162,22 @@ test("열린 뷰어(실시간 연결)가 있으면 유휴 종료하지 않고, �
     await new Promise((r) => setTimeout(r, 800));
     await assert.rejects(httpGet(httpPort, `/accounts?s=${session}`)); // 유휴 종료됨(연결 거부)
   } finally { hub.stop(); }
+});
+
+test("뷰어 HTML은 언어를 따른다(영어에는 한글이 없다)", () => {
+  const en = renderViewerHtml("en");
+  assert.match(en, /<html lang="en">/);
+  assert.match(en, /All channels/);
+  assert.equal(hasHangul(en), false);
+  const ko = renderViewerHtml("ko");
+  assert.match(ko, /<html lang="ko">/);
+  assert.match(ko, /전체 채널/);
+});
+
+test("Hub는 현재 언어로 뷰어 HTML을 준다", async () => {
+  const { hub } = await startTestHub({ http: true, language: "en" });
+  const r = await httpGet(hub.httpAddress.port, "/");
+  assert.equal(r.status, 200);
+  assert.match(r.body, /<html lang="en">/);
+  hub.stop();
 });

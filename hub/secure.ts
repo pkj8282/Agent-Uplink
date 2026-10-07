@@ -7,6 +7,9 @@ import { promisify } from "node:util";
 import { randomBytes } from "node:crypto";
 import { restrictDataDirAcl, currentUserSid } from "./acl.js";
 import { writeSecretFile } from "./fsutil.js";
+import { hubMsg } from "./messages.js";
+import type { Lang } from "../shared/i18n.js";
+import { currentLang } from "../shared/langConfig.js";
 import { isKeyText } from "../shared/auth.js";
 import { CLIENT_KEY_FILE } from "../shared/clientKey.js";
 
@@ -36,7 +39,7 @@ const SCAN_SCRIPT = `
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $root = $env:UPLINK_SCAN_ROOT
-# PowerShell 5.1의 ConvertFrom-Json은 배열을 통째로 한 개로 내보낸다 → 파이프로 펼쳐 문자열 배열로 만든다.
+# PowerShell 5.1 ConvertFrom-Json emits an array as a single item -> unroll it through the pipe into a string array.
 $allowed = @((ConvertFrom-Json $env:UPLINK_SCAN_ALLOWED) | ForEach-Object { [string]$_ })
 $paths = @((ConvertFrom-Json $env:UPLINK_SCAN_PATHS) | ForEach-Object { [string]$_ })
 $recurse = $env:UPLINK_SCAN_RECURSE -eq '1'
@@ -115,14 +118,9 @@ export const realSecureDeps: SecureDeps = {
   restrictAcl: restrictDataDirAcl,
 };
 
-function foreignMessage(dir: string, rep: ForeignReport): string {
+function foreignMessage(dir: string, rep: ForeignReport, lang: Lang): string {
   const first = rep.samples[0];
-  const where = first ? ` 예: ${first.path} (소유자 ${first.owner ?? "확인 불가"})` : "";
-  return [
-    `데이터 폴더(${dir})에 다른 사용자가 만든 항목이 ${rep.count}개 있습니다.${where}`,
-    "같은 PC의 다른 Windows 사용자가 먼저 만든 폴더·파일일 수 있어 사용하지 않습니다.",
-    "MCP 설정 env의 UPLINK_DATA_DIR를 자기 사용자 폴더(예: %LOCALAPPDATA%/AgentUplink)로 지정하거나, 관리자에게 이 폴더 정리를 요청하세요.",
-  ].join(" ");
+  return hubMsg(lang, "secure_foreign", { dir, count: rep.count, example: first ? { path: first.path, owner: first.owner } : undefined });
 }
 
 function loadOrCreateKey(file: string, valid: (t: string) => boolean): string {
@@ -137,7 +135,15 @@ function loadOrCreateKey(file: string, valid: (t: string) => boolean): string {
   return key;
 }
 
-export async function secureDataDir(dir: string, deps: SecureDeps = realSecureDeps): Promise<{ clientKey: string; adminKey: string }> {
+/**
+ * lang: 실패 안내 언어. 생략하면 폴더의 config.json에서 읽는다 — 잠금 전 남의 폴더일 수 있지만
+ * 값은 ko/en 선택에만 쓰이고(parseLanguage) 안내에 그대로 들어가지 않는다.
+ */
+export async function secureDataDir(
+  dir: string,
+  deps: SecureDeps = realSecureDeps,
+  lang: Lang = currentLang(dir),
+): Promise<{ clientKey: string; adminKey: string }> {
   fs.mkdirSync(dir, { recursive: true });
   const clientFile = path.join(dir, CLIENT_KEY_FILE);
   const adminFile = path.join(dir, ADMIN_KEY_FILE);
@@ -150,13 +156,9 @@ export async function secureDataDir(dir: string, deps: SecureDeps = realSecureDe
     // 잠금이 실패했어도 검사한다: 남이 만든 폴더면 잠금부터 실패하므로, 그 사실을 알려야 사용자가 원인을 안다.
     const firstRun = !fs.existsSync(marker);
     const rep = await deps.findForeign(dir, { recurse: firstRun || !acl.ok, paths: [clientFile, adminFile, marker] }, [me, ...ALLOWED_OWNER_SIDS]);
-    if (rep.count > 0) throw new Error(foreignMessage(dir, rep));
+    if (rep.count > 0) throw new Error(foreignMessage(dir, rep, lang));
     if (!acl.ok) {
-      throw new Error(
-        `데이터 폴더(${dir}) 권한을 현재 사용자 전용으로 바꾸지 못했습니다(${acl.error}). ` +
-          "다른 Windows 사용자가 만든 폴더이거나 권한이 바뀐 폴더일 수 있습니다. " +
-          "MCP 설정 env의 UPLINK_DATA_DIR를 자기 사용자 폴더(예: %LOCALAPPDATA%/AgentUplink)로 지정하세요.",
-      );
+      throw new Error(hubMsg(lang, "secure_acl_failed", { dir, detail: acl.error ?? "" }));
     }
   } else {
     fs.chmodSync(dir, 0o700);

@@ -25,10 +25,14 @@ test("환경변수로 포트와 유휴 종료를 오버라이드한다", () => {
 test("explainStartupError: 데이터 폴더 접근 거부는 다른 Windows 사용자 전용일 가능성과 UPLINK_DATA_DIR 해결책을 안내", async () => {
   const { explainStartupError } = await import("./options.js");
   const e = Object.assign(new Error("EPERM: operation not permitted, scandir 'X'"), { code: "EPERM" });
-  const msg = explainStartupError(e, "C:/ProgramData/AgentUplink");
+  const msg = explainStartupError(e, "C:/ProgramData/AgentUplink", "ko");
   assert.match(msg, /C:\/ProgramData\/AgentUplink/);
   assert.match(msg, /다른 Windows 사용자/);
   assert.match(msg, /UPLINK_DATA_DIR/);
-  assert.match(explainStartupError(Object.assign(new Error("x"), { code: "EACCES" }), "D"), /UPLINK_DATA_DIR/);
-  assert.equal(explainStartupError(new Error("다른 오류"), "D"), "Hub 시작 실패: 다른 오류");
+  assert.match(explainStartupError(Object.assign(new Error("x"), { code: "EACCES" }), "D", "ko"), /UPLINK_DATA_DIR/);
+  assert.equal(explainStartupError(new Error("다른 오류"), "D", "ko"), "Hub 시작 실패: 다른 오류");
+  const en = explainStartupError(e, "C:/ProgramData/AgentUplink", "en");
+  assert.match(en, /another Windows user/i);
+  assert.match(en, /UPLINK_DATA_DIR/);
+  assert.equal(explainStartupError(new Error("boom"), "D", "en"), "Hub failed to start: boom");
 });

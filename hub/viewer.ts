@@ -1,11 +1,15 @@
 // 로컬 전용 멀티채널 로그 뷰어. 외부 의존성 없이 인라인. 채널 필터 지원.
-export function renderViewerHtml(): string {
+// 문구는 Hub 문구표의 고정 문자열뿐이다(사용자 데이터는 페이지 스크립트가 textContent로 넣는다).
+import { hubMsg } from "./messages.js";
+import type { Lang } from "../shared/i18n.js";
+
+export function renderViewerHtml(lang: Lang): string {
   return `<!doctype html>
-<html lang="ko">
+<html lang="${lang}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Agent-Uplink 로그</title>
+<title>${hubMsg(lang, "viewer_title")}</title>
 <style>
   :root { color-scheme: light dark; }
   body { font-family: ui-monospace, Consolas, monospace; margin: 0; padding: 12px; }
@@ -25,10 +29,10 @@ export function renderViewerHtml(): string {
 </head>
 <body>
 <header>
-  <h1>Agent-Uplink 로그 (127.0.0.1)</h1>
-  <select id="chan"><option value="">전체 채널</option></select>
+  <h1>${hubMsg(lang, "viewer_heading")}</h1>
+  <select id="chan"><option value="">${hubMsg(lang, "viewer_all_channels")}</option></select>
 </header>
-<p id="auth" hidden>이 뷰어는 같은 Windows 사용자만 열 수 있습니다. 관리 앱의 '뷰어 열기' 버튼이나 터미널의 agent-uplink-viewer 명령으로 여세요. Hub가 재시작되면(유휴 종료 등) 다시 열어야 합니다.</p>
+<p id="auth" hidden>${hubMsg(lang, "viewer_auth_note")}</p>
 <div id="people"></div>
 <div id="log"></div>
 <script>
@@ -39,7 +43,7 @@ export function renderViewerHtml(): string {
   let filter = "";
   let byUuid = new Map();
 
-  // 발신자 이름에 마우스를 올리면 그 계정의 프로필 설명을 보여준다.
+  // Hovering a sender name shows that account's profile description.
   function applyTitles() {
     for (const el of log.querySelectorAll(".meta[data-uuid]")) {
       const p = byUuid.get(el.dataset.uuid);
@@ -78,7 +82,7 @@ export function renderViewerHtml(): string {
         return s;
       }));
       applyTitles();
-    } catch { /* Hub 재시작 중 등 — 다음 주기에 재시도 */ }
+    } catch { /* hub restarting etc. — retry next tick */ }
   }
 
 
@@ -123,7 +127,7 @@ export function renderViewerHtml(): string {
     for (const row of log.children) applyFilter(row);
   });
 
-  // 티켓(#t=)은 1회용 — 세션으로 바꾸고 주소에서 지운다. 세션은 이 탭의 sessionStorage에만 둔다(포트까지 포함한 origin 단위).
+  // The ticket (#t=) is single-use: exchange it for a session and remove it from the address. The session lives only in this tab's sessionStorage (per origin, including the port).
   async function start() {
     const m = /^#t=([0-9a-f]{64})$/.exec(location.hash);
     if (m) {
@@ -131,7 +135,7 @@ export function renderViewerHtml(): string {
       try {
         const res = await fetch("/session?t=" + m[1]);
         if (res.status === 200) store(false, (await res.json()).session);
-      } catch { /* 아래에서 세션 없음으로 안내 */ }
+      } catch { /* reported below as no session */ }
     }
     session = store(true);
     if (!session) { showAuth(); return; }
@@ -140,7 +144,7 @@ export function renderViewerHtml(): string {
     es = new EventSource("/events" + q());
     es.addEventListener("init", (e) => JSON.parse(e.data).forEach(fmt));
     es.onmessage = (e) => fmt(JSON.parse(e.data));
-    // 재연결 실패(Hub 재시작으로 세션 소멸 등)면 /accounts로 401 여부를 확인해 안내한다.
+    // If reconnecting fails (e.g. the session vanished when the hub restarted), check /accounts for 401 and show the notice.
     es.onerror = () => { void loadPeople(); };
   }
   void start();

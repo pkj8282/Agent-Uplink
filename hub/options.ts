@@ -1,6 +1,8 @@
 import path from "node:path";
 import { resolveDataDir } from "../shared/clientKey.js";
 import { HubOptions } from "./server.js";
+import { hubMsg } from "./messages.js";
+import type { Lang } from "../shared/i18n.js";
 
 export function resolveOptions(env: NodeJS.ProcessEnv): HubOptions & { infoPath: string } {
   const base = resolveDataDir(env);
@@ -18,15 +20,9 @@ export function resolveOptions(env: NodeJS.ProcessEnv): HubOptions & { infoPath:
  * Hub 시작 실패를 사람이 읽을 문구로. 데이터 폴더 접근 거부는 보통 같은 PC의 다른 Windows 사용자가
  * Hub를 먼저 실행해 폴더가 그 사용자 전용(ACL)이 된 경우다 → 사용자별 UPLINK_DATA_DIR를 안내한다.
  */
-export function explainStartupError(e: unknown, dataDir: string): string {
+export function explainStartupError(e: unknown, dataDir: string, lang: Lang): string {
   const code = (e as NodeJS.ErrnoException)?.code;
   const message = (e as Error)?.message ?? String(e);
-  if (code === "EPERM" || code === "EACCES") {
-    return [
-      `Hub 시작 실패: 데이터 폴더(${dataDir})에 접근할 수 없습니다(${code}).`,
-      "같은 PC의 다른 Windows 사용자가 먼저 Hub를 실행해 이 폴더가 그 사용자 전용이 됐을 수 있습니다.",
-      "Windows 사용자마다 MCP 설정의 env에 UPLINK_DATA_DIR를 서로 다른 폴더로 지정하세요.",
-    ].join(" ");
-  }
-  return `Hub 시작 실패: ${message}`;
+  if (code === "EPERM" || code === "EACCES") return hubMsg(lang, "startup_denied", { dir: dataDir, code });
+  return hubMsg(lang, "log_start_failed", { detail: message });
 }
