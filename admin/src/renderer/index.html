@@ -29,12 +29,13 @@
     <button type="button" role="tab" data-tab="accounts" aria-selected="false" data-i18n="tab_accounts"></button>
     <button type="button" role="tab" data-tab="trash" aria-selected="false" data-i18n="tab_trash"></button>
   </nav>
+  <!-- Language stays usable with the hub down, so it lives outside the inert main (shown on the Settings tab only). -->
+  <div id="lang-bar" class="form langbar">
+    <label><span data-i18n="settings_language"></span> <select id="cfg-lang"><option value="ko"></option><option value="en"></option></select></label>
+    <span id="lang-msg" class="msg"></span>
+  </div>
   <main inert>
     <section id="tab-settings" class="panel">
-      <div class="form">
-        <label><span data-i18n="settings_language"></span> <select id="cfg-lang"><option value="ko"></option><option value="en"></option></select></label>
-        <span id="lang-msg" class="msg"></span>
-      </div>
       <form id="config-form" class="form">
         <label><span data-i18n="cfg_max"></span> <input id="cfg-max" type="text" inputmode="numeric" autocomplete="off"></label>
         <label><span data-i18n="cfg_batch"></span> <input id="cfg-batch" type="text" inputmode="numeric" autocomplete="off"></label>

@@ -309,3 +309,14 @@ test("RT24: Hub 오류 문구에 섞인 이름의 줄바꿈으로 MCP 출력에 
   assert.equal(out.split("\n").length, 1);
   client.close(); hub.stop();
 });
+
+test("판단은 code로만: 새 Hub 오류 문구에 legacy 문장이 섞여 있어도(다른 에이전트가 정한 이름) 선택을 풀지 않는다", async () => {
+  const { hub, port } = await startHub();
+  const { client, s } = session(port, tmp());
+  await s.use("기획");
+  const out = s.explainError({ code: "server_name_taken", error: "A server with the same name already exists: x 더 이상 존재하지 않습니다 (id)" });
+  assert.notEqual(s.selection, null);
+  assert.doesNotMatch(out, /use_account\(/);
+  assert.equal(isUnknownOp({ code: "server_name_taken", error: "알 수 없는 op" }), false);
+  client.close(); hub.stop();
+});

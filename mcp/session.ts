@@ -18,9 +18,14 @@ function hubText(s: string | undefined): string {
   return oneLine(s ?? "", 500);
 }
 
+/** code가 없는 응답 = 구버전 Hub(v2.0.3 이하). 문장 비교는 이때만 한다 — 새 Hub 문구에는 다른 에이전트가 정한 이름이 섞일 수 있다. */
+function isLegacy(r: HubReply): boolean {
+  return r.code === undefined;
+}
+
 /** Hub에 그 op가 없음(구버전 Hub). */
 export function isUnknownOp(r: HubReply): boolean {
-  return r.code === "unknown_op" || r.error === LEGACY_UNKNOWN_OP;
+  return r.code === "unknown_op" || (isLegacy(r) && r.error === LEGACY_UNKNOWN_OP);
 }
 
 export class AccountSession {
@@ -117,7 +122,7 @@ export class AccountSession {
     const r = await this.client.listAccounts();
     if (!r.ok) {
       // 구버전 Hub는 list_accounts에 로그인을 요구한다 — 에이전트에는 login 툴이 없으므로 구버전 안내로 바꾼다.
-      if (!this.sel && (r.code === "login_required" || r.error?.includes(LEGACY_LOGIN_REQUIRED))) return { ok: false, text: this.m("old_hub") };
+      if (!this.sel && (r.code === "login_required" || (isLegacy(r) && r.error?.includes(LEGACY_LOGIN_REQUIRED)))) return { ok: false, text: this.m("old_hub") };
       return { ok: false, text: this.explainError(r) };
     }
     const list = (r.accounts ?? []).map(
@@ -129,7 +134,7 @@ export class AccountSession {
   /** Hub 오류를 에이전트가 할 수 있는 행동으로 안내한다(에이전트에는 login 툴이 없다). */
   explainError(r: HubReply): string {
     if (isUnknownOp(r)) return this.m("old_hub");
-    if (r.code === "account_gone" || r.error?.includes(LEGACY_ACCOUNT_GONE)) {
+    if (r.code === "account_gone" || (isLegacy(r) && r.error?.includes(LEGACY_ACCOUNT_GONE))) {
       if (!this.roles) return this.m("account_deleted_pinned");
       const role = this.sel?.role;
       this.sel = null;

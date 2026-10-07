@@ -231,6 +231,7 @@ function selectTab(name: string): void {
     b.setAttribute("aria-selected", String(b.dataset.tab === name));
   }
   for (const p of document.querySelectorAll<HTMLElement>(".panel")) p.hidden = p.id !== `tab-${name}`;
+  byId("lang-bar").hidden = name !== "settings";
 }
 
 for (const b of document.querySelectorAll<HTMLButtonElement>("[data-tab]")) {

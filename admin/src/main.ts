@@ -150,6 +150,7 @@ async function collectReport(win: BrowserWindow): Promise<Record<string, unknown
     lang: document.documentElement.lang,
     langPicker: !document.getElementById("lang-picker").hidden,
     title: document.title,
+    langSelectUsable: !document.getElementById("cfg-lang").closest("[inert]") && !document.getElementById("cfg-lang").closest("[hidden]"),
     bodyHasHangul: (() => {
       const b = document.body.cloneNode(true);
       for (const e of b.querySelectorAll("#lang-picker, #cfg-lang")) e.remove();

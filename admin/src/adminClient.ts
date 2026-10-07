@@ -162,7 +162,7 @@ export class AdminClient {
         throw e;
       });
       if (!r.ok) {
-        if (r.code === "unknown_op" || r.error === LEGACY_UNKNOWN_OP) throw this.fail("old_hub_no_op");
+        if (r.code === "unknown_op" || (r.code === undefined && r.error === LEGACY_UNKNOWN_OP)) throw this.fail("old_hub_no_op"); // 문장 비교는 code 없는 구버전 Hub만
         throw new HubOpError(r.error ?? adminMsg(this.lang(), "op_failed", { op }), r.code, r.conflicts);
       }
       return r;

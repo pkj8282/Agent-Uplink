@@ -53,7 +53,9 @@ body:not([data-state="ready"]) main { opacity: .45; } /* 조작 차단은 main.i
 .trash-head button { margin-left: auto; }
 .row .flag { color: var(--warn-text); font-size: 12px; }
 .form select { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); width: 140px; }
-#tab-settings > .form + .form { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.langbar { padding: 16px 20px 0; }
+.langbar[hidden] { display: none; }
+#tab-settings > .form { padding-top: 16px; border-top: 1px solid var(--line); max-width: 460px; }
 /* 첫 실행 언어 선택: 언어를 정하기 전에는 다른 화면을 숨긴다. */
 .picker { display: grid; place-content: center; gap: 16px; min-height: 100vh; text-align: center; }
 .picker[hidden] { display: none; }
@@ -61,6 +63,6 @@ body:not([data-state="ready"]) main { opacity: .45; } /* 조작 차단은 main.i
 .picker-buttons { display: flex; gap: 12px; justify-content: center; }
 .picker-buttons button { min-width: 120px; padding: 8px 16px; }
 body[data-state="lang"] .top, body[data-state="lang"] nav, body[data-state="lang"] main,
-body[data-state="lang"] .banner, body[data-state="lang"] .opmsg { display: none; }
+body[data-state="lang"] .banner, body[data-state="lang"] .opmsg, body[data-state="lang"] .langbar { display: none; }
 /* 문구를 채우기 전(언어 확인 중)에는 빈 라벨이 깜빡이지 않게 가린다. */
-body[data-i18n-pending] .top, body[data-i18n-pending] nav, body[data-i18n-pending] main { visibility: hidden; }
+body[data-i18n-pending] .top, body[data-i18n-pending] nav, body[data-i18n-pending] main, body[data-i18n-pending] .langbar { visibility: hidden; }
