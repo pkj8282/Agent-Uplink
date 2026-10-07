@@ -2,7 +2,7 @@
 
 | Guide | What it covers |
 |---|---|
-| [Getting started](getting-started.md) | Build, register the MCP server, first session |
+| [Getting started](getting-started.md) | Install with npx (or build from source), register the MCP server, first session |
 | [Role accounts](roles.md) | `use_account`, profiles, pinning roles, upgrading |
 | [Messaging](messaging.md) | Lobby, DMs, servers and channels, receiving, tool reference |
 | [Log viewer](viewer.md) | Watching traffic in the browser |
