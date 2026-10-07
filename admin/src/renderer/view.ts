@@ -37,19 +37,31 @@ export interface FormMessage { text: string; kind: "ok" | "err" | "dirty" }
  */
 export class ConfigFormState {
   private dirty = false;
+  /** 지금 보이는 상태 문구의 종류(문구는 언어를 바꾸면 다시 만든다). 실패 문구는 그 순간의 내용이라 다시 만들지 않는다. */
+  private shown: "dirty" | "saved" | null = null;
 
   edit(): FormMessage {
     this.dirty = true;
-    return { text: tr("form_dirty"), kind: "dirty" };
+    this.shown = "dirty";
+    return this.message()!;
   }
 
   saved(): FormMessage {
     this.dirty = false;
-    return { text: tr("form_saved"), kind: "ok" };
+    this.shown = "saved";
+    return this.message()!;
   }
 
   failed(text: string): FormMessage {
+    this.shown = null;
     return { text, kind: "err" };
+  }
+
+  /** 현재 언어로 다시 만든 상태 문구. 다시 만들 수 없는 것(실패·없음)은 null. */
+  message(): FormMessage | null {
+    if (this.shown === "dirty") return { text: tr("form_dirty"), kind: "dirty" };
+    if (this.shown === "saved") return { text: tr("form_saved"), kind: "ok" };
+    return null;
   }
 
   /** 새로고침 시 Hub 값으로 폼을 채워도 되는가. */

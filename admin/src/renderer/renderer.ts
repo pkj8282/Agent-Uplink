@@ -312,6 +312,11 @@ byId<HTMLSelectElement>("cfg-lang").addEventListener("change", async (e) => {
   const r = await window.admin.setLanguage(lang);
   setLang(lang);
   applyStatic();
+  // 이미 표시된 문구도 새 언어로: 폼 상태 문구는 다시 만들고, 다시 만들 수 없는 것(실패 문구·지난 작업 결과)은 지운다.
+  const fm = formState.message();
+  if (fm) showFormMessage(fm);
+  else showFormMessage({ text: "", kind: "ok" });
+  showOpMsg(null);
   const m = byId("lang-msg");
   m.textContent = r.ok ? tr("lang_changed_notice") : r.error;
   m.className = `msg ${r.ok ? "ok" : "err"}`;

@@ -182,3 +182,19 @@ test("영어 화면: 삭제 확인·휴지통 요약·오류 코드·폼 문구�
     assert.deepEqual(texts.filter(hasHangul), []);
   } finally { setLang("ko"); }
 });
+
+test("설정 폼 상태 문구는 언어를 바꾸면 새 언어로 다시 만든다(저장 안 됨·저장됨), 실패 문구는 지운다", () => {
+  setLang("ko");
+  try {
+    const s = new ConfigFormState();
+    s.edit();
+    setLang("en");
+    assert.deepEqual(s.message(), { text: "You have unsaved changes. Press Save to apply them.", kind: "dirty" });
+    s.saved();
+    setLang("ko");
+    assert.deepEqual(s.message(), { text: "저장했습니다(즉시 반영).", kind: "ok" });
+    s.failed("저장 실패: x");
+    assert.equal(s.message(), null);
+    assert.equal(new ConfigFormState().message(), null);
+  } finally { setLang("ko"); }
+});
