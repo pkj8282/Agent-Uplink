@@ -60,3 +60,12 @@ test("readLanguageFile: 없음·깨짐·이상한 값은 N/A", () => {
   fs.writeFileSync(cfg(d), JSON.stringify({ language: "<script>" }));
   assert.equal(readLanguageFile(d), "N/A");
 });
+
+test("RT23: 데이터 폴더 자체가 정션·링크면 거부하고 연결된 폴더의 config.json을 건드리지 않는다", (t) => {
+  const victim = tmp();
+  fs.writeFileSync(cfg(victim), JSON.stringify({ theme: "dark" }));
+  const link = path.join(tmp(), "AgentUplink");
+  try { fs.symlinkSync(victim, link, "junction"); } catch { t.skip("정션을 만들 수 없음"); return; }
+  assert.throws(() => writeLanguageFile(link, "ko"));
+  assert.deepEqual(JSON.parse(fs.readFileSync(cfg(victim), "utf8")), { theme: "dark" });
+});

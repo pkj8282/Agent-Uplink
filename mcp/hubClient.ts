@@ -11,6 +11,7 @@ import { readClientKey, resolveDataDir, clientKeyPath } from "../shared/clientKe
 import { currentLang } from "../shared/langConfig.js";
 import type { Lang } from "../shared/i18n.js";
 import { mcpMsg } from "./messages.js";
+import { oneLine } from "./text.js";
 
 export interface HubClientOptions {
   port?: number;
@@ -139,11 +140,11 @@ export class HubClient {
           // Hub 재시작 사이 다른 세션이 이 역할을 가져갔다: 연결은 유지하고 계정 선택만 해제해
           // use_account로 다른 역할을 고를 수 있게 한다(계속 같은 재로그인에 막히지 않도록).
           this.account = null;
-          this.onAccountLost?.(r.error ?? mcpMsg(this.lang(), "relogin_refused"));
-          throw this.fail("selection_released", { reason: r.error ?? "" });
+          this.onAccountLost?.(r.error ? oneLine(r.error, 500) : mcpMsg(this.lang(), "relogin_refused"));
+          throw this.fail("selection_released", { reason: oneLine(r.error ?? "", 500) });
         }
         this.close();
-        throw this.fail("relogin_failed", { reason: r.error ?? "" });
+        throw this.fail("relogin_failed", { reason: oneLine(r.error ?? "", 500) });
       }
     }
   }
@@ -199,7 +200,7 @@ export class HubClient {
     let h: Response;
     try { h = await this.request("hello", {}, 15000); } // 보안 준비(권한·소유자 검사) 동안 기다린다
     catch (e) { this.close(); throw this.fail("hub_no_answer", { port: this.port, detail: (e as Error).message }); }
-    if (!h.ok && h.code === "secure_setup_failed") { this.close(); throw this.fail("hub_cannot_start", { detail: h.error ?? "" }); }
+    if (!h.ok && h.code === "secure_setup_failed") { this.close(); throw this.fail("hub_cannot_start", { detail: oneLine(h.error ?? "", 1000) }); }
     if (h.magic !== MAGIC) { this.close(); throw this.fail("not_a_hub", { port: this.port }); }
     if (h.version !== PROTOCOL_VERSION) {
       this.close();

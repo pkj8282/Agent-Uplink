@@ -13,6 +13,11 @@ export interface Selection {
 
 type HubReply = { error?: string; code?: string };
 
+/** Hub가 보낸 오류 문구를 AI 출력에 넣을 때: 다른 에이전트가 정한 이름이 섞여 있을 수 있어 한 줄로 정리한다(레드팀 RT24). */
+function hubText(s: string | undefined): string {
+  return oneLine(s ?? "", 500);
+}
+
 /** Hub에 그 op가 없음(구버전 Hub). */
 export function isUnknownOp(r: HubReply): boolean {
   return r.code === "unknown_op" || r.error === LEGACY_UNKNOWN_OP;
@@ -55,7 +60,7 @@ export class AccountSession {
     const statuses = new Map<string, AccountStatus>();
     if (entries.length > 0) {
       const r = await this.client.accountStatus(entries.map((e) => e.uuid));
-      if (!r.ok) return isUnknownOp(r) ? this.m("old_hub") : this.m("role_status_failed", { detail: r.error ?? "" });
+      if (!r.ok) return isUnknownOp(r) ? this.m("old_hub") : this.m("role_status_failed", { detail: hubText(r.error) });
       for (const st of r.statuses ?? []) statuses.set(st.uuid, st);
     }
     const lines = entries.map((e) => {
@@ -80,9 +85,9 @@ export class AccountSession {
     const res = this.roles.resolve(v.role);
     // 구버전 Hub는 exclusive를 무시해 독점이 조용히 꺼진다 → 로그인 전에 역할 기능 지원을 확인한다.
     const probe = await this.client.accountStatus([res.uuid]);
-    if (!probe.ok) return { ok: false, text: isUnknownOp(probe) ? this.m("old_hub") : this.m("role_check_failed", { detail: probe.error ?? "" }) };
+    if (!probe.ok) return { ok: false, text: isUnknownOp(probe) ? this.m("old_hub") : this.m("role_check_failed", { detail: hubText(probe.error) }) };
     const r = await this.client.selectAccount(res.uuid, v.role);
-    if (!r.ok) return { ok: false, text: `${r.error}\n\n${await this.listText()}` };
+    if (!r.ok) return { ok: false, text: `${hubText(r.error)}\n\n${await this.listText()}` };
     this.sel = { uuid: res.uuid, role: v.role };
     this.lostNotice = null;
     const lines = [this.m("role_selected", { role: v.role }), this.m("label_uuid", { uuid: res.uuid })];
@@ -90,7 +95,7 @@ export class AccountSession {
     if (description !== undefined) {
       try {
         const p = await this.client.setProfile(description);
-        if (!p.ok) lines.push(this.m("profile_save_failed", { detail: p.error ?? "" }));
+        if (!p.ok) lines.push(this.m("profile_save_failed", { detail: hubText(p.error) }));
       } catch (e) {
         lines.push(this.m("profile_save_failed_retry", { detail: (e as Error).message }));
       }
@@ -130,6 +135,6 @@ export class AccountSession {
       this.sel = null;
       return this.m("account_deleted_role", { call: role ? `"${role}"` : "role" });
     }
-    return this.m("failed", { detail: r.error ?? this.m("unknown_error") });
+    return this.m("failed", { detail: r.error ? hubText(r.error) : this.m("unknown_error") });
   }
 }

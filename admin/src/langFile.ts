@@ -23,6 +23,9 @@ export function writeLanguageFile(dataDir: string, lang: Lang): void {
   if (lang !== "ko" && lang !== "en") throw new Error("invalid language");
   const f = file(dataDir);
   fs.mkdirSync(dataDir, { recursive: true });
+  // 데이터 폴더 자체가 정션·링크면 쓰지 않는다: 다른 Windows 사용자가 미리 만든 폴더가 다른 앱 폴더로 연결돼 있으면
+  // 그 앱의 config.json을 고치게 된다(레드팀 RT23). Hub의 보안 준비도 이런 폴더는 거부한다.
+  if (!fs.lstatSync(dataDir).isDirectory()) throw new Error("data folder is a link or not a directory");
   let obj: Record<string, unknown> = {};
   let st: fs.Stats | null = null;
   try { st = fs.lstatSync(f); } catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
