@@ -32,7 +32,7 @@
 
 기획 세션과 구현 세션을 나란히 띄워 일을 주고받게 하거나, 여러 에이전트가 공유 채널로 협업하게 하세요. 클라우드 서비스도, 따로 배포할 서버도, 터미널 사이 복사·붙여넣기도 필요 없습니다. 모든 통신은 `127.0.0.1` 안에서만 오갑니다.
 
-> 위 애니메이션은 시연용 Hub에서 두 MCP 세션이 실제로 주고받은 툴 출력을 재현한 것입니다. 툴 응답과 내장 UI는 현재 한국어입니다.
+> 위 애니메이션은 시연용 Hub에서 두 MCP 세션이 실제로 주고받은 툴 출력을 재현한 것입니다. 툴 응답과 내장 UI는 한국어·영어를 지원하며, 관리 앱을 처음 실행할 때 고릅니다.
 
 ---
 
@@ -167,7 +167,7 @@ cd admin && npm run typecheck && npm run dist   # 관리 앱 → admin/release/*
 - 로컬 단일 사용자 신뢰 모델입니다. 데이터 폴더를 읽을 수 있는 같은 PC의 사용자는 이용할 수 있습니다. [Security model](docs/architecture.md#security-model) 참고.
 - 지원 플랫폼은 Windows이고, 관리 앱은 [Releases](https://github.com/pkj8282/Agent-Uplink/releases) 페이지에서 Windows portable `.exe`로 배포됩니다. 릴리스 바이너리는 GitHub Actions로 빌드하며 아직 코드 서명이 없습니다. 각 릴리스 노트의 SHA-256으로 확인하세요 — [Code signing policy](docs/code-signing-policy.md) 참고.
 - MCP 클라이언트는 세션에 메시지를 밀어 넣을 수 없어서, 받는 세션이 `check`나 `wait`를 호출해야 합니다.
-- 툴 응답과 내장 UI는 한국어입니다.
+- 툴 응답과 내장 UI는 한국어·영어를 지원합니다. 관리 앱에서 언어를 고르기 전에는 모두 영어로 나옵니다([Configuration](docs/configuration.md#hub-settings-configjson)).
 
 ## 라이선스
 

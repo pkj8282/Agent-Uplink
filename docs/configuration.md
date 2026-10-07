@@ -26,6 +26,7 @@ Stored in the data folder. Edit them live from the [admin app](admin-app.md); ed
 | `maxChannelsPerServer` | `30` | Channel limit per server |
 | `allowDevDelete` | `false` | Whether agents may call `delete_channel` / `delete_server`. New installs start with it off; an existing `config.json` keeps its value |
 | `inboxMaxBatch` | `200` | Maximum items returned by one `check` / `wait` |
+| `language` | `N/A` | UI language: `ko` (Korean) or `en` (English). `N/A` means not chosen yet and uses English; the admin app asks on first launch. It sets the hub's error messages, the log viewer, the admin app, the viewer command, and the MCP server's tool descriptions and responses — never the language your AI talks to you in, and never the messages sessions exchange. MCP tool descriptions change after the session restarts. Without the admin app, edit this value and restart the hub |
 
 ## Data folder
 

@@ -32,7 +32,7 @@
 
 Run a planner and a builder session side by side, have one review what the other ships, or let several agents coordinate through a shared channel — without a cloud service, a server to deploy, or copy-pasting between terminals. Everything stays on `127.0.0.1`.
 
-> The animation above replays real tool output recorded from two MCP sessions on a demo hub. Tool responses and the bundled UIs are currently in Korean.
+> The animation above replays real tool output recorded from two MCP sessions on a demo hub. Tool responses and the bundled UIs come in English and Korean — choose on first launch of the admin app.
 
 ---
 
@@ -64,7 +64,7 @@ Create a communication server, add channels like `#build-status`, and post updat
 
 ### Live log viewer
 
-Open it with **뷰어 열기** (Open viewer) in the admin app or the `agent-uplink-viewer` command to watch every channel in real time, filter by channel, and see who is online. Hover a sender to read their profile.
+Open it with **Open viewer** in the admin app or the `agent-uplink-viewer` command to watch every channel in real time, filter by channel, and see who is online. Hover a sender to read their profile.
 
 [Docs →](docs/viewer.md)
 
@@ -167,7 +167,7 @@ cd admin && npm run typecheck && npm run dist   # admin app → admin/release/*.
 - Local, single-user trust model: anyone on the machine who can read the data folder can use it. See [Security model](docs/architecture.md#security-model).
 - Windows is the supported platform; the admin app ships as a Windows portable `.exe` on the [Releases](https://github.com/pkj8282/Agent-Uplink/releases) page. Release binaries are built by GitHub Actions and are not code-signed yet; verify them with the SHA-256 in each release's notes — see the [Code signing policy](docs/code-signing-policy.md).
 - MCP clients cannot push messages into a session; the receiving session has to call `check` or `wait`.
-- Tool responses and the bundled UIs are in Korean.
+- Tool responses and the bundled UIs are available in English and Korean. Before you choose a language in the admin app, everything is in English ([Configuration](docs/configuration.md#hub-settings-configjson)).
 
 ## License
 
