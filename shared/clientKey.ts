@@ -2,6 +2,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isKeyText } from "./auth.js";
+import { currentLang } from "./langConfig.js";
+import { sharedMsg } from "./messages.js";
 
 export const CLIENT_KEY_FILE = "client.key";
 
@@ -21,9 +23,9 @@ export function readClientKey(dataDir: string): string {
     raw = fs.readFileSync(file, "utf8");
   } catch (e) {
     const why = (e as NodeJS.ErrnoException).code ?? (e as Error).message;
-    throw new Error(`client.key를 읽을 수 없습니다(${why}): ${file}. Hub를 재시작해 보세요. MCP와 Hub의 UPLINK_DATA_DIR가 같은지도 확인하세요.`);
+    throw new Error(sharedMsg(currentLang(dataDir), "client_key_unreadable", { why: String(why), file }));
   }
   const key = raw.trim();
-  if (!isKeyText(key)) throw new Error(`client.key를 읽을 수 없습니다(형식 오류): ${file}. Hub를 재시작해 보세요.`);
+  if (!isKeyText(key)) throw new Error(sharedMsg(currentLang(dataDir), "client_key_malformed", { file }));
   return key;
 }

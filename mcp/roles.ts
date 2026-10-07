@@ -14,11 +14,14 @@ function hasForbidden(s: string): boolean {
   return false;
 }
 
-export function validateRoleName(raw: string): { ok: true; role: string } | { ok: false; error: string } {
+/** 실패는 언어 중립 code(문구는 호출자가 현재 언어로 만든다 — mcp/messages.ts의 같은 키). */
+export function validateRoleName(
+  raw: string,
+): { ok: true; role: string } | { ok: false; code: "role_empty" | "role_too_long" | "role_forbidden"; params?: { max: number } } {
   const role = raw.trim();
-  if (role.length === 0) return { ok: false, error: "역할 이름이 비어 있습니다." };
-  if ([...role].length > ROLE_NAME_MAX) return { ok: false, error: `역할 이름은 ${ROLE_NAME_MAX}자 이하여야 합니다.` };
-  if (hasForbidden(role)) return { ok: false, error: "역할 이름에 '=', ';', 줄바꿈·제어문자를 쓸 수 없습니다." };
+  if (role.length === 0) return { ok: false, code: "role_empty" };
+  if ([...role].length > ROLE_NAME_MAX) return { ok: false, code: "role_too_long", params: { max: ROLE_NAME_MAX } };
+  if (hasForbidden(role)) return { ok: false, code: "role_forbidden" };
   return { ok: true, role };
 }
 

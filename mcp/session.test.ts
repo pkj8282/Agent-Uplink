@@ -6,11 +6,12 @@ import path from "node:path";
 import net from "node:net";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 import { Hub } from "../hub/server.js";
-import { TEST_SECURE_DEPS, registerTestHub, TestClient, seedLanguage } from "../hub/testing.js";
+import { TEST_SECURE_DEPS, registerTestHub, TestClient, seedLanguage, hasHangul } from "../hub/testing.js";
 import { hubProof } from "../shared/auth.js";
 import { HubClient } from "./hubClient.js";
 import { RoleStore } from "./roles.js";
 import { AccountSession } from "./session.js";
+import { isUnknownOp } from "./session.js";
 
 function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-sess-")); }
 
@@ -30,7 +31,9 @@ async function startHub(tcpPort = 0, dataDir = tmp()) {
 
 /** 역할 세션 하나(= MCP 프로세스 하나). Hub는 이미 떠 있으므로 spawn하지 않는다. */
 function session(port: number, roleDir: string, cwd = "C:\\Proj", env?: string) {
-  const client = new HubClient({ port, dataDir: hubDirs.get(port), hubEntry: "nonexistent-should-not-spawn.js" });
+  // 가짜 Hub에는 데이터 폴더가 없다 — 실제 %ProgramData% 설정을 읽지 않도록 언어(ko)만 둔 임시 폴더를 쓴다.
+  const dataDir = hubDirs.get(port) ?? (() => { const d = tmp(); seedLanguage(d, "ko"); return d; })();
+  const client = new HubClient({ port, dataDir, hubEntry: "nonexistent-should-not-spawn.js" });
   return { client, s: new AccountSession(client, new RoleStore({ dataDir: roleDir, cwd, env })) };
 }
 
@@ -170,6 +173,7 @@ test("Hub 재시작 사이 역할을 빼앗겨도 곧바로 다른 역할을 고
  */
 async function fakeHub(handler: (req: any) => object | null) {
   const keyDir = tmp();
+  seedLanguage(keyDir, "ko"); // 한국어 안내 단정
   const key = "f".repeat(64);
   fs.writeFileSync(path.join(keyDir, "client.key"), key);
   const socks = new Set<net.Socket>();
@@ -240,7 +244,7 @@ test("관리 도구로 역할 계정이 삭제되면 선택을 해제하고 use_
   await adminOp(port, dataDir, "admin_delete_account", { uuid });
   const r = await client.check();
   assert.equal(r.ok, false);
-  const msg = s.explainError(r.error);
+  const msg = s.explainError(r);
   assert.match(msg, /use_account\("기획"\)/);
   assert.doesNotMatch(msg, /login/);
   assert.equal(s.selection, null);
@@ -264,4 +268,35 @@ test("역할 선택 직후 설명 저장 중 연결이 끊겨도 선택 성공�
   assert.match(r.text, /설명 저장 실패/);
   assert.equal(s.selection!.role, "기획");
   client.close(); f.close();
+});
+
+test("언어를 바꾸면 같은 세션의 다음 안내부터 그 언어(도구 설명과 달리 재시작 불필요)", async () => {
+  const { hub, port, dataDir } = await startHub();
+  const { client, s } = session(port, tmp());
+  assert.match((await s.guard())!, /먼저 계정을 선택하세요/);
+  const cfg = path.join(dataDir, "config.json");
+  fs.writeFileSync(cfg, JSON.stringify({ ...JSON.parse(fs.readFileSync(cfg, "utf8")), language: "en" }));
+  const g = (await s.guard())!;
+  assert.match(g, /Select an account first/);
+  assert.equal(hasHangul(g), false);
+  client.close(); hub.stop();
+});
+
+test("isUnknownOp: 새 Hub의 code와 구버전 Hub의 문장 모두", () => {
+  assert.equal(isUnknownOp({ code: "unknown_op", error: "Unknown op." }), true);
+  assert.equal(isUnknownOp({ error: "알 수 없는 op" }), true);
+  assert.equal(isUnknownOp({ code: "login_required", error: "x" }), false);
+  assert.equal(isUnknownOp({}), false);
+});
+
+test("explainError: account_gone code(영어 문장)와 구버전 한국어 문장 모두 역할 재선택 안내", async () => {
+  const { hub, port } = await startHub();
+  for (const r of [{ code: "account_gone", error: "This account no longer exists. Log in again." }, { error: "이 계정은 더 이상 존재하지 않습니다. 다시 login 하세요." }]) {
+    const { client, s } = session(port, tmp());
+    await s.use("기획");
+    assert.match(s.explainError(r), /use_account\("기획"\)/);
+    assert.equal(s.selection, null);
+    client.close();
+  }
+  hub.stop();
 });

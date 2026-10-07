@@ -47,6 +47,7 @@ test("MCP v2는 tools/list에서 17개 툴을 노출한다", async () => {
 
 test("env 없는 세션은 역할 선택 전 send를 막고 use_account를 안내한다", async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-smoke-"));
+  fs.writeFileSync(path.join(dataDir, "config.json"), JSON.stringify({ language: "ko" })); // 한국어 안내 단정
   const env: Record<string, string> = { UPLINK_DATA_DIR: dataDir, UPLINK_TCP_PORT: "1" };
   const out = await rpc([
     { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } } },

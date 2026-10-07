@@ -9,13 +9,18 @@ import { randomBytes } from "node:crypto";
 import { HubClient } from "./hubClient.js";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 import { Hub } from "../hub/server.js";
-import { startTestHub, TEST_SECURE_DEPS } from "../hub/testing.js";
+import { startTestHub, TEST_SECURE_DEPS, hasHangul } from "../hub/testing.js";
 
 const HUB_ENTRY = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "hub", "index.ts");
 const NODE_ARGS = ["--import", "tsx"];
 let portSeq = 49400;
 function freshPort(): number { return portSeq++; }
-function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-v2c-")); }
+/** 데이터 폴더(언어 기본 ko — 기존 한국어 안내 단정을 유지한다). */
+function tmp(language: "ko" | "en" = "ko"): string {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-v2c-"));
+  fs.writeFileSync(path.join(d, "config.json"), JSON.stringify({ language }));
+  return d;
+}
 
 /** 같은 포트(= 같은 Hub)의 클라이언트는 같은 데이터 폴더(같은 client.key)를 쓴다. */
 const dirByPort = new Map<number, string>();
@@ -121,8 +126,8 @@ async function fakeHub(onReq: (r: any) => object | "drop" | null, helloDelayMs?:
   return { port: (srv.address() as net.AddressInfo).port, bytes: () => Buffer.concat(seen).toString("utf8"), close: () => { for (const s of socks) s.destroy(); srv.close(); } };
 }
 
-function keyDir(): { dir: string; key: string } {
-  const dir = tmp(); const key = randomBytes(32).toString("hex");
+function keyDir(language: "ko" | "en" = "ko"): { dir: string; key: string } {
+  const dir = tmp(language); const key = randomBytes(32).toString("hex");
   fs.writeFileSync(path.join(dir, "client.key"), key);
   return { dir, key };
 }
@@ -213,4 +218,18 @@ test("Minor5: 인증 중 연결이 끊기면 '다른 사용자' 대신 끊김 �
   const c2 = new HubClient({ port: failed.port, dataDir: dir, hubEntry: "nonexistent.js" });
   await assert.rejects(c2.listAccounts(), /이 Windows 사용자의 Hub가 아닙니다/);
   c2.close(); failed.close();
+});
+
+test("MCP 자체 오류는 데이터 폴더의 언어를 따른다(en: 한글 없음)", async () => {
+  const { dir, key } = keyDir("en");
+  const f = await fakeHub((r) => r.op === "hello" ? { ok: true, magic: "agent-uplink", version: 3, nonce: randomBytes(32).toString("hex") }
+    : r.op === "auth" ? { ok: true, proof: randomBytes(32).toString("hex") } : { ok: true });
+  const c = new HubClient({ port: f.port, dataDir: dir, hubEntry: "nonexistent.js" });
+  await assert.rejects(c.listAccounts(), (e: Error) => /is not this Windows user's hub/.test(e.message) && !hasHangul(e.message));
+  assert.equal(f.bytes().includes(key), false);
+  c.close(); f.close();
+  const f2 = await fakeHub((r) => r.op === "hello" ? { ok: true, magic: "agent-uplink", version: 2 } : null);
+  const c2 = new HubClient({ port: f2.port, dataDir: dir, hubEntry: "nonexistent.js" });
+  await assert.rejects(c2.listAccounts(), (e: Error) => /old version \(protocol v2\)/.test(e.message) && !hasHangul(e.message));
+  c2.close(); f2.close();
 });

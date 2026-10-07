@@ -8,6 +8,9 @@ import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 import { MAGIC, PROTOCOL_VERSION, DEFAULT_TCP_PORT, Response } from "../shared/protocol.js";
 import { newNonce, isNonce, clientProof, hubProof, proofEquals } from "../shared/auth.js";
 import { readClientKey, resolveDataDir, clientKeyPath } from "../shared/clientKey.js";
+import { currentLang } from "../shared/langConfig.js";
+import type { Lang } from "../shared/i18n.js";
+import { mcpMsg } from "./messages.js";
 
 export interface HubClientOptions {
   port?: number;
@@ -30,15 +33,6 @@ interface Pending {
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export const OLD_PROTOCOL_HUB_MESSAGE =
-  "실행 중인 Hub가 구버전(프로토콜 v2)입니다. 실행 중인 Hub를 종료(재시작)하거나 재배포한 뒤 다시 시도하세요.";
-
-export const AUTH_DROPPED_MESSAGE =
-  "인증 중 Hub 연결이 끊기거나 응답이 없습니다(Hub가 종료 중이거나 연결이 너무 많을 수 있습니다). 잠시 후 다시 시도하세요.";
-
-export function notOurHubMessage(port: number): string {
-  return `포트 ${port}의 Hub가 이 Windows 사용자의 Hub가 아닙니다(인증 실패). 같은 PC의 다른 사용자가 포트를 점유했거나, 이 MCP와 Hub의 UPLINK_DATA_DIR가 다를 수 있습니다 — MCP 설정 env의 UPLINK_TCP_PORT·UPLINK_DATA_DIR를 확인하세요.`;
-}
 
 export class HubClient {
   private readonly port: number;
@@ -63,6 +57,15 @@ export class HubClient {
       opts.hubEntry ?? path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "hub", "index.js");
     this.nodeArgs = opts.nodeArgs ?? [];
     this.dataDir = opts.dataDir ?? resolveDataDir(process.env);
+  }
+
+  /** 표시 언어: 매번 데이터 폴더 config.json을 읽는다(관리 앱에서 바꾸면 다음 호출부터). */
+  lang(): Lang {
+    return currentLang(this.dataDir);
+  }
+
+  private fail(key: Parameters<typeof mcpMsg>[1], params?: object): Error {
+    return new Error(mcpMsg(this.lang(), key, params));
   }
 
   /** 재연결 때 독점 재로그인이 거부되면(다른 세션이 계정을 가져감) 호출된다. */
@@ -136,11 +139,11 @@ export class HubClient {
           // Hub 재시작 사이 다른 세션이 이 역할을 가져갔다: 연결은 유지하고 계정 선택만 해제해
           // use_account로 다른 역할을 고를 수 있게 한다(계속 같은 재로그인에 막히지 않도록).
           this.account = null;
-          this.onAccountLost?.(r.error ?? "재로그인 거부");
-          throw new Error(`계정 선택이 해제되었습니다(${r.error}). use_account로 다시 선택하세요.`);
+          this.onAccountLost?.(r.error ?? mcpMsg(this.lang(), "relogin_refused"));
+          throw this.fail("selection_released", { reason: r.error ?? "" });
         }
         this.close();
-        throw new Error(`Hub 재로그인 실패: ${r.error}`);
+        throw this.fail("relogin_failed", { reason: r.error ?? "" });
       }
     }
   }
@@ -166,7 +169,7 @@ export class HubClient {
       await delay(100);
       try { return await this.connectOnce(); } catch { /* 재시도 */ }
     }
-    throw new Error("Hub를 시작했지만 연결에 실패했습니다(포트 점유 또는 기동 실패).");
+    throw this.fail("hub_spawn_failed");
   }
 
   private spawnHub(): void {
@@ -185,7 +188,7 @@ export class HubClient {
     }));
     const fail = () => {
       this.sock = null;
-      for (const [, p] of this.pending) { clearTimeout(p.timer); p.reject(new Error("Hub 연결이 끊겼습니다.")); }
+      for (const [, p] of this.pending) { clearTimeout(p.timer); p.reject(this.fail("hub_disconnected")); }
       this.pending.clear();
     };
     sock.on("close", fail);
@@ -195,33 +198,33 @@ export class HubClient {
   private async handshake(): Promise<void> {
     let h: Response;
     try { h = await this.request("hello", {}, 15000); } // 보안 준비(권한·소유자 검사) 동안 기다린다
-    catch (e) { this.close(); throw new Error(`포트 ${this.port}가 응답하지 않습니다(Agent-Uplink Hub가 아닐 수 있음): ${(e as Error).message}`); }
-    if (!h.ok && h.code === "secure_setup_failed") { this.close(); throw new Error(`Hub를 시작할 수 없습니다: ${h.error}`); }
-    if (h.magic !== MAGIC) { this.close(); throw new Error(`포트 ${this.port}가 Agent-Uplink Hub가 아닙니다.`); }
+    catch (e) { this.close(); throw this.fail("hub_no_answer", { port: this.port, detail: (e as Error).message }); }
+    if (!h.ok && h.code === "secure_setup_failed") { this.close(); throw this.fail("hub_cannot_start", { detail: h.error ?? "" }); }
+    if (h.magic !== MAGIC) { this.close(); throw this.fail("not_a_hub", { port: this.port }); }
     if (h.version !== PROTOCOL_VERSION) {
       this.close();
-      throw new Error(h.version === 2 ? OLD_PROTOCOL_HUB_MESSAGE : `포트 ${this.port}의 Hub 프로토콜(v${h.version})이 이 MCP(v${PROTOCOL_VERSION})와 다릅니다. 같은 버전으로 재배포하세요.`);
+      throw h.version === 2 ? this.fail("old_protocol_hub") : this.fail("protocol_mismatch", { port: this.port, hub: h.version, mine: PROTOCOL_VERSION });
     }
     // v3 Hub는 키를 만든 뒤에야 hello에 답한다 → 답했는데 이 폴더에 키가 없으면 이 데이터 폴더의 Hub가 아니다.
-    if (!fs.existsSync(clientKeyPath(this.dataDir))) { this.close(); throw new Error(notOurHubMessage(this.port)); }
+    if (!fs.existsSync(clientKeyPath(this.dataDir))) { this.close(); throw this.fail("not_our_hub", { port: this.port }); }
     let key: string;
     try { key = readClientKey(this.dataDir); } catch (e) { this.close(); throw e; }
     const hubNonce = h.nonce;
-    if (!isNonce(hubNonce)) { this.close(); throw new Error(notOurHubMessage(this.port)); }
+    if (!isNonce(hubNonce)) { this.close(); throw this.fail("not_our_hub", { port: this.port }); }
     const nonce = newNonce();
     let r: Response;
     try { r = await this.request("auth", { nonce, proof: clientProof(key, hubNonce, nonce) }, 15000); }
-    catch { this.close(); throw new Error(AUTH_DROPPED_MESSAGE); } // 끊김·무응답은 "다른 사용자"와 구분한다
+    catch { this.close(); throw this.fail("auth_dropped"); } // 끊김·무응답은 "다른 사용자"와 구분한다
     // Hub 증명을 확인하기 전에는 login 등 아무것도 보내지 않는다(가짜 Hub에 계정·메시지를 넘기지 않음).
-    if (!r.ok || !proofEquals(hubProof(key, hubNonce, nonce), r.proof)) { this.close(); throw new Error(notOurHubMessage(this.port)); }
+    if (!r.ok || !proofEquals(hubProof(key, hubNonce, nonce), r.proof)) { this.close(); throw this.fail("not_our_hub", { port: this.port }); }
   }
 
   private request(op: string, params: object, timeoutMs = 60000): Promise<Response> {
     return new Promise((resolve, reject) => {
       const sock = this.sock;
-      if (!sock || sock.destroyed) { reject(new Error("Hub 연결이 없습니다.")); return; }
+      if (!sock || sock.destroyed) { reject(this.fail("hub_not_connected")); return; }
       const id = this.nextId++;
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`Hub 응답 타임아웃(op=${op}).`)); }, timeoutMs);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(this.fail("hub_timeout", { op })); }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       sock.write(encodeFrame({ op, id, ...params }));
     });

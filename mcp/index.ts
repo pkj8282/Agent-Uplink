@@ -90,7 +90,7 @@ server.registerTool(
       const sel = session.selection;
       if (!sel) return text(`아직 계정을 선택하지 않았습니다. use_account(role)로 고르세요.\n\n${await session.listText()}`);
       const r = await client.whoami();
-      if (!r.ok) return text(session.explainError(r.error), true);
+      if (!r.ok) return text(session.explainError(r), true);
       const lines = [`계정 UUID: ${r.uuid}`, `이름: ${r.name}`];
       if (sel.role) lines.push(`역할: ${sel.role}`);
       else lines.push("고정: UPLINK_ACCOUNT");
@@ -110,7 +110,7 @@ server.registerTool(
   },
   gated(async ({ description }: { description: string }) => {
     const r = await client.setProfile(description);
-    return r.ok ? text(`설명 변경: ${r.description || "(없음)"}`) : text(session.explainError(r.error), true);
+    return r.ok ? text(`설명 변경: ${r.description || "(없음)"}`) : text(session.explainError(r), true);
   }),
 );
 
@@ -123,7 +123,7 @@ server.registerTool(
   },
   gated(async ({ name }: { name: string }) => {
     const r = await client.setName(name);
-    return r.ok ? text(`이름 변경: ${r.name}`) : text(session.explainError(r.error), true);
+    return r.ok ? text(`이름 변경: ${r.name}`) : text(session.explainError(r), true);
   }),
 );
 
@@ -151,7 +151,7 @@ server.registerTool(
   },
   gated(async ({ peer }: { peer: string }) => {
     const r = await client.openDm(peer);
-    return r.ok ? text(`DM 채널 열림: ${r.channelId}`) : text(session.explainError(r.error), true);
+    return r.ok ? text(`DM 채널 열림: ${r.channelId}`) : text(session.explainError(r), true);
   }),
 );
 
@@ -164,7 +164,7 @@ server.registerTool(
   },
   gated(async () => {
     const r = await client.listDms();
-    if (!r.ok) return text(session.explainError(r.error), true);
+    if (!r.ok) return text(session.explainError(r), true);
     const list = (r.dms ?? []).map(
       (d) => `${oneLine(d.peerName, 80)}${d.peerOnline ? " (접속 중)" : ""} (${d.peer}) → ${d.channelId}${d.peerDescription ? ` — ${oneLine(d.peerDescription, 120)}` : ""}`,
     );
@@ -181,7 +181,7 @@ server.registerTool(
   },
   gated(async ({ name }: { name: string }) => {
     const r = await client.createServer(name);
-    return r.ok ? text(`서버 생성됨: ${r.serverId}`) : text(session.explainError(r.error), true);
+    return r.ok ? text(`서버 생성됨: ${r.serverId}`) : text(session.explainError(r), true);
   }),
 );
 
@@ -194,7 +194,7 @@ server.registerTool(
   },
   gated(async () => {
     const r = await client.listServers();
-    if (!r.ok) return text(session.explainError(r.error), true);
+    if (!r.ok) return text(session.explainError(r), true);
     const list = (r.servers ?? []).map((s) => `${s.name} (${s.serverId}) · 채널 ${s.channelCount}개`);
     return text(list.length ? list.join("\n") : "(서버 없음)");
   }),
@@ -212,7 +212,7 @@ server.registerTool(
   },
   gated(async ({ serverId, name }: { serverId: string; name: string }) => {
     const r = await client.createChannel(serverId, name);
-    return r.ok ? text(`채널 생성됨: ${r.channelId}`) : text(session.explainError(r.error), true);
+    return r.ok ? text(`채널 생성됨: ${r.channelId}`) : text(session.explainError(r), true);
   }),
 );
 
@@ -225,7 +225,7 @@ server.registerTool(
   },
   gated(async ({ serverId }: { serverId: string }) => {
     const r = await client.listChannels(serverId);
-    if (!r.ok) return text(session.explainError(r.error), true);
+    if (!r.ok) return text(session.explainError(r), true);
     const list = (r.channels ?? []).map((c) => `${c.name} → ${c.channelId}`);
     return text(list.length ? list.join("\n") : "(채널 없음)");
   }),
@@ -240,7 +240,7 @@ server.registerTool(
   },
   gated(async ({ channelId }: { channelId: string }) => {
     const r = await client.deleteChannel(channelId);
-    return r.ok ? text("채널 삭제됨(휴지통으로 이동)") : text(session.explainError(r.error), true);
+    return r.ok ? text("채널 삭제됨(휴지통으로 이동)") : text(session.explainError(r), true);
   }),
 );
 
@@ -253,7 +253,7 @@ server.registerTool(
   },
   gated(async ({ serverId }: { serverId: string }) => {
     const r = await client.deleteServer(serverId);
-    return r.ok ? text("서버 삭제됨(휴지통으로 이동)") : text(session.explainError(r.error), true);
+    return r.ok ? text("서버 삭제됨(휴지통으로 이동)") : text(session.explainError(r), true);
   }),
 );
 
@@ -269,7 +269,7 @@ server.registerTool(
   },
   gated(async ({ channelId, text: body }: { channelId: string; text: string }) => {
     const r = await client.send(channelId, body);
-    return r.ok ? text(`전송됨 (seq=${r.seq})`) : text(session.explainError(r.error), true);
+    return r.ok ? text(`전송됨 (seq=${r.seq})`) : text(session.explainError(r), true);
   }),
 );
 
@@ -285,7 +285,7 @@ server.registerTool(
   },
   gated(async ({ channelId, limit }: { channelId: string; limit?: number }) => {
     const r = await client.read(channelId, limit);
-    return r.ok ? text(fmtMessages(r.messages)) : text(session.explainError(r.error), true);
+    return r.ok ? text(fmtMessages(r.messages, client.lang())) : text(session.explainError(r), true);
   }),
 );
 
@@ -298,7 +298,7 @@ server.registerTool(
   },
   gated(async () => {
     const r = await client.check();
-    return r.ok ? text(fmtItems(r.items)) : text(session.explainError(r.error), true);
+    return r.ok ? text(fmtItems(r.items, client.lang())) : text(session.explainError(r), true);
   }),
 );
 
@@ -311,7 +311,7 @@ server.registerTool(
   },
   gated(async ({ timeoutMs }: { timeoutMs?: number }) => {
     const r = await client.wait(timeoutMs ?? 30000);
-    return r.ok ? text(fmtItems(r.items)) : text(session.explainError(r.error), true);
+    return r.ok ? text(fmtItems(r.items, client.lang())) : text(session.explainError(r), true);
   }),
 );
 
