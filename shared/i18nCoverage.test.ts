@@ -43,9 +43,8 @@ function hangulLiterals(rel: string): string[] {
 
 // 아직 변환하지 않은 파일. 각 Task가 자기 파일을 지운다 — 최종에는 비어 있어야 한다.
 const PENDING = new Set<string>([
-  "admin/src/renderer/renderer.ts", "admin/src/renderer/view.ts",
 ]);
-const PENDING_HTML = new Set<string>(["admin/src/renderer/index.html"]);
+const PENDING_HTML = new Set<string>([]);
 
 test("변환된 파일의 문자열 리터럴에 한글이 없다", () => {
   const offenders = sourceFiles().filter((f) => !PENDING.has(f)).flatMap(hangulLiterals);
@@ -80,4 +79,8 @@ test("Hub의 ok:false 응답 객체에는 모두 code가 있다", () => {
     visit(sf);
   }
   assert.deepEqual(offenders, []);
+});
+
+test("변환 대기 목록이 비었다(v2.1.0 완료 조건 — 새 파일도 처음부터 문구표를 쓴다)", () => {
+  assert.equal(PENDING.size + PENDING_HTML.size, 0);
 });

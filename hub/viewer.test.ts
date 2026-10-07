@@ -181,3 +181,8 @@ test("Hub는 현재 언어로 뷰어 HTML을 준다", async () => {
   assert.match(r.body, /<html lang="en">/);
   hub.stop();
 });
+
+test("뷰어 시각 표시는 UI 언어의 지역 형식을 쓴다", () => {
+  assert.match(renderViewerHtml("en"), /toLocaleTimeString\("en-US"\)/);
+  assert.match(renderViewerHtml("ko"), /toLocaleTimeString\("ko-KR"\)/);
+});

@@ -109,14 +109,30 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
-/** 첫 로드가 끝난 화면 상태를 모은다(스모크 리포트 본문). */
-async function collectReport(win: BrowserWindow): Promise<Record<string, unknown>> {
+/** 화면이 loading을 벗어날 때까지 기다린다(ready·hubdown·error·lang). */
+async function settled(win: BrowserWindow): Promise<void> {
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
     const state = await win.webContents.executeJavaScript("document.body.dataset.state");
-    if (state !== "loading") break;
+    if (state !== "loading") return;
     await new Promise((r) => setTimeout(r, 200));
   }
+}
+
+/** 첫 로드가 끝난 화면 상태를 모은다(스모크 리포트 본문). */
+async function collectReport(win: BrowserWindow): Promise<Record<string, unknown>> {
+  await settled(win);
+  // 스모크 전용: UPLINK_ADMIN_SMOKE_PICK=ko|en이면 언어 선택 화면에서 그 버튼을 눌러 저장 → Hub 확인까지 진행한다.
+  const pick = process.env.UPLINK_ADMIN_SMOKE_PICK;
+  if ((pick === "ko" || pick === "en") && (await win.webContents.executeJavaScript("document.body.dataset.state")) === "lang") {
+    await win.webContents.executeJavaScript(`document.getElementById("lang-${pick}").click()`);
+    for (let i = 0; i < 50 && (await win.webContents.executeJavaScript("document.body.dataset.state")) === "lang"; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    await settled(win);
+  }
+  // bodyHasHangul: 화면 전체(모든 탭)에 한글이 보이는지 — 영어 화면 확인용. 언어 이름(언어 선택 화면·언어 선택 상자)은
+  // 두 언어 공통이라 뺀다. 사용자 데이터가 한글이면 true일 수 있다.
   const report: Record<string, unknown> = await win.webContents.executeJavaScript(`({
     state: document.body.dataset.state,
     banner: document.getElementById("banner").hidden ? "" : document.getElementById("banner").textContent,
@@ -131,7 +147,16 @@ async function collectReport(win: BrowserWindow): Promise<Record<string, unknown
     trash: document.querySelectorAll("[data-kind=trash]").length,
     trashSummary: document.getElementById("trash-summary").textContent,
     opMsgHidden: document.getElementById("op-msg").hidden,
+    lang: document.documentElement.lang,
+    langPicker: !document.getElementById("lang-picker").hidden,
+    title: document.title,
+    bodyHasHangul: (() => {
+      const b = document.body.cloneNode(true);
+      for (const e of b.querySelectorAll("#lang-picker, #cfg-lang")) e.remove();
+      return [...b.textContent].some((c) => { const x = c.codePointAt(0); return x >= 0xac00 && x <= 0xd7a3; });
+    })(),
   })`);
+  if (report.state === "lang") return report; // 언어 선택 화면에는 설정 입력이 보이지 않는다
   // inert 전환 뒤 포커스 복원 확인: 설정 입력에 포커스 → 새로고침 → 끝난 뒤 포커스 위치
   report.focusAfterRefresh = await win.webContents.executeJavaScript(`(async () => {
     document.getElementById("cfg-max").focus();
@@ -145,7 +170,7 @@ async function collectReport(win: BrowserWindow): Promise<Record<string, unknown
 
 /**
  * UPLINK_ADMIN_SMOKE=<파일>: 첫 로드가 끝난 화면 상태를 JSON으로 쓰고 종료(빌드 검증용).
- * 정상 화면(ready/hubdown/error)은 exit 0, 시간 초과·로드 실패·렌더러 종료·스모크 오류는 exit 1.
+ * 정상 화면(ready/hubdown/error/lang)은 exit 0, 시간 초과·로드 실패·렌더러 종료·스모크 오류는 exit 1.
  * 어느 경로든 결과 파일을 남기고 반드시 종료한다(검증이 멈춘 채 대기하지 않도록).
  */
 function runSmoke(win: BrowserWindow, outFile: string): void {

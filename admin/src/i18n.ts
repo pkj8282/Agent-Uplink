@@ -29,3 +29,8 @@ export function t<T extends Record<string, Entry>, K extends keyof T & string>(
   const e = c[lang][key];
   return typeof e === "function" ? e(args[0]) : e;
 }
+
+/** 날짜·시각 표시용 지역 형식(OS 지역 설정을 따르지 않게 UI 언어로 고정한다). */
+export function localeOf(lang: Lang): string {
+  return lang === "ko" ? "ko-KR" : "en-US";
+}

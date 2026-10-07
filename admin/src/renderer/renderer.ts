@@ -5,6 +5,9 @@ import {
   restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle,
 } from "./view.js";
 import type { FormMessage } from "./view.js";
+import { getLang, setLang, tr } from "./lang.js";
+import { PICKER, type AdminKey } from "../messages.js";
+import { localeOf, type Lang } from "../i18n.js";
 
 const formState = new ConfigFormState();
 const snapshotSeq = new LatestOnly();
@@ -41,7 +44,7 @@ function showOpMsg(m: { text: string; kind: "ok" | "err" } | null): void {
 }
 byId("op-msg-close").addEventListener("click", () => showOpMsg(null));
 
-type ViewState = "loading" | "ready" | "hubdown" | "error";
+type ViewState = "loading" | "ready" | "hubdown" | "error" | "lang";
 
 let lastFocus: HTMLElement | null = null;
 
@@ -54,7 +57,7 @@ function setState(state: ViewState): void {
   }
   document.body.dataset.state = state;
   main.inert = state !== "ready";
-  byId("status").textContent = state === "loading" ? "불러오는 중…" : "";
+  byId("status").textContent = state === "loading" ? tr("status_loading") : "";
 }
 
 /** 다시 그린 뒤 포커스 복원: 원래 요소가 남아 있으면 그것, 다시 그려져 사라졌거나 비활성이면 현재 탭 버튼. */
@@ -73,7 +76,7 @@ async function refresh(): Promise<void> {
   if (!snapshotSeq.isLatest(t)) return; // 더 나중에 시작한 새로고침이 있으면 이 결과는 버린다
   if (!r.ok) {
     setState(r.hubDown ? "hubdown" : "error");
-    showBanner(r.hubDown ? r.error : `불러오기 실패: ${r.error}`);
+    showBanner(r.hubDown ? r.error : tr("load_failed", { detail: r.error }));
     return;
   }
   setState("ready");
@@ -102,8 +105,8 @@ function deleteButton(label: string, confirmText: string, action: () => Promise<
     const r = await action();
     await refresh();
     showOpMsg(r.ok
-      ? { text: "삭제했습니다(휴지통으로 이동).", kind: "ok" }
-      : { text: `삭제 실패: ${opErrorMessage(r.code, r.error)}`, kind: "err" });
+      ? { text: tr("deleted_ok"), kind: "ok" }
+      : { text: tr("delete_failed", { detail: opErrorMessage(r.code, r.error) }), kind: "err" });
   });
   return b;
 }
@@ -117,17 +120,17 @@ function renderTrash(s: Snapshot): void {
   const list = byId("trash-list");
   list.replaceChildren();
   if (!s.trash) return;
-  if (s.trash.length === 0) { list.append(el("li", "휴지통이 비어 있습니다.", "empty")); return; }
+  if (s.trash.length === 0) { list.append(el("li", tr("trash_is_empty"), "empty")); return; }
   for (const t of [...s.trash].reverse()) { // 최근 삭제가 위
     const li = el("li", undefined, "row");
     li.dataset.kind = "trash";
     li.append(
       el("span", trashKindLabel(t.kind), "meta"),
       el("span", trashTitle(t) || t.id, "name"),
-      el("span", `${new Date(t.deletedAt).toLocaleString()} · ${formatBytes(t.bytes)} · ${t.deletedBy}`, "meta"),
+      el("span", `${new Date(t.deletedAt).toLocaleString(localeOf(getLang()))} · ${formatBytes(t.bytes)} · ${t.deletedBy}`, "meta"),
     );
     for (const f of trashFlags(t)) li.append(el("span", f, "flag"));
-    const b = el("button", "복원");
+    const b = el("button", tr("btn_restore"));
     b.type = "button";
     b.disabled = !t.restorable;
     b.addEventListener("click", () => void restoreFlow(t, b));
@@ -157,13 +160,13 @@ byId("empty-trash").addEventListener("click", async () => {
   showOpMsg(null);
   const r = await window.admin.emptyTrash();
   await refresh();
-  showOpMsg(r.ok ? { text: `휴지통을 비웠습니다(${r.data.removed}개).`, kind: "ok" } : { text: opErrorMessage(r.code, r.error), kind: "err" });
+  showOpMsg(r.ok ? { text: tr("trash_emptied", { count: r.data.removed }), kind: "ok" } : { text: opErrorMessage(r.code, r.error), kind: "err" });
 });
 
 function renderServers(s: Snapshot): void {
   const list = byId("server-list");
   list.replaceChildren();
-  if (s.servers.length === 0) { list.append(el("li", "서버가 없습니다.", "empty")); return; }
+  if (s.servers.length === 0) { list.append(el("li", tr("no_servers"), "empty")); return; }
   for (const srv of s.servers) {
     const li = el("li");
     li.dataset.kind = "server";
@@ -171,8 +174,8 @@ function renderServers(s: Snapshot): void {
     row.append(
       el("span", srv.name, "name"),
       el("span", srv.id, "id"),
-      el("span", `채널 ${srv.channels.length}`, "meta"),
-      deleteButton("서버 삭제", deleteConfirmMessage({ kind: "server", name: srv.name, channelCount: srv.channels.length }),
+      el("span", tr("server_channels", { count: srv.channels.length }), "meta"),
+      deleteButton(tr("btn_delete_server"), deleteConfirmMessage({ kind: "server", name: srv.name, channelCount: srv.channels.length }),
         () => window.admin.deleteServer(srv.id)),
     );
     const sub = el("ul");
@@ -182,7 +185,7 @@ function renderServers(s: Snapshot): void {
       cli.append(
         el("span", `# ${ch.name}`, "name"),
         el("span", ch.id, "id"),
-        deleteButton("삭제", deleteConfirmMessage({ kind: "channel", name: ch.name, serverName: srv.name }),
+        deleteButton(tr("btn_delete"), deleteConfirmMessage({ kind: "channel", name: ch.name, serverName: srv.name }),
           () => window.admin.deleteChannel(ch.id)),
       );
       sub.append(cli);
@@ -195,7 +198,7 @@ function renderServers(s: Snapshot): void {
 function renderAccounts(s: Snapshot): void {
   const accounts = byId("account-list");
   accounts.replaceChildren();
-  if (s.accounts.length === 0) accounts.append(el("li", "계정이 없습니다.", "empty"));
+  if (s.accounts.length === 0) accounts.append(el("li", tr("no_accounts"), "empty"));
   for (const a of s.accounts) {
     const n = dmCountOf(a.uuid, s.dms);
     const li = el("li", undefined, "row");
@@ -207,14 +210,14 @@ function renderAccounts(s: Snapshot): void {
     );
     if (a.description) li.append(el("span", displayName(a.description, 120), "desc"));
     li.append(
-      deleteButton("계정 삭제", deleteConfirmMessage({ kind: "account", name: a.name, uuid: a.uuid, dmCount: n }),
+      deleteButton(tr("btn_delete_account"), deleteConfirmMessage({ kind: "account", name: a.name, uuid: a.uuid, dmCount: n }),
         () => window.admin.deleteAccount(a.uuid)),
     );
     accounts.append(li);
   }
   const dms = byId("dm-list");
   dms.replaceChildren();
-  if (s.dms.length === 0) dms.append(el("li", "DM이 없습니다.", "empty"));
+  if (s.dms.length === 0) dms.append(el("li", tr("no_dms"), "empty"));
   for (const d of s.dms) {
     const li = el("li", undefined, "row");
     li.dataset.kind = "dm";
@@ -239,7 +242,7 @@ byId("refresh").addEventListener("click", () => void refresh());
 byId("open-viewer").addEventListener("click", async () => {
   showOpMsg(null);
   const r = await window.admin.openViewer();
-  if (!r.ok) showOpMsg({ text: `뷰어를 열지 못했습니다: ${r.error}`, kind: "err" });
+  if (!r.ok) showOpMsg({ text: tr("viewer_open_failed", { detail: r.error }), kind: "err" });
 });
 
 function showFormMessage(m: FormMessage): void {
@@ -260,9 +263,70 @@ byId<HTMLFormElement>("config-form").addEventListener("submit", async (e) => {
   });
   if (!parsed.ok) { showFormMessage(formState.failed(parsed.error)); return; }
   const r = await window.admin.setConfig(parsed.patch);
-  if (!r.ok) { showFormMessage(formState.failed(`저장 실패: ${r.error}`)); return; }
+  if (!r.ok) { showFormMessage(formState.failed(tr("save_failed", { detail: r.error }))); return; }
   showFormMessage(formState.saved());
   await refresh();
 });
 
-void refresh();
+// --- 언어 ---
+
+/** index.html의 고정 라벨(data-i18n)과 창 제목·lang을 현재 언어로 채운다. 언어 이름은 두 언어 공통(PICKER). */
+function applyStatic(): void {
+  for (const e of document.querySelectorAll<HTMLElement>("[data-i18n]")) e.textContent = tr(e.dataset.i18n as AdminKey);
+  for (const e of document.querySelectorAll<HTMLElement>("[data-i18n-aria]")) e.setAttribute("aria-label", tr(e.dataset.i18nAria as AdminKey));
+  document.title = tr("window_title");
+  document.documentElement.lang = getLang();
+  const sel = byId<HTMLSelectElement>("cfg-lang");
+  for (const o of sel.options) o.textContent = o.value === "ko" ? PICKER.ko : PICKER.en;
+  sel.value = getLang();
+}
+
+/** 첫 실행(config.json의 language가 N/A): 언어를 고를 때까지 다른 화면을 숨긴다. 저장 실패는 진행한 뒤 알린다(다음 실행 때 다시 묻는다). */
+function pickLanguage(): Promise<string | null> {
+  return new Promise((resolve) => {
+    document.body.dataset.state = "lang";
+    document.body.removeAttribute("data-i18n-pending");
+    const box = byId("lang-picker");
+    byId("lang-picker-title").textContent = PICKER.title;
+    const buttons = [byId<HTMLButtonElement>("lang-ko"), byId<HTMLButtonElement>("lang-en")];
+    buttons[0].textContent = PICKER.ko;
+    buttons[1].textContent = PICKER.en;
+    box.hidden = false;
+    const choose = async (lang: Lang) => {
+      for (const b of buttons) b.disabled = true;
+      setLang(lang);
+      const r = await window.admin.setLanguage(lang);
+      box.hidden = true;
+      resolve(r.ok ? null : r.error);
+    };
+    buttons[0].addEventListener("click", () => void choose("ko"), { once: true });
+    buttons[1].addEventListener("click", () => void choose("en"), { once: true });
+    buttons[0].focus();
+  });
+}
+
+// 설정 탭 언어: 다른 설정과 따로 바로 저장한다(Hub가 꺼져 있어도 바꿀 수 있어야 한다).
+byId<HTMLSelectElement>("cfg-lang").addEventListener("change", async (e) => {
+  const lang: Lang = (e.target as HTMLSelectElement).value === "ko" ? "ko" : "en";
+  const r = await window.admin.setLanguage(lang);
+  setLang(lang);
+  applyStatic();
+  const m = byId("lang-msg");
+  m.textContent = r.ok ? tr("lang_changed_notice") : r.error;
+  m.className = `msg ${r.ok ? "ok" : "err"}`;
+  await refresh(); // 목록·상태 문구를 새 언어로 다시 그린다(Hub 오류도 같은 설정을 따른다)
+});
+
+async function boot(): Promise<void> {
+  const g = await window.admin.getLanguage();
+  const setting = g.ok ? g.data : "N/A";
+  let saveError: string | null = null;
+  if (setting === "N/A") saveError = await pickLanguage();
+  else setLang(setting);
+  applyStatic();
+  document.body.removeAttribute("data-i18n-pending");
+  await refresh(); // 그다음 Hub 확인
+  if (saveError) showOpMsg({ text: saveError, kind: "err" });
+}
+
+void boot();

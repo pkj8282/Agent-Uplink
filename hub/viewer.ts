@@ -1,7 +1,7 @@
 // 로컬 전용 멀티채널 로그 뷰어. 외부 의존성 없이 인라인. 채널 필터 지원.
 // 문구는 Hub 문구표의 고정 문자열뿐이다(사용자 데이터는 페이지 스크립트가 textContent로 넣는다).
 import { hubMsg } from "./messages.js";
-import type { Lang } from "../shared/i18n.js";
+import { localeOf, type Lang } from "../shared/i18n.js";
 
 export function renderViewerHtml(lang: Lang): string {
   return `<!doctype html>
@@ -101,7 +101,7 @@ export function renderViewerHtml(lang: Lang): string {
   function fmt(m) {
     const label = m.channelLabel || m.channelId;
     addChannelOption(label);
-    const t = new Date(m.ts).toLocaleTimeString();
+    const t = new Date(m.ts).toLocaleTimeString("${localeOf(lang)}");
     const row = document.createElement("div");
     row.className = "row";
     row.dataset.ch = label;

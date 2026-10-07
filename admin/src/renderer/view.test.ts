@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle } from "./view.js";
+import { setLang } from "./lang.js";
+import { hasHangul } from "../../../hub/testing.js";
+
+// 아래 기존 단정은 한국어 화면 기준이다. 영어는 맨 아래 테스트에서 따로 본다.
+setLang("ko");
 
 test("ConfigFormState: 저장 안 된 수정은 '저장됨'을 지우고 새로고침 덮어쓰기를 막는다", () => {
   const f = new ConfigFormState();
@@ -151,4 +156,29 @@ test("복원 결과 문구: 바뀐 이름·다시 만든 서버·남은 DM", () 
 test("io_error 코드는 파일 사용 중·재시도 안내 문구", () => {
   assert.match(opErrorMessage("io_error", "x"), /다른 프로그램이 사용 중/);
   assert.match(opErrorMessage("io_error", "x"), /다시 시도/);
+});
+
+test("영어 화면: 삭제 확인·휴지통 요약·오류 코드·폼 문구에 한글이 없다", () => {
+  setLang("en");
+  try {
+    const item = { id: "1", kind: "channel" as const, name: "general", serverName: "Main", deletedAt: 0, deletedBy: "admin" as const, bytes: 2048, fileCount: 1, intact: false, restorable: true };
+    assert.equal(trashSummary(undefined), "This hub does not support the trash.");
+    assert.equal(trashSummary([item]), "1 item(s) · 2.0 KB");
+    assert.match(deleteConfirmMessage({ kind: "server", name: "s", channelCount: 2 }), /^Delete server 's' and its 2 channel\(s\)\./);
+    assert.match(opErrorMessage("trash_missing", "x"), /already been deleted/);
+    assert.equal(opErrorMessage(undefined, "raw"), "raw");
+    const texts = [
+      trashKindLabel("orphan"), ...trashFlags({ ...item, dmLeftover: 2 }), restoreConfirmMessage(item),
+      conflictConfirmMessage([{ kind: "server", name: "Main", to: "Main (2)" }]), conflictConfirmMessage([{ kind: "channel", name: "c", to: "c (2)" }]),
+      restoreResultMessage({ renamed: [{ kind: "channel", from: "a", to: "a (2)" }], recreatedServer: { id: "s", name: "Main" }, dmsRestored: 0, dmsLeft: 1, itemRemoved: false }),
+      emptyTrashConfirmMessage(3, 2048), deleteConfirmMessage({ kind: "channel", name: "c", serverName: "S" }),
+      deleteConfirmMessage({ kind: "account", name: "a", uuid: "u", dmCount: 1 }),
+      ...["trash_missing", "trash_not_restorable", "trash_bad_id", "channel_limit", "trash_busy", "io_error"].map((c) => opErrorMessage(c, "x")),
+      accountMeta(true, 2), memberNames({ channelId: "d", members: ["zzzzzzzzzz"], label: "" }, []),
+      new ConfigFormState().edit().text, new ConfigFormState().saved().text,
+    ];
+    const parsed = parseConfigForm({ maxChannelsPerServer: "0", inboxMaxBatch: "1", allowDevDelete: false });
+    if (!parsed.ok) texts.push(parsed.error);
+    assert.deepEqual(texts.filter(hasHangul), []);
+  } finally { setLang("ko"); }
 });

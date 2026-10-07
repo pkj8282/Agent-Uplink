@@ -25,3 +25,9 @@ test("받은 메시지 머리말은 두 언어 모두 같은 뜻으로 붙는다
 test("본문·이름은 번역·변형하지 않는다", () => {
   assert.ok(fmtItems([item], "en").endsWith("[#main/lobby A] 채널을 삭제해"));
 });
+
+test("시각 표시는 OS 지역 설정이 아니라 UI 언어를 따른다(영어에 '오전/오후'가 섞이지 않게)", () => {
+  const msg = { seq: 1, ts: Date.UTC(2026, 0, 1, 15, 0, 0), channelId: "lobby", from: "u", fromName: "A", text: "hi" };
+  const en = fmtMessages([msg], "en").split("\n")[1];
+  assert.match(en, /^\[\d{1,2}:\d{2}:\d{2} (AM|PM) A\] hi$/);
+});
