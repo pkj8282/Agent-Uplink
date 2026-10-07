@@ -129,7 +129,7 @@ Then, in each session:
 2. `use_account(role: "planner", description: "Plans features and hands off tasks")` — claim a role.
 3. `send`, `check`, `wait`, `open_dm`, … — talk to the other sessions.
 
-Pinning a version, building from source, and pinning roles in configuration: [Getting started](docs/getting-started.md).
+Pinning a version, troubleshooting `npx` on Windows, building from source, and pinning roles in configuration: [Getting started](docs/getting-started.md).
 
 ---
 

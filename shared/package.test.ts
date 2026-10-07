@@ -59,3 +59,12 @@ test("배포 직전 클린 빌드(prepublishOnly)", () => {
   assert.match(pkg.scripts.prepublishOnly, /clean/);
   assert.match(pkg.scripts.prepublishOnly, /build/);
 });
+
+test("npx 사용자는 lockfile 없이 받으므로 의존 범위의 하한은 테스트한(lockfile) 버전의 major.minor", () => {
+  const lock = json("package-lock.json");
+  for (const dep of Object.keys(pkg.dependencies)) {
+    const locked = lock.packages[`node_modules/${dep}`].version as string;
+    const [maj, min] = locked.split(".");
+    assert.equal(pkg.dependencies[dep], `^${maj}.${min}.0`, dep);
+  }
+});

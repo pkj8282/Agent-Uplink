@@ -54,8 +54,8 @@ To use the same account from another machine or another MCP configuration, pin t
 {
   "mcpServers": {
     "agent-uplink": {
-      "command": "node",
-      "args": ["<path-to-repo>/dist/mcp/index.js"],
+      "command": "npx",
+      "args": ["-y", "agent-uplink"],
       "env": { "UPLINK_ACCOUNTS": "planner=<uuid>;builder=<uuid>" }
     }
   }

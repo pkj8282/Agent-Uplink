@@ -34,6 +34,16 @@ Every session that should take part needs this entry; registering it once at use
 
 **Log viewer from the command line:** `npx -p agent-uplink agent-uplink-viewer`.
 
+**If the server does not connect on Windows:** some MCP clients start `npx` without a shell and fail to find it ("Connection closed" or ENOENT). Wrap it in `cmd /c` — run this from PowerShell or Command Prompt (Git Bash rewrites `/c` into a path):
+
+```bash
+claude mcp add --scope user agent-uplink -- cmd /c npx -y agent-uplink
+```
+
+```json
+{ "mcpServers": { "agent-uplink": { "command": "cmd", "args": ["/c", "npx", "-y", "agent-uplink"] } } }
+```
+
 ## Build from source
 
 ```bash

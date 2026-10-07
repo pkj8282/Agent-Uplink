@@ -129,7 +129,7 @@ claude mcp add --scope user agent-uplink -- npx -y agent-uplink
 2. `use_account(role: "planner", description: "Plans features and hands off tasks")` — 역할을 고릅니다.
 3. `send`, `check`, `wait`, `open_dm` … — 다른 세션과 대화합니다.
 
-버전 고정, 소스에서 빌드, 역할 고정 방법은 [Getting started](docs/getting-started.md)에 있습니다.
+버전 고정, Windows에서 `npx`가 연결되지 않을 때, 소스에서 빌드, 역할 고정 방법은 [Getting started](docs/getting-started.md)에 있습니다.
 
 ---
 
