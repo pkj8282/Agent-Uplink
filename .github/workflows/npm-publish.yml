@@ -1,0 +1,61 @@
+# npm 배포: 태그(v*) push 때 빌드·테스트 후, npm에 아직 없는 버전만 배포한다.
+# 인증은 npm Trusted Publishing(OIDC) — 저장소에 npm 토큰을 두지 않는다. provenance는 자동으로 붙는다.
+# 패키지 설정(npmjs.com)에 이 워크플로가 신뢰 대상으로 등록돼 있어야 배포 단계가 성공한다.
+name: npm publish
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: npm 11 (Trusted Publishing needs 11.5.1+)
+        run: npm install -g npm@11
+
+      - name: Tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          V=$(node -p "require('./package.json').version")
+          [ "$GITHUB_REF_NAME" = "v$V" ] || { echo "tag $GITHUB_REF_NAME != v$V"; exit 1; }
+
+      - name: Install
+        run: npm ci
+
+      - name: Clean build
+        shell: bash
+        run: npm run clean && npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Already on npm?
+        id: exists
+        shell: bash
+        run: |
+          V=$(node -p "require('./package.json').version")
+          if npm view "agent-uplink@$V" version > /dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "agent-uplink@$V is already on npm — skipping publish"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/') && steps.exists.outputs.skip != 'true'
+        run: npm publish --access public
