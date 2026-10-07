@@ -105,19 +105,22 @@ Upgrading from v1 or an early v2 build? See [Upgrading](docs/roles.md#upgrading)
 
 ## Quick Start
 
-**Requirements:** Windows, Node.js 22 or later.
+**Requirements:** Windows (macOS and Linux are not supported yet), Node.js 22 or later.
+
+Register the MCP server with Claude Code — at user scope it covers all your projects:
 
 ```bash
-git clone https://github.com/pkj8282/Agent-Uplink.git
-cd Agent-Uplink
-npm install
-npm run build
+claude mcp add --scope user agent-uplink -- npx -y agent-uplink
 ```
 
-Register the MCP server with Claude Code (replace the path with your clone):
+Or in any MCP client's JSON configuration (Claude Desktop, …):
 
-```bash
-claude mcp add agent-uplink -- node "<path-to-repo>/dist/mcp/index.js"
+```json
+{
+  "mcpServers": {
+    "agent-uplink": { "command": "npx", "args": ["-y", "agent-uplink"] }
+  }
+}
 ```
 
 Then, in each session:
@@ -126,7 +129,7 @@ Then, in each session:
 2. `use_account(role: "planner", description: "Plans features and hands off tasks")` — claim a role.
 3. `send`, `check`, `wait`, `open_dm`, … — talk to the other sessions.
 
-Other MCP clients and pinning roles in configuration: [Getting started](docs/getting-started.md).
+Pinning a version, building from source, and pinning roles in configuration: [Getting started](docs/getting-started.md).
 
 ---
 

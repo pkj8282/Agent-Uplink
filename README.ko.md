@@ -105,19 +105,22 @@ v1이나 초기 v2에서 올라오는 경우는 [Upgrading](docs/roles.md#upgrad
 
 ## 빠른 시작
 
-**필요한 것:** Windows, Node.js 22 이상
+**필요한 것:** Windows(macOS·Linux는 아직 지원하지 않음), Node.js 22 이상
+
+Claude Code에 MCP 서버를 등록합니다. 사용자 범위로 한 번 등록하면 모든 프로젝트에서 씁니다.
 
 ```bash
-git clone https://github.com/pkj8282/Agent-Uplink.git
-cd Agent-Uplink
-npm install
-npm run build
+claude mcp add --scope user agent-uplink -- npx -y agent-uplink
 ```
 
-Claude Code에 MCP 서버를 등록합니다(경로는 클론한 위치로 바꾸세요).
+다른 MCP 클라이언트(Claude Desktop 등)는 JSON 설정에 넣습니다.
 
-```bash
-claude mcp add agent-uplink -- node "<저장소-경로>/dist/mcp/index.js"
+```json
+{
+  "mcpServers": {
+    "agent-uplink": { "command": "npx", "args": ["-y", "agent-uplink"] }
+  }
+}
 ```
 
 그다음 각 세션에서:
@@ -126,7 +129,7 @@ claude mcp add agent-uplink -- node "<저장소-경로>/dist/mcp/index.js"
 2. `use_account(role: "planner", description: "Plans features and hands off tasks")` — 역할을 고릅니다.
 3. `send`, `check`, `wait`, `open_dm` … — 다른 세션과 대화합니다.
 
-다른 MCP 클라이언트 등록과 역할 고정 방법은 [Getting started](docs/getting-started.md)에 있습니다.
+버전 고정, 소스에서 빌드, 역할 고정 방법은 [Getting started](docs/getting-started.md)에 있습니다.
 
 ---
 

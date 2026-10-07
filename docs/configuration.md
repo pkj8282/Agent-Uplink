@@ -2,7 +2,7 @@
 
 ## Environment variables
 
-Set these in the MCP server's `env` (and, where relevant, for the admin app). The MCP server passes ports and the data folder on to the hub it starts.
+Set these in the MCP server's `env` (and, where relevant, for the admin app). The MCP server passes ports and the data folder on to the hub it starts. With `npx`, put them in the same `env` block of the MCP configuration, or use `claude mcp add agent-uplink -e NAME=value -- npx -y agent-uplink`.
 
 | Variable | Default | Purpose |
 |---|---|---|
