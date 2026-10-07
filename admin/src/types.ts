@@ -1,12 +1,15 @@
 // 메인·프리로드·렌더러가 공유하는 타입(값 없음 → 렌더러에서 import type 가능).
+import type { Lang, LangSetting } from "./i18n.js";
 
 export interface AdminConfig {
   maxChannelsPerServer: number;
   allowDevDelete: boolean;
   inboxMaxBatch: number;
+  /** 구버전 Hub는 없음. */
+  language?: LangSetting;
 }
 
-export type ConfigPatch = Partial<AdminConfig>;
+export type ConfigPatch = Partial<Omit<AdminConfig, "language">> & { language?: Lang };
 
 export interface SnapshotServer { id: string; name: string; channels: { id: string; name: string }[]; }
 export interface SnapshotAccount { uuid: string; name: string; description?: string; online?: boolean; }
@@ -60,4 +63,8 @@ export interface AdminApi {
   restoreTrash(id: string, confirmRename: boolean): Promise<IpcResult<RestoreReport>>;
   emptyTrash(): Promise<IpcResult<{ removed: number }>>;
   openViewer(): Promise<IpcResult<void>>;
+  /** 데이터 폴더 config.json의 언어(Hub가 꺼져 있어도 읽는다). */
+  getLanguage(): Promise<IpcResult<LangSetting>>;
+  /** 언어 저장: Hub가 켜져 있으면 Hub로, 꺼져 있으면 파일에 직접. */
+  setLanguage(lang: Lang): Promise<IpcResult<{ via: "hub" | "file" }>>;
 }

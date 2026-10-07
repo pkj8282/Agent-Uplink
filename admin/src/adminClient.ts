@@ -4,14 +4,19 @@ import path from "node:path";
 import { encodeFrame, FrameDecoder } from "./framing.js";
 import { newNonce, isNonce, clientProof, hubProof, proofEquals, readClientKeyFile } from "./auth.js";
 import type { AdminConfig, ConfigPatch, IpcResult, NameConflict, RestoreReport, Snapshot } from "./types.js";
+import { effectiveLang, type Lang } from "./i18n.js";
+import { readLanguageFile } from "./langFile.js";
+import { adminMsg, LEGACY_UNKNOWN_OP, type AdminKey } from "./messages.js";
 
 const HUB_MAGIC = "agent-uplink";
 const HUB_PROTOCOL_VERSION = 3;
-export const HUB_DOWN_MESSAGE = "Hub가 실행 중이 아닙니다. 세션을 열거나 Hub를 시작하세요.";
+export function hubDownMessage(lang: Lang): string {
+  return adminMsg(lang, "hub_down");
+}
 
 export class HubNotRunningError extends Error {
-  constructor() {
-    super(HUB_DOWN_MESSAGE);
+  constructor(lang: Lang) {
+    super(hubDownMessage(lang));
     this.name = "HubNotRunningError";
   }
 }
@@ -21,12 +26,14 @@ export interface AdminTarget {
   keyPath: string;
   /** client.key 경로(v3 핸드셰이크). 생략하면 admin.key와 같은 폴더의 client.key. */
   clientKeyPath?: string;
+  /** 데이터 폴더(언어 설정 config.json). 생략하면 client.key가 있는 폴더. */
+  dataDir?: string;
 }
 
 /** Hub(hub/options.ts)와 같은 env 규칙으로 접속 포트와 admin.key 경로를 정한다. */
 export function resolveAdminTarget(env: NodeJS.ProcessEnv): AdminTarget {
   const base = env.UPLINK_DATA_DIR ?? path.join(env.PROGRAMDATA ?? ".", "AgentUplink");
-  return { port: Number(env.UPLINK_TCP_PORT ?? 47800), keyPath: path.join(base, "admin.key"), clientKeyPath: path.join(base, "client.key") };
+  return { port: Number(env.UPLINK_TCP_PORT ?? 47800), keyPath: path.join(base, "admin.key"), clientKeyPath: path.join(base, "client.key"), dataDir: base };
 }
 
 export interface AdminClientOptions extends AdminTarget {
@@ -78,6 +85,7 @@ export class AdminClient {
   private readonly helloTimeoutMs: number;
   private readonly host: string;
   private readonly connectTimeoutMs: number;
+  private readonly dataDir: string;
 
   constructor(opts: AdminClientOptions) {
     this.port = opts.port;
@@ -87,6 +95,16 @@ export class AdminClient {
     this.helloTimeoutMs = opts.helloTimeoutMs ?? 15000;
     this.host = opts.host ?? "127.0.0.1";
     this.connectTimeoutMs = opts.connectTimeoutMs ?? 10000;
+    this.dataDir = opts.dataDir ?? path.dirname(this.clientKeyPath);
+  }
+
+  /** 표시 언어: 매번 데이터 폴더 config.json을 읽는다(언어를 바꾸면 다음 호출부터). */
+  lang(): Lang {
+    return effectiveLang(readLanguageFile(this.dataDir));
+  }
+
+  private fail(key: AdminKey, params?: object): Error {
+    return new Error(adminMsg(this.lang(), key, params));
   }
 
   async snapshot(): Promise<Snapshot> {
@@ -126,26 +144,26 @@ export class AdminClient {
     try {
       const hello = await conn.request("hello", {}, this.helloTimeoutMs).catch((e: unknown) => {
         if (e instanceof DisconnectedError) {
-          throw new Error(`포트 ${this.port}의 프로그램이 Hub 응답 없이 연결을 끊었습니다. Hub가 종료 중이거나 Agent-Uplink Hub가 아닐 수 있습니다. 잠시 후 새로고침하세요.`);
+          throw this.fail("hello_dropped", { port: this.port });
         }
-        if (e instanceof TimeoutError) throw new Error(`${e.message} 포트를 다른 프로그램이 쓰고 있을 수 있습니다.`);
+        if (e instanceof TimeoutError) throw this.fail("hello_timeout", { detail: e.message });
         throw e;
       });
-      if (!hello.ok && hello.code === "secure_setup_failed") throw new Error(`Hub를 시작할 수 없습니다: ${hello.error}`);
-      if (hello.magic !== HUB_MAGIC) throw new Error(`포트 ${this.port}의 프로그램은 Agent-Uplink Hub가 아닙니다.`);
+      if (!hello.ok && hello.code === "secure_setup_failed") throw this.fail("hub_cannot_start", { detail: hello.error ?? "" });
+      if (hello.magic !== HUB_MAGIC) throw this.fail("not_a_hub", { port: this.port });
       if (hello.version !== HUB_PROTOCOL_VERSION) {
-        if (hello.version === 2) throw new Error("실행 중인 Hub가 구버전(v2.0.1 이하)입니다. Hub를 종료(재시작)한 뒤 새로고침하세요.");
-        throw new Error(`포트 ${this.port}의 Agent-Uplink Hub 버전(v${hello.version})이 관리 도구(v${HUB_PROTOCOL_VERSION})와 맞지 않습니다.`);
+        if (hello.version === 2) throw this.fail("old_protocol_hub");
+        throw this.fail("version_mismatch", { port: this.port, hub: hello.version, mine: HUB_PROTOCOL_VERSION });
       }
       await this.authenticate(conn, hello.nonce);
       const r = await conn.request(op, { token: this.readToken(), ...params }).catch((e: unknown) => {
-        if (e instanceof DisconnectedError) throw new Error("요청 도중 Hub 연결이 끊겼습니다. 작업이 적용됐는지 새로고침으로 확인하세요.");
-        if (e instanceof TimeoutError) throw new Error(`${e.message} 작업이 Hub에서 이미 처리됐을 수 있습니다. 새로고침으로 확인하세요.`);
+        if (e instanceof DisconnectedError) throw this.fail("op_dropped");
+        if (e instanceof TimeoutError) throw this.fail("op_timeout", { detail: e.message });
         throw e;
       });
       if (!r.ok) {
-        if (r.error === "알 수 없는 op") throw new Error("이 Hub에는 이 관리 기능이 없습니다(구버전). Hub를 재배포한 뒤 다시 시도하세요.");
-        throw new HubOpError(r.error ?? `${op} 실패`, r.code, r.conflicts);
+        if (r.code === "unknown_op" || r.error === LEGACY_UNKNOWN_OP) throw this.fail("old_hub_no_op");
+        throw new HubOpError(r.error ?? adminMsg(this.lang(), "op_failed", { op }), r.code, r.conflicts);
       }
       return r;
     } finally {
@@ -155,14 +173,14 @@ export class AdminClient {
 
   /** v3 핸드셰이크. Hub 증명을 확인하기 전에는 admin 토큰을 보내지 않는다(가짜 Hub에 새지 않게). */
   private async authenticate(conn: Connection, hubNonce: unknown): Promise<void> {
-    const notOurs = `포트 ${this.port}의 Hub가 이 Windows 사용자의 Hub가 아닙니다(인증 실패). 다른 사용자가 포트를 점유했거나 UPLINK_DATA_DIR가 Hub와 다를 수 있습니다.`;
+    const notOurs = adminMsg(this.lang(), "not_our_hub", { port: this.port });
     // v3 Hub는 키를 만든 뒤에야 hello에 답한다 → 답했는데 이 폴더에 키가 없으면 이 데이터 폴더의 Hub가 아니다.
     if (!fs.existsSync(this.clientKeyPath)) throw new Error(notOurs);
-    const key = readClientKeyFile(this.clientKeyPath);
+    const key = readClientKeyFile(this.clientKeyPath, this.lang());
     if (!isNonce(hubNonce)) throw new Error(notOurs);
     const nonce = newNonce();
     const r = await conn.request("auth", { nonce, proof: clientProof(key, hubNonce, nonce) }).catch(() => {
-      throw new Error("인증 중 Hub 연결이 끊기거나 응답이 없습니다(Hub가 종료 중이거나 연결이 너무 많을 수 있습니다). 잠시 후 새로고침하세요.");
+      throw this.fail("auth_dropped");
     });
     if (!r.ok || !proofEquals(hubProof(key, hubNonce, nonce), r.proof)) throw new Error(notOurs);
   }
@@ -173,11 +191,9 @@ export class AdminClient {
     try {
       token = fs.readFileSync(this.keyPath, "utf8").trim();
     } catch {
-      throw new Error(
-        `admin.key를 읽을 수 없습니다: ${this.keyPath}. 실행 중인 Hub가 관리 기능이 있는 버전인지, UPLINK_DATA_DIR가 Hub와 같은지 확인하세요.`,
-      );
+      throw this.fail("admin_key_unreadable", { file: this.keyPath });
     }
-    if (!token) throw new Error(`admin.key가 비어 있습니다: ${this.keyPath}`);
+    if (!token) throw this.fail("admin_key_empty", { file: this.keyPath });
     return token;
   }
 
@@ -187,12 +203,12 @@ export class AdminClient {
       const sock = net.connect(this.port, this.host);
       const timer = setTimeout(() => {
         sock.destroy();
-        reject(new Error(`포트 ${this.port} 연결 시간이 초과됐습니다(${this.connectTimeoutMs}ms).`));
+        reject(this.fail("connect_timeout", { port: this.port, ms: this.connectTimeoutMs }));
       }, this.connectTimeoutMs);
-      sock.once("connect", () => { clearTimeout(timer); resolve(new Connection(sock, this.timeoutMs)); });
+      sock.once("connect", () => { clearTimeout(timer); resolve(new Connection(sock, this.timeoutMs, () => this.lang())); });
       sock.once("error", (e: NodeJS.ErrnoException) => {
         clearTimeout(timer);
-        reject(e.code === "ECONNREFUSED" ? new HubNotRunningError() : new Error(`Hub 연결 실패: ${e.message}`));
+        reject(e.code === "ECONNREFUSED" ? new HubNotRunningError(this.lang()) : this.fail("connect_failed", { detail: e.message }));
       });
     });
   }
@@ -210,23 +226,23 @@ class Connection {
   private nextId = 1;
   private pending = new Map<number, Pending>();
 
-  constructor(private readonly sock: net.Socket, private readonly timeoutMs: number) {
+  constructor(private readonly sock: net.Socket, private readonly timeoutMs: number, private readonly lang: () => Lang) {
     sock.on("data", (chunk) => this.dec.push(chunk, (r: Reply | null) => {
       if (!r || typeof r !== "object") return; // 객체가 아닌 프레임(null 등)은 무시
       const p = this.pending.get(r.id);
       if (p) { clearTimeout(p.timer); this.pending.delete(r.id); p.resolve(r); }
     }));
-    sock.on("close", () => this.failAll(new DisconnectedError("Hub 연결이 끊겼습니다.")));
+    sock.on("close", () => this.failAll(new DisconnectedError(adminMsg(this.lang(), "disconnected"))));
     sock.on("error", () => { /* close가 뒤따른다 */ });
   }
 
   request(op: string, params: object, timeoutMs = this.timeoutMs): Promise<Reply> {
     return new Promise((resolve, reject) => {
-      if (this.sock.destroyed) { reject(new DisconnectedError("Hub 연결이 끊겼습니다.")); return; }
+      if (this.sock.destroyed) { reject(new DisconnectedError(adminMsg(this.lang(), "disconnected"))); return; }
       const id = this.nextId++;
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new TimeoutError(`Hub가 응답하지 않습니다(op=${op}, ${timeoutMs}ms).`));
+        reject(new TimeoutError(adminMsg(this.lang(), "no_answer", { op, ms: timeoutMs })));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       this.sock.write(encodeFrame({ op, id, ...params }));

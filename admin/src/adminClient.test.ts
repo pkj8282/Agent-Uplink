@@ -7,9 +7,15 @@ import path from "node:path";
 import { startTestHub, TestClient as Raw } from "../../hub/testing.js";
 import { hubProof } from "../../shared/auth.js";
 import { encodeFrame, FrameDecoder } from "./framing.js";
-import { AdminClient, HubNotRunningError, HUB_DOWN_MESSAGE, resolveAdminTarget, toResult } from "./adminClient.js";
+import { AdminClient, HubNotRunningError, hubDownMessage, resolveAdminTarget, toResult } from "./adminClient.js";
+import { hasHangul } from "../../hub/testing.js";
 
-function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-admin-")); }
+/** 데이터 폴더(언어 기본 ko — 기존 한국어 안내 단정을 유지한다). */
+function tmp(language: "ko" | "en" = "ko"): string {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-admin-"));
+  fs.writeFileSync(path.join(d, "config.json"), JSON.stringify({ language }));
+  return d;
+}
 
 async function startHub(dataDir?: string) {
   const t = await startTestHub({ dataDir, http: true });
@@ -40,11 +46,13 @@ test("resolveAdminTarget은 Hub와 같은 env 규칙을 따른다", () => {
     port: 47800,
     keyPath: path.join("C:\\PD", "AgentUplink", "admin.key"),
     clientKeyPath: path.join("C:\\PD", "AgentUplink", "client.key"),
+    dataDir: path.join("C:\\PD", "AgentUplink"),
   });
   assert.deepEqual(resolveAdminTarget({ PROGRAMDATA: "C:\\PD", UPLINK_DATA_DIR: "D:\\data", UPLINK_TCP_PORT: "47900" }), {
     port: 47900,
     keyPath: path.join("D:\\data", "admin.key"),
     clientKeyPath: path.join("D:\\data", "client.key"),
+    dataDir: "D:\\data",
   });
 });
 
@@ -92,8 +100,8 @@ test("delete*는 대상을 제거하고, 없는 대상은 명확히 거부한다
 test("Hub 미실행(접속 거부)과 사용 중 Hub 종료는 HubNotRunningError → toResult hubDown:true", async () => {
   const port = await closedPort();
   const dead = new AdminClient({ port, keyPath: path.join(tmp(), "admin.key"), timeoutMs: 2000 });
-  await assert.rejects(dead.snapshot(), (e: unknown) => e instanceof HubNotRunningError && (e as Error).message === HUB_DOWN_MESSAGE);
-  assert.deepEqual(await toResult(() => dead.snapshot()), { ok: false, error: HUB_DOWN_MESSAGE, hubDown: true });
+  await assert.rejects(dead.snapshot(), (e: unknown) => e instanceof HubNotRunningError && (e as Error).message === hubDownMessage("ko"));
+  assert.deepEqual(await toResult(() => dead.snapshot()), { ok: false, error: hubDownMessage("ko"), hubDown: true });
 
   const { hub, client } = await startHub();
   await client.snapshot(); // 정상
@@ -357,4 +365,31 @@ test("Minor6: hello는 보안 준비 시간만큼 기다린다(op 응답 한도�
   const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 300 });
   assert.deepEqual((await c.snapshot()).servers, []);
   f.close();
+});
+
+test("관리 앱 main 쪽 오류 문구는 데이터 폴더의 언어를 따른다(en)", async () => {
+  const port = await closedPort();
+  const dead = new AdminClient({ port, keyPath: path.join(tmp("en"), "admin.key"), timeoutMs: 2000 });
+  await assert.rejects(dead.snapshot(), (e: unknown) => e instanceof HubNotRunningError && (e as Error).message === "The hub is not running. Open a session or start the hub.");
+  const f = await fakeServer((req, s) => s.write(encodeFrame({ ok: true, id: req.id, magic: "agent-uplink", version: 2 })));
+  const c = new AdminClient({ port: f.port, keyPath: path.join(tmp("en"), "admin.key"), timeoutMs: 2000 });
+  await assert.rejects(c.snapshot(), (e: Error) => /old version/.test(e.message) && !hasHangul(e.message));
+  f.close();
+});
+
+test("새 Hub의 unknown_op code(영어 문장)도 구버전 안내로 바뀐다", async () => {
+  const f = await fakeServer((req, s) => {
+    if (answerHandshake(req, s)) { /* hello·auth */ }
+    else s.write(encodeFrame({ ok: false, id: req.id, code: "unknown_op", error: "Unknown op." }));
+  });
+  const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 2000 });
+  await assert.rejects(c.snapshot(), /구버전/);
+  f.close();
+});
+
+test("setConfig로 언어를 저장하면 응답 config에 반영된다", async () => {
+  const { hub, client } = await startHub();
+  assert.equal((await client.setConfig({ language: "en" })).language, "en");
+  assert.equal((await client.snapshot()).config.language, "en");
+  hub.stop();
 });

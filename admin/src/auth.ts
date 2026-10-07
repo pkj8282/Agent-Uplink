@@ -1,5 +1,7 @@
 // 사본: shared/auth.ts + shared/viewerUrl.ts(관리 앱은 별도 패키지라 루트 모듈을 번들하지 않는다). 바꾸면 원본과 함께 바꾸고 auth.test.ts를 돌린다.
 import fs from "node:fs";
+import type { Lang } from "./i18n.js";
+import { adminMsg } from "./messages.js";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -57,14 +59,14 @@ export function isViewerUrl(u: unknown): u is string {
   );
 }
 
-export function readClientKeyFile(file: string): string {
+export function readClientKeyFile(file: string, lang: Lang): string {
   let raw: string;
   try {
     raw = fs.readFileSync(file, "utf8");
   } catch {
-    throw new Error(`client.key를 읽을 수 없습니다: ${file}. 실행 중인 Hub가 v2.0.2 이상인지, UPLINK_DATA_DIR가 Hub와 같은지 확인하세요.`);
+    throw new Error(adminMsg(lang, "client_key_unreadable", { file }));
   }
   const key = raw.trim();
-  if (!isKeyText(key)) throw new Error(`client.key 형식이 잘못됐습니다: ${file}. Hub를 재시작해 보세요.`);
+  if (!isKeyText(key)) throw new Error(adminMsg(lang, "client_key_malformed", { file }));
   return key;
 }

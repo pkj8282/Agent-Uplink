@@ -8,7 +8,7 @@ export interface ConfigFormInput {
   allowDevDelete: boolean;
 }
 
-export type ParseResult = { ok: true; patch: Required<ConfigPatch> } | { ok: false; error: string };
+export type ParseResult = { ok: true; patch: Required<Omit<ConfigPatch, "language">> } | { ok: false; error: string };
 
 /** "1 이상 안전 정수" 문자열만 숫자로. 아니면 null. */
 function posInt(raw: string): number | null {

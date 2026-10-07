@@ -2,20 +2,29 @@ import { app, BrowserWindow, ipcMain, shell } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { AdminClient, resolveAdminTarget, toResult } from "./adminClient.js";
+import { AdminClient, HubNotRunningError, resolveAdminTarget, toResult } from "./adminClient.js";
 import { isTrustedFrame } from "./ipcGuard.js";
 import { isViewerUrl } from "./auth.js";
 import type { ConfigPatch, IpcResult } from "./types.js";
+import { effectiveLang, type Lang } from "./i18n.js";
+import { readLanguageFile, writeLanguageFile } from "./langFile.js";
+import { adminMsg, type AdminKey } from "./messages.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const indexFile = path.join(here, "renderer", "index.html");
 // 창·작업 표시줄 아이콘(logo.svg → build/icon.png, 빌드 때 dist로 복사됨). exe 아이콘은 electron-builder의 win.icon.
 const windowIcon = path.join(here, "icon.png");
-const client = new AdminClient(resolveAdminTarget(process.env));
+const target = resolveAdminTarget(process.env);
+const dataDir = target.dataDir!;
+const client = new AdminClient(target);
 let mainWindow: BrowserWindow | null = null;
 
+/** main 쪽 문구: 매번 데이터 폴더의 언어를 읽는다(설정에서 바꾸면 바로 반영). */
+const mainLang = (): Lang => effectiveLang(readLanguageFile(dataDir));
+const msg = (key: AdminKey, params?: object) => adminMsg(mainLang(), key, params);
+
 function asId(v: unknown): string {
-  if (typeof v !== "string" || v.length === 0) throw new Error("잘못된 대상 ID입니다.");
+  if (typeof v !== "string" || v.length === 0) throw new Error(msg("invalid_target"));
   return v;
 }
 
@@ -25,7 +34,7 @@ function handle(channel: string, fn: (arg: unknown) => Promise<IpcResult<unknown
     const wc = mainWindow?.webContents;
     return wc && isTrustedFrame(e.sender, e.senderFrame, { webContents: wc, mainFrame: wc.mainFrame })
       ? fn(arg)
-      : { ok: false, error: "허용되지 않은 호출입니다.", hubDown: false };
+      : { ok: false, error: msg("untrusted_call"), hubDown: false };
   });
 }
 
@@ -48,8 +57,31 @@ handle("admin:emptyTrash", () => toResult(() => client.emptyTrash()));
 // 뷰어는 같은 Windows 사용자만 열 수 있다: 인증된 Hub에서 1회용 티켓을 받아 기본 브라우저로 연다(형식 검사 후).
 handle("admin:openViewer", () => toResult(async () => {
   const url = await client.viewerTicket();
-  if (!isViewerUrl(url)) throw new Error("Hub가 잘못된 뷰어 주소를 보냈습니다.");
+  if (!isViewerUrl(url)) throw new Error(msg("bad_viewer_url"));
   await shell.openExternal(url);
+}));
+// 언어: Hub가 꺼져 있어도 동작해야 한다(첫 실행 언어 선택) — 읽기는 파일, 쓰기는 Hub가 켜져 있으면 Hub로(기록자는 Hub), 꺼져 있으면 파일에 직접.
+handle("admin:getLanguage", async () => ({ ok: true, data: readLanguageFile(dataDir) }));
+handle("admin:setLanguage", (arg) => toResult(async () => {
+  if (arg !== "ko" && arg !== "en") throw new Error(msg("lang_invalid"));
+  const lang: Lang = arg;
+  try {
+    const cfg = await client.setConfig({ language: lang });
+    if (cfg.language !== lang) {
+      // 구버전 Hub는 language를 모르고 무시한다 → 파일에라도 남기고 알린다.
+      writeLanguageFile(dataDir, lang);
+      throw new Error(adminMsg(lang, "lang_old_hub"));
+    }
+    return { via: "hub" as const };
+  } catch (e) {
+    if (!(e instanceof HubNotRunningError)) throw e;
+    try {
+      writeLanguageFile(dataDir, lang);
+    } catch (w) {
+      throw new Error(adminMsg(lang, "lang_save_failed", { detail: (w as Error).message }));
+    }
+    return { via: "file" as const };
+  }
 }));
 
 function createWindow(): BrowserWindow {
@@ -59,7 +91,7 @@ function createWindow(): BrowserWindow {
     height: 700,
     minWidth: 720,
     minHeight: 480,
-    title: "Agent-Uplink 관리",
+    title: msg("window_title"),
     webPreferences: {
       preload: path.join(here, "preload.cjs"),
       contextIsolation: true,

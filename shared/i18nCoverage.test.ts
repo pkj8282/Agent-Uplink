@@ -43,7 +43,6 @@ function hangulLiterals(rel: string): string[] {
 
 // 아직 변환하지 않은 파일. 각 Task가 자기 파일을 지운다 — 최종에는 비어 있어야 한다.
 const PENDING = new Set<string>([
-  "admin/src/adminClient.ts", "admin/src/auth.ts", "admin/src/main.ts",
   "admin/src/renderer/renderer.ts", "admin/src/renderer/view.ts",
 ]);
 const PENDING_HTML = new Set<string>(["admin/src/renderer/index.html"]);

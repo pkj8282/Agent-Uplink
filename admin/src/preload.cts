@@ -10,4 +10,6 @@ contextBridge.exposeInMainWorld("admin", {
   restoreTrash: (id: string, confirmRename: boolean) => ipcRenderer.invoke("admin:restoreTrash", { id, confirmRename }),
   emptyTrash: () => ipcRenderer.invoke("admin:emptyTrash"),
   openViewer: () => ipcRenderer.invoke("admin:openViewer"),
+  getLanguage: () => ipcRenderer.invoke("admin:getLanguage"),
+  setLanguage: (lang: string) => ipcRenderer.invoke("admin:setLanguage", lang),
 });
