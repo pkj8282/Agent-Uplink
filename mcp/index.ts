@@ -318,9 +318,23 @@ server.registerTool(
   }),
 );
 
+/**
+ * 호스트가 입력(stdin)을 닫으면 끝낸다. Hub 연결이 이벤트 루프를 붙잡아 프로세스가 남으면 역할이 계속 "사용 중"이고
+ * Hub도 유휴 종료하지 못한다(Windows에서 `cmd /c npx …`의 위 프로세스만 끝나는 경우 등).
+ */
+function exitWhenHostLeaves(): void {
+  const leave = () => {
+    client.close();
+    process.exit(0);
+  };
+  process.stdin.once("end", leave);
+  process.stdin.once("close", leave);
+}
+
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  exitWhenHostLeaves();
   process.stderr.write(`${pinnedUuid ? m("mcp_started_pinned", { account: pinnedUuid }) : m("mcp_started_unselected")}\n`);
 }
 main().catch((e) => { process.stderr.write(`${m("mcp_fatal", { detail: (e as Error).message })}\n`); process.exit(1); });

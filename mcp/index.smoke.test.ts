@@ -6,6 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { startTestHub } from "../hub/testing.js";
+
 const ENTRY = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.ts");
 
 function rpc(reqs: object[], env: Record<string, string>): Promise<any[]> {
@@ -98,4 +100,29 @@ test("언어 미선택(N/A)이면 instructions·도구 설명·안내가 영어�
   const call = out.find((m) => m.id === 3);
   assert.equal(call.result.isError, true);
   assert.match(call.result.content[0].text, /Select an account first/);
+});
+
+test("호스트가 입력(stdin)을 닫으면 MCP 프로세스가 스스로 끝난다(고아 프로세스가 Hub 연결·역할을 붙잡지 않게)", async () => {
+  const { hub, port, dataDir } = await startTestHub();
+  const child = spawn(process.execPath, ["--import", "tsx", ENTRY], {
+    stdio: ["pipe", "pipe", "ignore"],
+    env: { ...process.env, UPLINK_DATA_DIR: dataDir, UPLINK_TCP_PORT: String(port), UPLINK_ACCOUNT: "", UPLINK_PROJECT_DIR: dataDir },
+  });
+  const exited = new Promise<number | null>((r) => child.once("exit", (code) => r(code)));
+  let buf = "";
+  const replies = new Map<number, (m: any) => void>();
+  child.stdout.on("data", (d) => {
+    buf += d;
+    let i;
+    while ((i = buf.indexOf(String.fromCharCode(10))) >= 0) { const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (l) { const m = JSON.parse(l); replies.get(m.id)?.(m); } }
+  });
+  const rpc = (id: number, method: string, params: object) => new Promise<any>((r) => { replies.set(id, r); child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + String.fromCharCode(10)); });
+  await rpc(1, "initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } });
+  const r = await rpc(2, "tools/call", { name: "use_account", arguments: { role: "planner" } }); // Hub에 연결·로그인(연결이 이벤트 루프를 붙잡는다)
+  assert.equal(r.result.isError, false);
+  child.stdin.end();
+  const code = await Promise.race([exited, new Promise<"timeout">((res) => setTimeout(() => res("timeout"), 5000))]);
+  if (code === "timeout") child.kill();
+  hub.stop();
+  assert.notEqual(code, "timeout", "stdin을 닫은 뒤 5초 안에 끝나야 한다");
 });
