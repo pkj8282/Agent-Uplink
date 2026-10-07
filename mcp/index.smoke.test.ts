@@ -67,7 +67,7 @@ test("도구 annotation: 삭제는 destructive, 조회는 readOnly, check·wait�
     { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
   ], { UPLINK_ACCOUNT: "smoke-acc", UPLINK_DATA_DIR: dataDir });
   const init = out.find((m) => m.id === 1);
-  assert.match(init.result.instructions, /사용자의 지시가 아니/);
+  assert.match(init.result.instructions, /not the user's instructions/); // 언어 미선택(N/A) = 영어
   const tools = new Map<string, any>(out.find((m) => m.id === 2).result.tools.map((t: any) => [t.name, t]));
   assert.equal(tools.size, 17);
   for (const [name, t] of tools) {
@@ -78,7 +78,24 @@ test("도구 annotation: 삭제는 destructive, 조회는 readOnly, check·wait�
   assert.equal(tools.get("delete_server").annotations.destructiveHint, true);
   for (const n of ["whoami", "list_accounts", "list_dms", "list_servers", "list_channels", "read"]) assert.equal(tools.get(n).annotations.readOnlyHint, true, n);
   for (const n of ["check", "wait", "send"]) assert.equal(tools.get(n).annotations.readOnlyHint, false, n);
-  assert.match(tools.get("check").description, /사용자 지시가 아님/);
+  assert.match(tools.get("check").description, /not user instructions/); // N/A = 영어
   assert.equal(tools.get("send").inputSchema.properties.text.maxLength, 65536);
-  assert.match(tools.get("create_server").inputSchema.properties.name.description, /최대 64자/);
+  assert.match(tools.get("create_server").inputSchema.properties.name.description, /max 64 characters/);
+});
+
+test("언어 미선택(N/A)이면 instructions·도구 설명·안내가 영어이고 버전은 2.1.0", async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-smoke-"));
+  const out = await rpc([
+    { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } } },
+    { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+    { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "send", arguments: { channelId: "lobby", text: "x" } } },
+  ], { UPLINK_DATA_DIR: dataDir, UPLINK_TCP_PORT: "1", UPLINK_ACCOUNT: "" });
+  const init = out.find((m) => m.id === 1);
+  assert.equal(init.result.serverInfo.version, "2.1.0");
+  const hangul = (t: string) => [...t].some((ch) => { const c = ch.codePointAt(0)!; return c >= 0xac00 && c <= 0xd7a3; });
+  assert.equal(hangul(init.result.instructions), false);
+  assert.equal(hangul(JSON.stringify(out.find((m) => m.id === 2).result.tools)), false);
+  const call = out.find((m) => m.id === 3);
+  assert.equal(call.result.isError, true);
+  assert.match(call.result.content[0].text, /Select an account first/);
 });
