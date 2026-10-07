@@ -10,6 +10,7 @@ import { readClientKey } from "../shared/clientKey.js";
 import { Response } from "../shared/protocol.js";
 import { Hub, HubLimits } from "./server.js";
 import { SecureDeps } from "./secure.js";
+import type { LangSetting } from "../shared/i18n.js";
 
 /** win32 경로(PowerShell·icacls)를 건너뛴다 — 실제 경로는 secure.test.ts가 주입·통합 테스트로 검증한다. */
 export const TEST_SECURE_DEPS: SecureDeps = {
@@ -25,8 +26,18 @@ export function registerTestHub(port: number, dataDir: string): void {
   dataDirByPort.set(port, dataDir);
 }
 
-export async function startTestHub(opts: { dataDir?: string; http?: boolean; limits?: Partial<HubLimits> } = {}): Promise<{ hub: Hub; port: number; dataDir: string }> {
+/** 테스트 데이터 폴더에 언어를 정해 둔다(config.json이 이미 있으면 그대로 둔다). N/A면 아무것도 쓰지 않는다. */
+export function seedLanguage(dataDir: string, language: LangSetting): void {
+  const file = path.join(dataDir, "config.json");
+  if (language === "N/A" || fs.existsSync(file)) return;
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ language }));
+}
+
+/** language 기본값 "ko": 기존 테스트의 한국어 문구 단정을 유지한다. 영어·N/A 경로는 명시해서 시험한다. */
+export async function startTestHub(opts: { dataDir?: string; http?: boolean; limits?: Partial<HubLimits>; language?: LangSetting } = {}): Promise<{ hub: Hub; port: number; dataDir: string }> {
   const dataDir = opts.dataDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "uplink-t-"));
+  seedLanguage(dataDir, opts.language ?? "ko");
   const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0, ...(opts.limits ? { limits: opts.limits } : {}) });
   await hub.startTcp();
   if (opts.http) await hub.startHttp();

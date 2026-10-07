@@ -749,9 +749,14 @@ export class Hub {
           reply({ ok: false, error: "allowDevDelete는 boolean이어야 합니다." });
           return;
         }
+        if (patch.language !== undefined && patch.language !== "ko" && patch.language !== "en") {
+          reply({ ok: false, code: "config_language_invalid", error: "language는 ko 또는 en이어야 합니다." });
+          return;
+        }
         if (patch.maxChannelsPerServer !== undefined) this.config.maxChannelsPerServer = patch.maxChannelsPerServer;
         if (patch.inboxMaxBatch !== undefined) this.config.inboxMaxBatch = patch.inboxMaxBatch;
         if (patch.allowDevDelete !== undefined) this.config.allowDevDelete = patch.allowDevDelete;
+        if (patch.language !== undefined) this.config.language = patch.language as "ko" | "en"; // 위에서 검증함
         saveConfig(this.opts.dataDir, this.config);
         reply({ ok: true, config: { ...this.config } });
         return;

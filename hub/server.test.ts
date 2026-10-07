@@ -440,6 +440,22 @@ test("admin_set_config는 잘못된 값을 거부하고 기존 값을 유지한�
   a.close(); hub.stop();
 });
 
+test("admin_set_config: language는 ko/en만, 저장·응답에 반영", async () => {
+  const { hub, port, dataDir } = await startTestHub({ language: "N/A" });
+  const token = fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim();
+  const a = new Client(port); await a.ready();
+  for (const bad of ["fr", "N/A", "KO", 1, null]) {
+    const r = await a.req("admin_set_config", { token, patch: { language: bad } });
+    assert.equal(r.ok, false, String(bad));
+    assert.equal(r.code, "config_language_invalid", String(bad));
+  }
+  const r = await a.req("admin_set_config", { token, patch: { language: "ko" } });
+  assert.equal(r.ok, true);
+  assert.equal((r.config as { language?: string }).language, "ko");
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dataDir, "config.json"), "utf8")).language, "ko");
+  a.close(); hub.stop();
+});
+
 test("admin_delete_channel/server는 allowDevDelete=false여도 삭제하고 라우팅을 제거한다", async () => {
   const dataDir = tmp();
   fs.mkdirSync(dataDir, { recursive: true });

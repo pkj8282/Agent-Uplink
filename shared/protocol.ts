@@ -104,7 +104,7 @@ export type Request =
   | { op: "delete_channel"; id: number; channelId: string }
   | { op: "delete_server"; id: number; serverId: string }
   | { op: "admin_snapshot"; id: number; token: string }
-  | { op: "admin_set_config"; id: number; token: string; patch: { maxChannelsPerServer?: number; allowDevDelete?: boolean; inboxMaxBatch?: number } }
+  | { op: "admin_set_config"; id: number; token: string; patch: { maxChannelsPerServer?: number; allowDevDelete?: boolean; inboxMaxBatch?: number; language?: unknown } }
   | { op: "admin_delete_channel"; id: number; token: string; channelId: string }
   | { op: "admin_delete_server"; id: number; token: string; serverId: string }
   | { op: "admin_delete_account"; id: number; token: string; uuid: string }
