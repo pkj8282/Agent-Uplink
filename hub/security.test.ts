@@ -92,7 +92,7 @@ test("RT3: 뷰어 응답에 CORS 허용 헤더가 없다(다른 출처 페이지
 });
 
 test("RT4: 뷰어는 사용자 데이터를 HTML로 해석해 넣지 않는다", () => {
-  assert.doesNotMatch(renderViewerHtml("ko"), /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
+  for (const lang of ["ko", "en"] as const) assert.doesNotMatch(renderViewerHtml(lang), /innerHTML|outerHTML|insertAdjacentHTML|document\.write/);
 });
 
 test("RT6: junction 항목에 대한 restore/empty op는 바깥 폴더를 건드리지 않는다", async () => {
