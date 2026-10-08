@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { backupCorrupt, writeFileAtomic } from "./fsutil.js";
-import { escapeControls } from "../shared/controlChars.js";
+import { Guard, plainGuard } from "./securityLog.js";
 
 export interface ServerChannel {
   id: string;
@@ -33,7 +33,9 @@ export class ServerStore {
     }
   }
 
-  constructor(opts: { dir: string }) {
+  constructor(opts: { dir: string; guard?: Guard }) {
+    const guard = opts.guard ?? plainGuard;
+    const at = { source: "disk" as const, where: "servers" };
     const dir = path.join(opts.dir, "servers");
     fs.mkdirSync(dir, { recursive: true });
     this.file = path.join(dir, "index.json");
@@ -43,8 +45,8 @@ export class ServerStore {
         for (const [id, rec] of Object.entries(obj)) {
           rec.channels ??= [];
           // 디스크 입구(v2.1.2)
-          if (typeof rec.name === "string") rec.name = escapeControls(rec.name);
-          for (const c of rec.channels) if (c && typeof c.name === "string") c.name = escapeControls(c.name);
+          if (typeof rec.name === "string") rec.name = guard(rec.name, { ...at, field: "server_name" });
+          for (const c of rec.channels) if (c && typeof c.name === "string") c.name = guard(c.name, { ...at, field: "channel_name" });
           this.servers.set(id, rec);
         }
       } catch {

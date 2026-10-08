@@ -37,14 +37,15 @@ export type NameKind = "account" | "server" | "channel";
 
 /**
  * 서버·채널·계정 이름: 앞뒤 공백을 지운 뒤 1~NAME_MAX 코드포인트(원래 문자열 기준). 통과하면 위장 문자를
- * 이스케이프한 이름(v2.1.2 입력 경계). 실패는 언어 중립 값(문구는 Hub가 만든다).
+ * 이스케이프한 이름(v2.1.2 입력 경계 — Hub는 clean에 감독 기록을 넘긴다). 실패는 언어 중립 값(문구는 Hub가 만든다).
  */
 export function validateName(
   raw: unknown,
   kind: NameKind,
+  clean: (s: string) => string = escapeControls,
 ): { ok: true; name: string } | { ok: false; code: "name_invalid"; params: { kind: NameKind; max: number } } {
   const name = typeof raw === "string" ? raw.trim() : "";
   const len = [...name].length;
   if (len === 0 || len > NAME_MAX) return { ok: false, code: "name_invalid", params: { kind, max: NAME_MAX } };
-  return { ok: true, name: escapeControls(name) };
+  return { ok: true, name: clean(name) };
 }

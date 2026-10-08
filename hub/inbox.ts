@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { writeFileAtomic } from "./fsutil.js";
-import { escapeControls } from "../shared/controlChars.js";
+import { Guard, plainGuard } from "./securityLog.js";
 import { InboxItem } from "../shared/protocol.js";
 
 interface Box {
@@ -14,8 +14,11 @@ export class InboxStore {
   private readonly dir: string;
   private boxes = new Map<string, Box>();
 
-  constructor(opts: { dir: string }) {
+  private readonly guard: Guard;
+
+  constructor(opts: { dir: string; guard?: Guard }) {
     this.dir = path.join(opts.dir, "notifications");
+    this.guard = opts.guard ?? plainGuard;
     fs.mkdirSync(this.dir, { recursive: true });
   }
 
@@ -29,9 +32,11 @@ export class InboxStore {
       for (const line of lines) {
         try {
           const it = JSON.parse(line) as InboxItem;
-          // 디스크 입구(v2.1.2), 본문은 그대로
-          if (typeof it.fromName === "string") it.fromName = escapeControls(it.fromName);
-          if (typeof it.channelLabel === "string") it.channelLabel = escapeControls(it.channelLabel);
+          // 디스크 입구(v2.1.2): 보낸 이름·채널 라벨·본문(줄바꿈·탭은 유지)
+          const at = { source: "disk" as const, where: "inbox", account: uuid };
+          if (typeof it.fromName === "string") it.fromName = this.guard(it.fromName, { ...at, field: "fromName" });
+          if (typeof it.channelLabel === "string") it.channelLabel = this.guard(it.channelLabel, { ...at, field: "channelLabel" });
+          if (typeof it.text === "string") it.text = this.guard(it.text, { ...at, field: "text", keepLineBreaks: true });
           b.items.push(it);
           if (it.seq > b.seq) b.seq = it.seq;
         } catch {

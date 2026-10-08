@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { backupCorrupt, writeFileAtomic } from "./fsutil.js";
-import { escapeControls } from "../shared/controlChars.js";
+import { Guard, plainGuard } from "./securityLog.js";
 
 export interface DmRecord {
   channelId: string;
@@ -16,7 +16,8 @@ export class DmStore {
   /** index.json을 읽지 못했는가(계정 역색인으로 재구성 — recovery.ts). */
   corrupt = false;
 
-  constructor(opts: { dir: string }) {
+  constructor(opts: { dir: string; guard?: Guard }) {
+    const guard = opts.guard ?? plainGuard;
     const dir = path.join(opts.dir, "dm");
     fs.mkdirSync(dir, { recursive: true });
     this.file = path.join(dir, "index.json");
@@ -24,7 +25,7 @@ export class DmStore {
       try {
         const obj = JSON.parse(fs.readFileSync(this.file, "utf8")) as Record<string, DmRecord>;
         for (const [id, rec] of Object.entries(obj)) {
-          if (rec && typeof rec.label === "string") rec.label = escapeControls(rec.label); // 디스크 입구(v2.1.2)
+          if (rec && typeof rec.label === "string") rec.label = guard(rec.label, { source: "disk", where: "dm", field: "label" }); // 디스크 입구(v2.1.2)
           this.records.set(id, rec);
         }
       } catch {

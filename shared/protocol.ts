@@ -67,6 +67,17 @@ export interface TrashItemInfo {
   dmLeftover?: number;
 }
 
+/** 유니코드 스테가노그래피 감독 기록(v2.1.2): Hub 입구에서 숨은 문자를 보이는 글자로 바꾼 한 건. preview는 이스케이프된 앞 80 코드포인트. */
+export interface SecurityFinding {
+  ts: number;
+  source: "request" | "disk";
+  where: string; // 요청 op(send·set_name…) 또는 디스크 파일 종류(accounts·servers·dm·log·inbox)
+  field: string; // name·description·text·fromName·channelLabel·label
+  account?: string; // 요청한 계정 또는 그 레코드의 계정
+  counts: Record<string, number>; // 종류별 개수(FindingKind)
+  preview: string;
+}
+
 export interface NameConflict {
   kind: "server" | "channel";
   name: string;
@@ -137,6 +148,7 @@ export interface Response {
   snapshotAccounts?: { uuid: string; name: string; description: string; online: boolean }[]; // admin_snapshot
   snapshotDms?: { channelId: string; members: string[]; label: string }[]; // admin_snapshot
   trash?: TrashItemInfo[]; // admin_snapshot
+  securityFindings?: SecurityFinding[]; // admin_snapshot(최근 100건, v2.1.2)
   restored?: RestoreReport; // admin_restore_trash
   removed?: number; // admin_empty_trash
   error?: string;

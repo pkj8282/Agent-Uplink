@@ -20,7 +20,7 @@ import { rebuildDmIndex } from "./recovery.js";
 import { hubMsg, type HubKey } from "./messages.js";
 import { effectiveLang, type Lang } from "../shared/i18n.js";
 import { currentLang } from "../shared/langConfig.js";
-import { escapeControls } from "../shared/controlChars.js";
+import { SecurityLog } from "./securityLog.js";
 import {
   MAGIC,
   PROTOCOL_VERSION,
@@ -76,6 +76,8 @@ export class Hub {
   protected limits: HubLimits;
   protected channels!: ChannelStore;
   protected accounts!: AccountStore;
+  /** 유니코드 스테가노그래피 감독 기록(v2.1.2) — 스토어보다 먼저 만든다. */
+  protected security!: SecurityLog;
   protected inbox!: InboxStore;
   protected dm!: DmStore;
   protected servers!: ServerStore;
@@ -120,6 +122,11 @@ export class Hub {
   }
 
   /** 오류 응답: 판단용 code와 표시용 문구. */
+  /** 이름 요청의 감독(validateName에 넘긴다). */
+  private nameGuard(where: string, account: unknown): (s: string) => string {
+    return (s) => this.security.guard(s, { source: "request", where, field: "name", ...(typeof account === "string" ? { account } : {}) });
+  }
+
   protected err(code: string, key: HubKey, params?: object): { ok: false; code: string; error: string } {
     return { ok: false, code, error: this.msg(key, params) };
   }
@@ -142,11 +149,13 @@ export class Hub {
 
   private loadData(): void {
     this.config = loadConfig(this.opts.dataDir);
-    this.channels = new ChannelStore({ dir: this.opts.dataDir });
-    this.accounts = new AccountStore({ dir: this.opts.dataDir });
-    this.inbox = new InboxStore({ dir: this.opts.dataDir });
-    this.dm = new DmStore({ dir: this.opts.dataDir });
-    this.servers = new ServerStore({ dir: this.opts.dataDir });
+    this.security = new SecurityLog({ dir: this.opts.dataDir });
+    const guard = this.security.guard;
+    this.channels = new ChannelStore({ dir: this.opts.dataDir, guard });
+    this.accounts = new AccountStore({ dir: this.opts.dataDir, guard });
+    this.inbox = new InboxStore({ dir: this.opts.dataDir, guard });
+    this.dm = new DmStore({ dir: this.opts.dataDir, guard });
+    this.servers = new ServerStore({ dir: this.opts.dataDir, guard });
     this.trash = new TrashStore({ dir: this.opts.dataDir });
     this.trashOps = new TrashOps({
       dataDir: this.opts.dataDir, servers: this.servers, dm: this.dm, accounts: this.accounts,
@@ -451,7 +460,7 @@ export class Hub {
         let loginName: string | undefined;
         // 이름 힌트는 새 계정을 만들 때만 쓴다 — 기존 계정은 힌트를 무시한다(긴 UPLINK_ACCOUNT_NAME으로 업그레이드 뒤 막히지 않게).
         if (req.name !== undefined && !this.accounts.get(req.uuid)) {
-          const v = validateName(req.name, "account");
+          const v = validateName(req.name, "account", this.nameGuard("login", req.uuid));
           if (!v.ok) {
             reply(this.err(v.code, "name_invalid", v.params));
             return;
@@ -505,7 +514,7 @@ export class Hub {
       case "set_name": {
         const uuid = needLogin();
         if (!uuid) return;
-        const v = validateName(req.name, "account");
+        const v = validateName(req.name, "account", this.nameGuard("set_name", uuid));
         if (!v.ok) {
           reply(this.err(v.code, "name_invalid", v.params));
           return;
@@ -554,7 +563,7 @@ export class Hub {
       case "create_server": {
         const uuid = needLogin();
         if (!uuid) return;
-        const v = validateName(req.name, "server");
+        const v = validateName(req.name, "server", this.nameGuard("create_server", uuid));
         if (!v.ok) {
           reply(this.err(v.code, "name_invalid", v.params));
           return;
@@ -588,7 +597,7 @@ export class Hub {
           reply(this.err("server_not_found", "server_not_found", { id: req.serverId }));
           return;
         }
-        const v = validateName(req.name, "channel");
+        const v = validateName(req.name, "channel", this.nameGuard("create_channel", uuid));
         if (!v.ok) {
           reply(this.err(v.code, "name_invalid", v.params));
           return;
@@ -670,9 +679,11 @@ export class Hub {
           return;
         }
         const name = this.accounts.get(uuid)!.name;
-        const msg = this.channels.append(ch.id, uuid, name, req.text);
+        // 본문 감독(v2.1.2): 길이는 원래 기준으로 위에서 검사했다. 줄바꿈·탭은 유지, 숨은 문자는 이스케이프·기록.
+        const text = this.security.guard(req.text, { source: "request", where: "send", field: "text", account: uuid, keepLineBreaks: true });
+        const msg = this.channels.append(ch.id, uuid, name, text);
         reply({ ok: true, seq: msg.seq });
-        this.fanout(ch, msg.from, name, req.text, msg.ts);
+        this.fanout(ch, msg.from, name, text, msg.ts);
         return;
       }
 
@@ -749,6 +760,7 @@ export class Hub {
           })),
           snapshotDms: this.dm.all().map((r) => ({ channelId: r.channelId, members: [...r.members], label: r.label })),
           trash: this.trash.list(),
+          securityFindings: this.security.recent(100),
         });
         return;
       }
@@ -837,7 +849,7 @@ export class Hub {
           return;
         }
         // 길이는 원래 문자열 기준으로 위에서 검사했다. 저장은 위장 문자를 이스케이프한 값(v2.1.2 입력 경계).
-        reply({ ok: true, description: this.accounts.setDescription(uuid, escapeControls(d)) });
+        reply({ ok: true, description: this.accounts.setDescription(uuid, this.security.guard(d, { source: "request", where: "set_profile", field: "description", account: uuid })) });
         return;
       }
 

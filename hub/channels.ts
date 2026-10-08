@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Channel, Message } from "../shared/protocol.js";
-import { escapeControls } from "../shared/controlChars.js";
+import { Guard, plainGuard } from "./securityLog.js";
 
 interface Entry {
   channel: Channel;
@@ -15,8 +15,11 @@ export class ChannelStore {
   private readonly ringSize: number;
   private entries = new Map<string, Entry>();
 
-  constructor(opts: { dir: string; ringSize?: number }) {
+  private readonly guard: Guard;
+
+  constructor(opts: { dir: string; ringSize?: number; guard?: Guard }) {
     this.dir = opts.dir;
+    this.guard = opts.guard ?? plainGuard;
     this.ringSize = opts.ringSize ?? 1000;
   }
 
@@ -43,7 +46,10 @@ export class ChannelStore {
       for (const line of lines.slice(-this.ringSize)) {
         try {
           const m = JSON.parse(line) as Message;
-          if (typeof m.fromName === "string") m.fromName = escapeControls(m.fromName); // 디스크 입구(v2.1.2), 본문은 그대로
+          // 디스크 입구(v2.1.2): 보낸 이름과 본문(줄바꿈·탭은 유지)
+          const at = { source: "disk" as const, where: "log", account: String(m.from) };
+          if (typeof m.fromName === "string") m.fromName = this.guard(m.fromName, { ...at, field: "fromName" });
+          if (typeof m.text === "string") m.text = this.guard(m.text, { ...at, field: "text", keepLineBreaks: true });
           entry.ring.push(m);
           if (m.seq > entry.seq) entry.seq = m.seq;
         } catch {
