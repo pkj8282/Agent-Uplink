@@ -1,4 +1,4 @@
-// shared/controlChars.ts 복제본(관리 앱 독립 빌드용) — 수정은 원본과 함께, text.test.ts가 일치를 검사한다.
+// 표시 위장 문자의 유일한 기준: Hub 입구 이스케이프(escapeControls)와 MCP·관리 앱 출력 한 줄 정리(oneLine).
 // admin/src/text.ts는 이 파일의 복제본이다(첫 줄 제외) — admin/src/text.test.ts가 일치를 검사한다.
 
 /**
