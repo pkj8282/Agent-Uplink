@@ -49,6 +49,7 @@ handle("admin:setConfig", (patch) => toResult(() => client.setConfig(patch as Co
 handle("admin:deleteChannel", (id) => toResult(() => client.deleteChannel(asId(id))));
 handle("admin:deleteServer", (id) => toResult(() => client.deleteServer(asId(id))));
 handle("admin:deleteAccount", (uuid) => toResult(() => client.deleteAccount(asId(uuid))));
+handle("admin:deleteDm", (id) => toResult(() => client.deleteDm(asId(id))));
 handle("admin:restoreTrash", (arg) => {
   const a = (arg ?? {}) as { id?: unknown; confirmRename?: unknown };
   return toResult(() => client.restoreTrash(asId(a.id), a.confirmRename === true));

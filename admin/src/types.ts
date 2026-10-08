@@ -17,7 +17,7 @@ export interface SnapshotDm { channelId: string; members: string[]; label: strin
 
 export interface TrashItem {
   id: string;
-  kind: "channel" | "server" | "account" | "orphan";
+  kind: "channel" | "server" | "account" | "orphan" | "dm";
   name: string;
   serverName?: string;
   deletedAt: number;
@@ -60,6 +60,7 @@ export interface AdminApi {
   deleteChannel(channelId: string): Promise<IpcResult<void>>;
   deleteServer(serverId: string): Promise<IpcResult<void>>;
   deleteAccount(uuid: string): Promise<IpcResult<void>>;
+  deleteDm(channelId: string): Promise<IpcResult<void>>;
   restoreTrash(id: string, confirmRename: boolean): Promise<IpcResult<RestoreReport>>;
   emptyTrash(): Promise<IpcResult<{ removed: number }>>;
   openViewer(): Promise<IpcResult<void>>;

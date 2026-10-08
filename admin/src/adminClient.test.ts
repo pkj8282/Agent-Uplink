@@ -392,3 +392,24 @@ test("setConfig로 언어를 저장하면 응답 config에 반영된다", async 
   assert.equal((await client.snapshot()).config.language, "en");
   hub.stop();
 });
+
+test("deleteDm: DM이 휴지통으로(kind dm), 같은 ID를 다시 지우면 dm_not_found", async () => {
+  const { hub, port, client } = await startHub();
+  const s = await seed(port);
+  await client.deleteDm(s.dmId);
+  const snap = await client.snapshot();
+  assert.deepEqual(snap.dms, []);
+  assert.equal(snap.trash!.filter((t) => t.kind === "dm").length, 1);
+  const r = await toResult(() => client.deleteDm(s.dmId));
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.equal(r.code, "dm_not_found");
+  s.a.close(); s.b.close(); hub.stop();
+});
+
+test("구버전 Hub(admin_delete_dm 모름): deleteDm은 실패로 끝나고 예외로 죽지 않는다", async () => {
+  const f = await fakeServer((req, s) => s.write(encodeFrame({ ok: false, id: req.id, code: "unknown_op", error: "unknown op: admin_delete_dm" })));
+  const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 2000 });
+  const r = await toResult(() => c.deleteDm("x"));
+  assert.equal(r.ok, false);
+  f.close();
+});

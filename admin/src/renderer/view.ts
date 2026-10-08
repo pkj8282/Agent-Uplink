@@ -73,7 +73,8 @@ export class ConfigFormState {
 export type DeleteTarget =
   | { kind: "channel"; name: string; serverName: string }
   | { kind: "server"; name: string; channelCount: number }
-  | { kind: "account"; name: string; uuid: string; dmCount: number };
+  | { kind: "account"; name: string; uuid: string; dmCount: number }
+  | { kind: "dm"; names: string };
 
 
 /** 확인창 등 평문 UI에 넣을 이름: 위장 문자(제어·방향·폭 0)를 정리하고 코드포인트 기준으로 자른다. */
@@ -81,7 +82,7 @@ export function displayName(s: string, max = 80): string {
   return oneLine(s, max);
 }
 
-const KIND_KEY: Record<TrashItem["kind"], AdminKey> = { channel: "kind_channel", server: "kind_server", account: "kind_account", orphan: "kind_orphan" };
+const KIND_KEY: Record<TrashItem["kind"], AdminKey> = { channel: "kind_channel", server: "kind_server", account: "kind_account", orphan: "kind_orphan", dm: "kind_dm" };
 
 export function trashKindLabel(kind: TrashItem["kind"]): string {
   return tr(KIND_KEY[kind]);
@@ -138,6 +139,9 @@ const CODE_KEY: Record<string, AdminKey> = {
   trash_bad_id: "op_trash_bad_id",
   channel_limit: "op_channel_limit",
   trash_busy: "op_trash_busy",
+  dm_not_found: "op_dm_not_found",
+  dm_member_missing: "op_dm_member_missing",
+  dm_exists: "op_dm_exists",
   io_error: "op_io_error",
 };
 
@@ -160,6 +164,8 @@ export function deleteConfirmMessage(t: DeleteTarget): string {
       return `${tr("delete_server_confirm", { name: displayName(t.name), count: t.channelCount })}${tr("suffix_to_trash")}`;
     case "account":
       return `${tr("delete_account_confirm", { name: displayName(t.name), uuid: displayName(t.uuid), count: t.dmCount })}${tr("suffix_to_trash")}`;
+    case "dm":
+      return `${tr("delete_dm_confirm", { names: displayName(t.names, 170) })}${tr("suffix_to_trash")}`;
   }
 }
 

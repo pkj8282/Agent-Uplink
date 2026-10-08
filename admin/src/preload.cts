@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("admin", {
   deleteChannel: (channelId: string) => ipcRenderer.invoke("admin:deleteChannel", channelId),
   deleteServer: (serverId: string) => ipcRenderer.invoke("admin:deleteServer", serverId),
   deleteAccount: (uuid: string) => ipcRenderer.invoke("admin:deleteAccount", uuid),
+  deleteDm: (channelId: string) => ipcRenderer.invoke("admin:deleteDm", channelId),
   restoreTrash: (id: string, confirmRename: boolean) => ipcRenderer.invoke("admin:restoreTrash", { id, confirmRename }),
   emptyTrash: () => ipcRenderer.invoke("admin:emptyTrash"),
   openViewer: () => ipcRenderer.invoke("admin:openViewer"),

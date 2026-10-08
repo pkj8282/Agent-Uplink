@@ -133,6 +133,7 @@ export class AdminClient {
   async deleteChannel(channelId: string): Promise<void> { await this.call("admin_delete_channel", { channelId }); }
   async deleteServer(serverId: string): Promise<void> { await this.call("admin_delete_server", { serverId }); }
   async deleteAccount(uuid: string): Promise<void> { await this.call("admin_delete_account", { uuid }); }
+  async deleteDm(channelId: string): Promise<void> { await this.call("admin_delete_dm", { channelId }); }
 
   /** 뷰어를 열 1회용 티켓 URL. */
   async viewerTicket(): Promise<string> {

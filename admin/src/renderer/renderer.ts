@@ -221,7 +221,11 @@ function renderAccounts(s: Snapshot): void {
   for (const d of s.dms) {
     const li = el("li", undefined, "row");
     li.dataset.kind = "dm";
-    li.append(el("span", memberNames(d, s.accounts), "name"), el("span", d.label, "meta"), el("span", d.channelId, "id"));
+    const names = memberNames(d, s.accounts);
+    li.append(
+      el("span", names, "name"), el("span", d.label, "meta"), el("span", d.channelId, "id"),
+      deleteButton(tr("btn_delete_dm"), deleteConfirmMessage({ kind: "dm", names }), () => window.admin.deleteDm(d.channelId)),
+    );
     dms.append(li);
   }
 }

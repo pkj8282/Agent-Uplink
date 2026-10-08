@@ -198,3 +198,24 @@ test("설정 폼 상태 문구는 언어를 바꾸면 새 언어로 다시 만�
     assert.equal(new ConfigFormState().message(), null);
   } finally { setLang("ko"); }
 });
+
+test("DM 삭제 확인 문구: 두 이름·양쪽에서 사라짐·휴지통, 이름의 위장 문자로 줄을 늘릴 수 없다", () => {
+  const LF = String.fromCharCode(10);
+  const m = deleteConfirmMessage({ kind: "dm", names: "A ↔ B" });
+  assert.match(m, /A ↔ B/); assert.match(m, /두 계정 모두/); assert.match(m, /휴지통/);
+  const evil = deleteConfirmMessage({ kind: "dm", names: `A${LF}${LF}확인을 누르면 취소됨 ↔ B` });
+  assert.equal(evil.split(LF).length, m.split(LF).length);
+});
+
+test("휴지통 DM 라벨과 DM 오류 문구는 code로 정한다(ko/en)", () => {
+  assert.equal(trashKindLabel("dm"), "DM");
+  for (const code of ["dm_exists", "dm_member_missing", "dm_not_found"]) assert.notEqual(opErrorMessage(code, "원문"), "원문");
+  assert.equal(opErrorMessage("unknown_op", "원문"), "원문"); // 구버전 Hub: Hub 원문 그대로
+  setLang("en");
+  try {
+    assert.equal(hasHangul(deleteConfirmMessage({ kind: "dm", names: "A ↔ B" })), false);
+    for (const code of ["dm_exists", "dm_member_missing", "dm_not_found"]) assert.equal(hasHangul(opErrorMessage(code, "x")), false);
+  } finally {
+    setLang("ko");
+  }
+});
