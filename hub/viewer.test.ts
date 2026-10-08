@@ -2,10 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { Hub } from "./server.js";
-import { startTestHub, TestClient, openViewerSession, registerTestHub, TEST_SECURE_DEPS, httpGet, hasHangul } from "./testing.js";
+import { startTestHub, TestClient, openViewerSession, registerTestHub, TEST_SECURE_DEPS, httpGet, hasHangul, tempDir } from "./testing.js";
 import { renderViewerHtml } from "./viewer.js";
 
 test("뷰어 HTML은 외부 CDN 없이 EventSource를 쓴다", () => {
@@ -147,7 +146,7 @@ test("유휴 종료(stop) 뒤에는 열려 있던 뷰어 연결로도 요청이 
 });
 
 test("열린 뷰어(실시간 연결)가 있으면 유휴 종료하지 않고, 뷰어를 닫으면 유휴 종료한다", async () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-vw-idle-"));
+  const dataDir = tempDir("uplink-vw-idle-");
   const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 300 });
   await hub.startTcp(); await hub.startHttp(); await hub.secure(TEST_SECURE_DEPS);
   registerTestHub(hub.tcpAddress.port, dataDir);

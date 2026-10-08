@@ -1,13 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
-import { startTestHub, TestClient } from "./testing.js";
+import { startTestHub, TestClient, tempDir } from "./testing.js";
 
-function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-rec-")); }
+function tmp(): string { return tempDir("uplink-rec-"); }
 
 async function client(port: number): Promise<(op: string, p?: object) => Promise<any>> {
   const c = new TestClient(port); await c.ready();

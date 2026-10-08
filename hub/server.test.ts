@@ -2,15 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import net from "node:net";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 import { Hub } from "./server.js";
 import { Response } from "../shared/protocol.js";
 
-function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-hub-")); }
+function tmp(): string { return tempDir("uplink-hub-"); }
 
-import { startTestHub, TestClient as Client, TEST_SECURE_DEPS, hasHangul } from "./testing.js";
+import { startTestHub, TestClient as Client, TEST_SECURE_DEPS, hasHangul, tempDir } from "./testing.js";
 import { newNonce, clientProof, hubProof, proofEquals } from "../shared/auth.js";
 import { readClientKey } from "../shared/clientKey.js";
 

@@ -2,11 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { startTestHub } from "../hub/testing.js";
+import { startTestHub, tempDir } from "../hub/testing.js";
 
 const ENTRY = path.join(path.dirname(fileURLToPath(import.meta.url)), "index.ts");
 
@@ -33,7 +32,7 @@ function rpc(reqs: object[], env: Record<string, string>): Promise<any[]> {
 }
 
 test("MCP v2는 tools/list에서 17개 툴을 노출한다", async () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-smoke-"));
+  const dataDir = tempDir("uplink-smoke-");
   const out = await rpc([
     { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } } },
     { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
@@ -48,7 +47,7 @@ test("MCP v2는 tools/list에서 17개 툴을 노출한다", async () => {
 });
 
 test("env 없는 세션은 역할 선택 전 send를 막고 use_account를 안내한다", async () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-smoke-"));
+  const dataDir = tempDir("uplink-smoke-");
   fs.writeFileSync(path.join(dataDir, "config.json"), JSON.stringify({ language: "ko" })); // 한국어 안내 단정
   const env: Record<string, string> = { UPLINK_DATA_DIR: dataDir, UPLINK_TCP_PORT: "1" };
   const out = await rpc([
@@ -63,7 +62,7 @@ test("env 없는 세션은 역할 선택 전 send를 막고 use_account를 안�
 });
 
 test("도구 annotation: 삭제는 destructive, 조회는 readOnly, check·wait는 readOnly 아님, 모두 로컬", async () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-smoke-"));
+  const dataDir = tempDir("uplink-smoke-");
   const out = await rpc([
     { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } } },
     { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
@@ -86,7 +85,7 @@ test("도구 annotation: 삭제는 destructive, 조회는 readOnly, check·wait�
 });
 
 test("언어 미선택(N/A)이면 instructions·도구 설명·안내가 영어이고 버전은 package.json과 같다", async () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-smoke-"));
+  const dataDir = tempDir("uplink-smoke-");
   const out = await rpc([
     { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } } },
     { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },

@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { InboxStore } from "./inbox.js";
+import { tempDir } from "./testing.js";
 
-function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-inbox-")); }
+function tmp(): string { return tempDir("uplink-inbox-"); }
 function item(text: string) {
   return { ts: Date.now(), channelId: "lobby", channelKind: "server" as const, channelLabel: "l", from: "u2", fromName: "B", text };
 }

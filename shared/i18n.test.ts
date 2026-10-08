@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { defineCatalog, effectiveLang, parseLanguage, t } from "./i18n.js";
 import { currentLang, readLanguage } from "./langConfig.js";
+import { tempDir } from "../hub/testing.js";
 
 test("parseLanguage는 ko/en만 받고 나머지는 N/A", () => {
   assert.equal(parseLanguage("ko"), "ko");
@@ -27,7 +27,7 @@ test("t: 문자열과 params 함수", () => {
   assert.equal(t(c, "en", "port", { port: 5 }), "port 5");
 });
 
-function tmpDir(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-lang-")); }
+function tmpDir(): string { return tempDir("uplink-lang-"); }
 
 test("readLanguage: 파일 없음·깨짐·이상한 값 → N/A, 값이 바뀌면 바로 반영", () => {
   const d = tmpDir();

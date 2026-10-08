@@ -1,19 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 import { Hub } from "../hub/server.js";
-import { TEST_SECURE_DEPS, registerTestHub, TestClient, seedLanguage, hasHangul } from "../hub/testing.js";
+import { TEST_SECURE_DEPS, registerTestHub, TestClient, seedLanguage, hasHangul, tempDir } from "../hub/testing.js";
 import { hubProof } from "../shared/auth.js";
 import { HubClient } from "./hubClient.js";
 import { RoleStore } from "./roles.js";
 import { AccountSession } from "./session.js";
 import { isUnknownOp } from "./session.js";
 
-function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-sess-")); }
+function tmp(): string { return tempDir("uplink-sess-"); }
 
 /** 포트 → 그 Hub의 데이터 폴더(client.key 위치). 세션 클라이언트가 같은 키로 인증하게 한다. */
 const hubDirs = new Map<number, string>();

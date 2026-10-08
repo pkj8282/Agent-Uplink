@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { writeFileAtomic, writeSecretFile } from "./fsutil.js";
+import { tempDir } from "./testing.js";
 
-function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-fs-")); }
+function tmp(): string { return tempDir("uplink-fs-"); }
 
 test("writeFileAtomic는 내용을 정확히 쓰고 임시 파일을 남기지 않는다", () => {
   const dir = tmp();

@@ -3,15 +3,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { Hub } from "./server.js";
-import { startTestHub, TestClient, httpGet, openViewerSession } from "./testing.js";
+import { startTestHub, TestClient, httpGet, openViewerSession, tempDir } from "./testing.js";
 import { isAllowedHost, renderViewerHtml } from "./viewer.js";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 
-function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-sec-")); }
+function tmp(): string { return tempDir("uplink-sec-"); }
 const CRLF = String.fromCharCode(13, 10);
 
 function get(port: number, urlPath: string, host: string | null, session?: string): Promise<{ status: number; body: string }> {
@@ -99,7 +98,7 @@ test("RT6: junction 항목에 대한 restore/empty op는 바깥 폴더를 건드
   const { hub, port, dataDir } = await startTestHub();
   try {
     const token = fs.readFileSync(path.join(dataDir, "admin.key"), "utf8").trim();
-    const victim = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-victim-"));
+    const victim = tempDir("uplink-victim-");
     const id = "1759500000000-channel-deadbeef";
     fs.writeFileSync(path.join(victim, "meta.json"), JSON.stringify({ v: 1, id, kind: "channel", state: "done", deletedAt: 1, deletedBy: "admin", name: "x", files: [] }));
     fs.symlinkSync(victim, path.join(dataDir, "trash", id), "junction");

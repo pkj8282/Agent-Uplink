@@ -1,13 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { secureDataDir, SecureDeps, MARKER_FILE, realSecureDeps } from "./secure.js";
 import { isKeyText } from "../shared/auth.js";
-import { hasHangul } from "./testing.js";
+import { hasHangul, tempDir } from "./testing.js";
 
-function tmp(name = "uplink-sec2-"): string { return fs.mkdtempSync(path.join(os.tmpdir(), name)); }
+function tmp(name = "uplink-sec2-"): string { return tempDir(name); }
 
 /** win32 경로를 주입으로 돌린다. calls에 호출 순서를 남긴다. */
 function deps(over: Partial<SecureDeps> = {}, calls: string[] = []): SecureDeps {

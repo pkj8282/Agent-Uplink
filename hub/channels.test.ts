@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { ChannelStore } from "./channels.js";
+import { tempDir } from "./testing.js";
 
-function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-ch-")); }
+function tmp(): string { return tempDir("uplink-ch-"); }
 
 test("register한 채널에 append하면 seq가 채널별로 1부터 증가한다", () => {
   const s = new ChannelStore({ dir: tmp() });

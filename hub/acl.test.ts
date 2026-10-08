@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { restrictDataDirAcl } from "./acl.js";
+import { tempDir } from "./testing.js";
 
 const win = process.platform === "win32";
 const USERS_SID = "*S-1-5-32-545";
@@ -15,7 +16,7 @@ function acl(p: string): string {
 
 test("RT5: 데이터 폴더가 상속받은 Users 권한을 제거하고 하위 파일까지 현재 사용자 전용으로 만든다", { skip: !win }, async () => {
   // ProgramData처럼 Users에 읽기 권한을 상속하는 부모를 흉내 낸다.
-  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-acl-"));
+  const parent = tempDir("uplink-acl-");
   execFileSync("icacls", [parent, "/grant", `${USERS_SID}:(OI)(CI)RX`], { encoding: "utf8" });
   const dataDir = path.join(parent, "AgentUplink");
   fs.mkdirSync(path.join(dataDir, "accounts"), { recursive: true });

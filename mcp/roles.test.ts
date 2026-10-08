@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { RoleStore, folderKey, legacyFolderKey, parseAccountsEnv, resolveRoleCwd, validateRoleName } from "./roles.js";
+import { tempDir } from "../hub/testing.js";
 
-function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-roles-")); }
+function tmp(): string { return tempDir("uplink-roles-"); }
 
 test("validateRoleName: trim·대소문자 구분·40자·금지문자", () => {
   assert.deepEqual(validateRoleName("  기획 "), { ok: true, role: "기획" });

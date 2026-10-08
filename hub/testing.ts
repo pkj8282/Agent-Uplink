@@ -20,6 +20,22 @@ export const TEST_SECURE_DEPS: SecureDeps = {
   restrictAcl: async () => ({ ok: true }),
 };
 
+const tempDirs: string[] = [];
+
+/** 테스트 임시 폴더. 테스트 프로세스가 끝날 때(--test-force-exit의 process.exit 포함) 한꺼번에 지운다.
+ *  삭제 실패(아직 파일을 잡은 Hub 자식 등)는 테스트 결과에 영향을 주지 않는다. mkdtemp를 직접 쓰지 말 것(tempDir.test.ts가 검사). */
+export function tempDir(prefix: string): string {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  if (tempDirs.push(d) === 1) {
+    process.on("exit", () => {
+      for (const dir of tempDirs) {
+        try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); } catch { /* 결과에 영향 없음 */ }
+      }
+    });
+  }
+  return d;
+}
+
 const dataDirByPort = new Map<number, string>();
 
 export function registerTestHub(port: number, dataDir: string): void {
@@ -36,7 +52,7 @@ export function seedLanguage(dataDir: string, language: LangSetting): void {
 
 /** language 기본값 "ko": 기존 테스트의 한국어 문구 단정을 유지한다. 영어·N/A 경로는 명시해서 시험한다. */
 export async function startTestHub(opts: { dataDir?: string; http?: boolean; limits?: Partial<HubLimits>; language?: LangSetting } = {}): Promise<{ hub: Hub; port: number; dataDir: string }> {
-  const dataDir = opts.dataDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "uplink-t-"));
+  const dataDir = opts.dataDir ?? tempDir("uplink-t-");
   seedLanguage(dataDir, opts.language ?? "ko");
   const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0, ...(opts.limits ? { limits: opts.limits } : {}) });
   await hub.startTcp();

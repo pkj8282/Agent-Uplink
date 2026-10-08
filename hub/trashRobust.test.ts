@@ -3,19 +3,18 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import net from "node:net";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 import { Hub } from "./server.js";
 import { Response } from "../shared/protocol.js";
 
-function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-robust-")); }
+function tmp(): string { return tempDir("uplink-robust-"); }
 const win = process.platform === "win32";
 const A = "aaaaaaaa-0000-4000-8000-000000000001";
 const B = "bbbbbbbb-0000-4000-8000-000000000002";
 
-import { startTestHub, TestClient as Client } from "./testing.js";
+import { startTestHub, TestClient as Client, tempDir } from "./testing.js";
 
 async function startHub(dataDir = tmp()) {
   const { hub, port } = await startTestHub({ dataDir });

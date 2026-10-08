@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { readLanguageFile, writeLanguageFile } from "./langFile.js";
+import { tempDir } from "../../hub/testing.js";
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "uplink-alang-"));
+const tmp = () => tempDir("uplink-alang-");
 const cfg = (d: string) => path.join(d, "config.json");
 
 test("다른 키를 보존하고 language만 바꾼다(임시 파일을 남기지 않는다)", () => {

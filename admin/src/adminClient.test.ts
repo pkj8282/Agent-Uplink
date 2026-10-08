@@ -2,9 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import net from "node:net";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { startTestHub, TestClient as Raw } from "../../hub/testing.js";
+import { startTestHub, TestClient as Raw, tempDir } from "../../hub/testing.js";
 import { hubProof } from "../../shared/auth.js";
 import { encodeFrame, FrameDecoder } from "./framing.js";
 import { AdminClient, HubNotRunningError, hubDownMessage, resolveAdminTarget, toResult } from "./adminClient.js";
@@ -12,7 +11,7 @@ import { hasHangul } from "../../hub/testing.js";
 
 /** 데이터 폴더(언어 기본 ko — 기존 한국어 안내 단정을 유지한다). */
 function tmp(language: "ko" | "en" = "ko"): string {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-admin-"));
+  const d = tempDir("uplink-admin-");
   fs.writeFileSync(path.join(d, "config.json"), JSON.stringify({ language }));
   return d;
 }

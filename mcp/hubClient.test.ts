@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import net from "node:net";
@@ -9,7 +8,7 @@ import { randomBytes } from "node:crypto";
 import { HubClient } from "./hubClient.js";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 import { Hub } from "../hub/server.js";
-import { startTestHub, TEST_SECURE_DEPS, hasHangul } from "../hub/testing.js";
+import { startTestHub, TEST_SECURE_DEPS, hasHangul, tempDir } from "../hub/testing.js";
 
 const HUB_ENTRY = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "hub", "index.ts");
 const NODE_ARGS = ["--import", "tsx"];
@@ -17,7 +16,7 @@ let portSeq = 49400;
 function freshPort(): number { return portSeq++; }
 /** 데이터 폴더(언어 기본 ko — 기존 한국어 안내 단정을 유지한다). */
 function tmp(language: "ko" | "en" = "ko"): string {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-v2c-"));
+  const d = tempDir("uplink-v2c-");
   fs.writeFileSync(path.join(d, "config.json"), JSON.stringify({ language }));
   return d;
 }

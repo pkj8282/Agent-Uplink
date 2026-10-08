@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { readClientKey, clientKeyPath, resolveDataDir } from "./clientKey.js";
+import { tempDir } from "../hub/testing.js";
 
 /** 데이터 폴더(언어 기본 ko — 기존 한국어 안내 단정을 유지한다). */
 function tmp(language: "ko" | "en" = "ko"): string {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-ck-"));
+  const d = tempDir("uplink-ck-");
   fs.writeFileSync(path.join(d, "config.json"), JSON.stringify({ language }));
   return d;
 }

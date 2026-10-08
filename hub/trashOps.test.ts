@@ -2,15 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import net from "node:net";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 import { Hub } from "./server.js";
 import { Response } from "../shared/protocol.js";
 
-function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-tops-")); }
+function tmp(): string { return tempDir("uplink-tops-"); }
 
-import { startTestHub, TestClient as Client } from "./testing.js";
+import { startTestHub, TestClient as Client, tempDir } from "./testing.js";
 
 async function startHub(dataDir = tmp()) {
   // MCP 삭제(delete_channel/delete_server) 경로를 시험하므로 기존 설치처럼 켜 둔다(v2.0.2 새 설치 기본값은 꺼짐).

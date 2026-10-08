@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { loadConfig, saveConfig } from "./config.js";
+import { tempDir } from "./testing.js";
 
-function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-cfg-")); }
+function tmp(): string { return tempDir("uplink-cfg-"); }
 
 test("설정이 없으면 기본값으로 생성하고 파일에 쓴다", () => {
   const dir = tmp();

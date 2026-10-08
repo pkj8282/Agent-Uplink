@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { AccountStore } from "./accounts.js";
+import { tempDir } from "./testing.js";
 
-function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-acc-")); }
+function tmp(): string { return tempDir("uplink-acc-"); }
 
 test("getOrCreate는 계정을 만들고 파일로 영속한다", () => {
   const dir = tmp();

@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { ServerStore } from "./servers.js";
+import { tempDir } from "./testing.js";
 
-function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-srv-")); }
+function tmp(): string { return tempDir("uplink-srv-"); }
 
 test("createServer/addChannel이 ID를 부여하고 조회된다", () => {
   const s = new ServerStore({ dir: tmp() });

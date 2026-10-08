@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { DmStore } from "./dm.js";
+import { tempDir } from "./testing.js";
 
-function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-dm-")); }
+function tmp(): string { return tempDir("uplink-dm-"); }
 
 test("create는 채널ID를 부여하고 findByPair로 순서 무관하게 찾는다", () => {
   const s = new DmStore({ dir: tmp() });

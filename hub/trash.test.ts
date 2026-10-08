@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { TrashStore, isTrashId, isTrashFileName } from "./trash.js";
 import { backupCorrupt } from "./fsutil.js";
+import { tempDir } from "./testing.js";
 
-function tmp(): string { return fs.mkdtempSync(path.join(os.tmpdir(), "uplink-trash-")); }
+function tmp(): string { return tempDir("uplink-trash-"); }
 const U1 = "11111111-1111-4111-8111-111111111111";
 const S1 = "22222222-2222-4222-8222-222222222222";
 
@@ -79,7 +79,7 @@ test("RT6: meta.files에 경로 조작 이름이 있으면 meta를 거부(null)�
 test("RT6: 항목 폴더가 junction이면 따라가지 않는다(itemDir null, 비우기에서 대상 보존)", () => {
   const dir = tmp();
   const t = new TrashStore({ dir });
-  const victim = fs.mkdtempSync(path.join(os.tmpdir(), "uplink-victim-"));
+  const victim = tempDir("uplink-victim-");
   fs.writeFileSync(path.join(victim, "소중한.txt"), "keep");
   const id = "1759500000000-channel-deadbeef";
   fs.symlinkSync(victim, path.join(t.dir, id), "junction");
