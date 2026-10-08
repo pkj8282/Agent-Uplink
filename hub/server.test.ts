@@ -840,3 +840,15 @@ test("이스케이프 뒤 같은 이름: 백슬래시+n을 직접 쓴 서버 이
   assert.equal(r.ok, false); assert.equal(r.code, "server_name_taken");
   a.close(); hub.stop();
 });
+
+test("디스크에 위장 문자가 든 이름의 계정은 이스케이프된 이름으로 open_dm 할 수 있다(v2.1.2)", async () => {
+  const dataDir = tempDir("uplink-hub-");
+  const LF = String.fromCharCode(10), B = String.fromCharCode(92);
+  fs.mkdirSync(path.join(dataDir, "accounts"), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, "accounts", "u2.json"), JSON.stringify({ uuid: "u2", name: `B${LF}x`, createdAt: 1, dm: {}, inboxCursor: 0 }));
+  const { hub, port } = await startTestHub({ dataDir });
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  const r = await a.req("open_dm", { peer: `B${B}nx` });
+  assert.equal(r.ok, true, r.error);
+  a.close(); hub.stop();
+});

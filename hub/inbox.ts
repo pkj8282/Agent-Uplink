@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { writeFileAtomic } from "./fsutil.js";
+import { escapeControls } from "../shared/controlChars.js";
 import { InboxItem } from "../shared/protocol.js";
 
 interface Box {
@@ -28,6 +29,9 @@ export class InboxStore {
       for (const line of lines) {
         try {
           const it = JSON.parse(line) as InboxItem;
+          // 디스크 입구(v2.1.2), 본문은 그대로
+          if (typeof it.fromName === "string") it.fromName = escapeControls(it.fromName);
+          if (typeof it.channelLabel === "string") it.channelLabel = escapeControls(it.channelLabel);
           b.items.push(it);
           if (it.seq > b.seq) b.seq = it.seq;
         } catch {

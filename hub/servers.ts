@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { backupCorrupt, writeFileAtomic } from "./fsutil.js";
+import { escapeControls } from "../shared/controlChars.js";
 
 export interface ServerChannel {
   id: string;
@@ -41,6 +42,9 @@ export class ServerStore {
         const obj = JSON.parse(fs.readFileSync(this.file, "utf8")) as Record<string, ServerRecord>;
         for (const [id, rec] of Object.entries(obj)) {
           rec.channels ??= [];
+          // 디스크 입구(v2.1.2)
+          if (typeof rec.name === "string") rec.name = escapeControls(rec.name);
+          for (const c of rec.channels) if (c && typeof c.name === "string") c.name = escapeControls(c.name);
           this.servers.set(id, rec);
         }
       } catch {

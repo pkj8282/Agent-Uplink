@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { writeFileAtomic } from "./fsutil.js";
+import { escapeControls } from "../shared/controlChars.js";
 import { AccountInfo } from "../shared/protocol.js";
 
 export interface Account {
@@ -25,6 +26,9 @@ export class AccountStore {
         const a = JSON.parse(fs.readFileSync(path.join(this.dir, f), "utf8")) as Account;
         a.dm ??= {};
         a.inboxCursor ??= 0;
+        // 디스크 입구(v2.1.2): 이전 버전·손으로 고친 파일의 위장 문자를 메모리에 들이지 않는다(다음 저장 때 이스케이프된 값으로 기록됨).
+        if (typeof a.name === "string") a.name = escapeControls(a.name);
+        if (typeof a.description === "string") a.description = escapeControls(a.description);
         this.accounts.set(a.uuid, a);
       } catch {
         // 손상 파일 무시

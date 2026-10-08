@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Channel, Message } from "../shared/protocol.js";
+import { escapeControls } from "../shared/controlChars.js";
 
 interface Entry {
   channel: Channel;
@@ -42,6 +43,7 @@ export class ChannelStore {
       for (const line of lines.slice(-this.ringSize)) {
         try {
           const m = JSON.parse(line) as Message;
+          if (typeof m.fromName === "string") m.fromName = escapeControls(m.fromName); // 디스크 입구(v2.1.2), 본문은 그대로
           entry.ring.push(m);
           if (m.seq > entry.seq) entry.seq = m.seq;
         } catch {

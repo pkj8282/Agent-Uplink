@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { backupCorrupt, writeFileAtomic } from "./fsutil.js";
+import { escapeControls } from "../shared/controlChars.js";
 
 export interface DmRecord {
   channelId: string;
@@ -22,7 +23,10 @@ export class DmStore {
     if (fs.existsSync(this.file)) {
       try {
         const obj = JSON.parse(fs.readFileSync(this.file, "utf8")) as Record<string, DmRecord>;
-        for (const [id, rec] of Object.entries(obj)) this.records.set(id, rec);
+        for (const [id, rec] of Object.entries(obj)) {
+          if (rec && typeof rec.label === "string") rec.label = escapeControls(rec.label); // 디스크 입구(v2.1.2)
+          this.records.set(id, rec);
+        }
       } catch {
         // 손상: 원본을 보존하고 빈 상태로 시작 → Hub가 계정 역색인으로 재구성한다(개별 DM 로그는 보존)
         backupCorrupt(this.file);
