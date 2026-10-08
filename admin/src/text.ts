@@ -10,7 +10,10 @@ const prop = (p: string) => `${BACKSLASH}p{${p}}`;
  * 줄바꿈·방향 제어·폭 0 문자와 유니코드 스테가노그래피에 쓰이는 태그 문자·변형 선택자·채움 문자가 모두 여기에 든다.
  * 정상 이모지 안의 ZWJ·변형 선택자·태그는 inspectText가 이모지 묶음으로 먼저 떼어 보호한다.
  */
-const UNSAFE = new RegExp(`^[${["Cc", "Cf", "Zl", "Zp", "Default_Ignorable_Code_Point", "Cs"].map(prop).join("")}]$`, "v");
+const UNSAFE_SET = `[${["Cc", "Cf", "Zl", "Zp", "Default_Ignorable_Code_Point", "Cs"].map(prop).join("")}]`;
+const UNSAFE = new RegExp(`^${UNSAFE_SET}$`, "v");
+/** 사전 검사: 위험 문자가 하나도 없으면 ③·④ 모두 바꿀 것이 없다 — 긴 본문·로그 적재에서 이모지 분리 비용을 건너뛴다. */
+const ANY_UNSAFE = new RegExp(UNSAFE_SET, "v");
 const FORMAT = new RegExp(`^${prop("Cf")}$`, "v");
 const RGI_ALL = new RegExp(prop("RGI_Emoji"), "gv");
 const RGI_ONE = new RegExp(`^${prop("RGI_Emoji")}$`, "v");
@@ -45,6 +48,9 @@ interface Seg { emoji: boolean; text: string }
 const NAMED: Record<number, string> = { 0x0a: "n", 0x0d: "r", 0x09: "t" };
 const add = (counts: Counts, k: FindingKind, n = 1) => { counts[k] = (counts[k] ?? 0) + n; };
 const kept = (c: number, keepLineBreaks: boolean) => keepLineBreaks && (c === 0x0a || c === 0x0d || c === 0x09);
+const isControl = (c: number) => c < 0x20 || (c >= 0x7f && c <= 0x9f);
+/** 가장 긴 RGI 이모지 시퀀스(약 10 코드포인트)보다 넉넉한 여유 — 앞부분만 잘라 처리해도 max 안의 이모지는 온전하다. */
+const EMOJI_SLACK = 32;
 
 /** ①② 이모지 묶음(유니코드 공식 RGI 목록)을 떼어낸다. 순서는 그대로. */
 function splitEmoji(s: string): Seg[] {
@@ -59,7 +65,7 @@ function splitEmoji(s: string): Seg[] {
   return out;
 }
 
-/** ④ 이모지 부분 독립 검사: 묶음이 정확히 RGI 하나인지 다시 확인(아니면 일반 텍스트로 강등)하고, 이모지 바로 뒤에 붙은 위험 문자 연속을 이모지 스머글링으로 센다. */
+/** ④ 이모지 부분 독립 검사: 묶음이 정확히 RGI 하나인지 다시 확인(아니면 일반 텍스트로 강등)하고, 이모지 바로 뒤에 붙은 위험 문자 연속을 이모지 스머글링으로 센다(줄바꿈 등 제어 문자는 스머글링 수단이 아니라 세지 않는다). */
 function inspectEmoji(segs: Seg[], keepLineBreaks: boolean): { segs: Seg[]; counts: Counts } {
   const counts: Counts = {};
   const out = segs.map((g) => (g.emoji && !RGI_ONE.test(g.text) ? { emoji: false, text: g.text } : g));
@@ -68,7 +74,7 @@ function inspectEmoji(segs: Seg[], keepLineBreaks: boolean): { segs: Seg[]; coun
     let run = 0;
     for (const ch of out[i].text) {
       const c = ch.codePointAt(0)!;
-      if (!isUnsafeChar(c) || kept(c, keepLineBreaks)) break;
+      if (!isUnsafeChar(c) || kept(c, keepLineBreaks) || isControl(c)) break;
       run++;
     }
     if (run) add(counts, "emoji_smuggling", run);
@@ -90,6 +96,7 @@ function scanPlain(text: string, keepLineBreaks: boolean, counts: Counts): strin
 
 /** 감독 검사: ① 이모지 추출 → ② 이모지 제외 → ③ 나머지 검사 / ④ 이모지 독립 검사 → ⑤ 재조립. keepLineBreaks는 메시지 본문용. */
 export function inspectText(s: string, opts: { keepLineBreaks?: boolean } = {}): Inspection {
+  if (!ANY_UNSAFE.test(s)) return { text: s, counts: {}, changed: false };
   const keep = opts.keepLineBreaks === true;
   const emoji = inspectEmoji(splitEmoji(s), keep);
   const counts: Counts = { ...emoji.counts };
@@ -102,23 +109,42 @@ export function escapeControls(s: string): string {
   return inspectText(s).text;
 }
 
-/** 위험 문자를 공백으로 바꾸고 코드포인트 기준 max자를 넘으면 자른다. 정상 이모지는 깨지 않으며 경계에 걸리면 통째로 뺀다. */
-export function oneLine(s: string, max = 200): string {
+/** 코드포인트 기준 max자까지(이모지는 통째로만). plain은 이모지 밖 문자 변환. cut = 잘렸는가. */
+function take(s: string, max: number, plain: (ch: string) => string): { out: string; cut: boolean } {
+  let head = "";
+  let k = 0;
+  for (const ch of s) {
+    if (k++ >= max + EMOJI_SLACK) break; // 긴 문자열 전체를 펼치지 않는다
+    head += ch;
+  }
   let out = "";
   let n = 0;
-  for (const g of splitEmoji(s)) {
+  for (const g of splitEmoji(head)) {
     if (g.emoji && RGI_ONE.test(g.text)) {
       const len = [...g.text].length;
-      if (n + len > max) return `${out}…`;
+      if (n + len > max) return { out, cut: true };
       out += g.text;
       n += len;
       continue;
     }
     for (const ch of g.text) {
-      if (n >= max) return `${out}…`;
-      out += isUnsafeChar(ch.codePointAt(0)!) ? " " : ch;
+      if (n >= max) return { out, cut: true };
+      out += plain(ch);
       n++;
     }
   }
-  return out;
+  return { out, cut: head.length < s.length };
+}
+
+/** 위험 문자를 공백으로 바꾸고 코드포인트 기준 max자를 넘으면 자른다. 정상 이모지는 깨지 않으며 경계에 걸리면 통째로 뺀다. */
+export function oneLine(s: string, max = 200): string {
+  if (!ANY_UNSAFE.test(s) && s.length <= max) return s; // 사전 검사(UTF-16 길이 ≤ max면 코드포인트도 ≤ max)
+  const r = take(s, max, (ch) => (isUnsafeChar(ch.codePointAt(0)!) ? " " : ch));
+  return r.cut ? `${r.out}…` : r.out;
+}
+
+/** 코드포인트 기준 max자까지 자른다(문자는 바꾸지 않음, 경계에 걸린 이모지는 통째로 뺌). 보안 기록 미리보기용. */
+export function clipText(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return take(s, max, (ch) => ch).out;
 }

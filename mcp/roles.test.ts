@@ -149,3 +149,9 @@ test("resolveRoleCwd: UPLINK_PROJECT_DIR가 있으면 그것, 없거나 공백�
   assert.equal(resolveRoleCwd({ UPLINK_PROJECT_DIR: "  " }, "C:/app"), "C:/app");
   assert.equal(resolveRoleCwd({}, "C:/app"), "C:/app");
 });
+
+test("역할 이름: 정상 이모지(VS16·ZWJ)는 허용, 이모지 밖의 숨은 문자는 거부(v2.1.2 최종 리뷰 ②)", () => {
+  const cps = (...c: number[]) => String.fromCodePoint(...c);
+  for (const ok of [`${cps(0x2699, 0xfe0f)}설정`, `${cps(0x2764, 0xfe0f)}팀`, `${cps(0x1f6e0, 0xfe0f)}빌더`]) assert.equal(validateRoleName(ok).ok, true, ok);
+  for (const bad of [`a${cps(0x200b)}`, `a${cps(0xe0041)}`, `a${cps(0xad)}b`, "a=b", "a;b"]) assert.equal(validateRoleName(bad).ok, false, bad);
+});

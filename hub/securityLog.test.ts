@@ -71,3 +71,13 @@ test("plainGuard는 기록 없이 정리만 한다(본문이면 줄바꿈 유지
   assert.equal(plainGuard(`a${LF}b${cps(0x200b)}`, { ...DISK, keepLineBreaks: true }), `a${LF}b${B}u{200B}`);
   assert.equal(plainGuard(`a${LF}b`, DISK), `a${B}nb`);
 });
+
+test("미리보기 경계에 이모지가 걸려도 숨은 문자가 남지 않고, 디스크 중복 판정이 재시작 후에도 맞다(최종 리뷰 ③)", () => {
+  const dir = tempDir("uplink-seclog-");
+  const family = cps(0x1f468, 0x200d, 0x1f469, 0x200d, 0x1f467);
+  const s = `${cps(0x200b)}${"x".repeat(70)}${family}${family}${family}`;
+  for (let i = 0; i < 3; i++) new SecurityLog({ dir }).guard(s, DISK);
+  const r = new SecurityLog({ dir }).recent(100);
+  assert.equal(r.length, 1);
+  assert.equal(inspectText(r[0].preview).changed, false);
+});

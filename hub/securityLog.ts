@@ -2,7 +2,7 @@
 // 숨은 문자를 바꾼 경우에만 <dataDir>/security/findings.jsonl에 기록한다(최근 max건).
 import fs from "node:fs";
 import path from "node:path";
-import { inspectText, escapeControls } from "../shared/controlChars.js";
+import { clipText, inspectText, escapeControls } from "../shared/controlChars.js";
 import { SecurityFinding } from "../shared/protocol.js";
 import { writeFileAtomic } from "./fsutil.js";
 
@@ -77,7 +77,8 @@ export class SecurityLog {
       const base = {
         source: ctx.source, where: ctx.where, field: ctx.field,
         ...(ctx.account !== undefined ? { account: escapeControls(ctx.account) } : {}),
-        preview: [...r.text].slice(0, PREVIEW_MAX).join(""),
+        // 경계에 걸린 이모지는 통째로 뺀다 — 중간에서 자르면 날 ZWJ·태그가 남아 디스크 중복 판정이 깨진다.
+        preview: clipText(r.text, PREVIEW_MAX),
       };
       // 디스크 출처는 Hub를 시작할 때마다 같은 옛 데이터를 다시 읽는다 — 같은 기록은 한 번만.
       if (!(ctx.source === "disk" && this.items.some((f) => sameDiskKey(f, base)))) {

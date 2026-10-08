@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { escapeControls, inspectText, isUnsafeChar, kindOf, oneLine } from "./controlChars.js";
+import { clipText, escapeControls, inspectText, isUnsafeChar, kindOf, oneLine } from "./controlChars.js";
 
 const B = String.fromCharCode(92);
 const ch = (c: number) => String.fromCodePoint(c);
@@ -97,4 +97,28 @@ test("oneLine: 이모지를 깨지 않고, 최대 길이 경계에 걸린 이모
   assert.equal(oneLine(`a${FAMILY}b`, 10), `a${FAMILY}b`);
   assert.equal(oneLine(`ab${FAMILY}`, 3), "ab…");
   assert.equal(oneLine(`a${cps(0xe0041)}${HEART}`, 10), `a ${HEART}`);
+});
+
+// ── v2.1.2 최종 리뷰 수정 ──
+test("성능: 위험 문자가 없는 긴 본문(한글 65,536자)은 사전 검사로 바로 통과(Hub 시작·send가 막히지 않게)", () => {
+  const s = "가".repeat(65536);
+  inspectText(s); // 준비
+  const t0 = performance.now();
+  for (let i = 0; i < 5; i++) assert.equal(inspectText(s, { keepLineBreaks: true }).changed, false);
+  const per = (performance.now() - t0) / 5;
+  assert.ok(per < 10, `1회 ${per.toFixed(1)}ms`);
+  const t1 = performance.now();
+  oneLine(s, 200);
+  assert.ok(performance.now() - t1 < 10);
+});
+
+test("이모지 뒤 줄바꿈·제어 문자는 이모지 스머글링으로 세지 않는다(거짓 경보 방지)", () => {
+  assert.deepEqual(inspectText(`좋아요 ${THUMB_SKIN}${ch(10)}다음 줄`).counts, { control: 1 });
+  assert.deepEqual(inspectText(`${HEART}${ch(10)}${cps(0xe0041)}`, { keepLineBreaks: true }).counts, { tag: 1 });
+});
+
+test("clipText: 코드포인트 기준으로 자르되 경계에 걸린 이모지는 통째로 뺀다", () => {
+  assert.equal(clipText(`${"x".repeat(78)}${FAMILY}`, 80), "x".repeat(78));
+  assert.equal(clipText(`ab${HEART}c`, 10), `ab${HEART}c`);
+  assert.equal(clipText("가나다", 2), "가나");
 });

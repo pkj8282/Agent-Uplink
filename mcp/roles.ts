@@ -2,16 +2,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { isUnsafeChar } from "./text.js";
+import { inspectText } from "../shared/controlChars.js";
 
 export const ROLE_NAME_MAX = 40;
 
-/** '=', ';'(env 형식을 깸)와 표시를 위장할 수 있는 문자(제어·줄 구분·방향 제어·폭 0). */
+/**
+ * '=', ';'(env 형식을 깸)와 표시를 위장할 수 있는 숨은 문자. 감독 검사기(v2.1.2)와 같은 기준이라 정상 이모지(⚙️ 같은 VS16·ZWJ)는
+ * 허용한다 — 한 글자씩 판정하면 v2.1.1에서 쓰던 이모지 역할 이름을 잃는다.
+ */
 function hasForbidden(s: string): boolean {
-  for (const ch of s) {
-    if (ch === "=" || ch === ";" || isUnsafeChar(ch.codePointAt(0)!)) return true;
-  }
-  return false;
+  return s.includes("=") || s.includes(";") || inspectText(s).changed;
 }
 
 /** 실패는 언어 중립 code(문구는 호출자가 현재 언어로 만든다 — mcp/messages.ts의 같은 키). */
