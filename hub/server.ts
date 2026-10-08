@@ -814,6 +814,16 @@ export class Hub {
         return;
       }
 
+      case "admin_delete_dm": {
+        if (!adminAuth()) return;
+        if (!this.trashOps.deleteDm((req as { channelId?: unknown }).channelId, "admin")) {
+          reply(this.err("dm_not_found", "dm_not_found"));
+          return;
+        }
+        reply({ ok: true });
+        return;
+      }
+
       case "admin_delete_account": {
         if (!adminAuth()) return;
         if (!this.accounts.get(req.uuid)) {

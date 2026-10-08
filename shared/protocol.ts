@@ -55,7 +55,7 @@ export interface AccountStatus {
 
 export interface TrashItemInfo {
   id: string;
-  kind: "channel" | "server" | "account" | "orphan";
+  kind: "channel" | "server" | "account" | "orphan" | "dm";
   name: string;
   serverName?: string;
   deletedAt: number;
@@ -119,6 +119,7 @@ export type Request =
   | { op: "admin_delete_channel"; id: number; token: string; channelId: string }
   | { op: "admin_delete_server"; id: number; token: string; serverId: string }
   | { op: "admin_delete_account"; id: number; token: string; uuid: string }
+  | { op: "admin_delete_dm"; id: number; token: string; channelId: string }
   | { op: "admin_restore_trash"; id: number; token: string; trashId?: string; confirmRename?: boolean }
   | { op: "admin_empty_trash"; id: number; token: string };
 

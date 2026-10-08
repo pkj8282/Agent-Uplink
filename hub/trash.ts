@@ -8,7 +8,7 @@ import { TrashItemInfo } from "../shared/protocol.js";
 import { isSafeAccountId, isUuid } from "./ids.js";
 import { escapeControls } from "../shared/controlChars.js";
 
-export type TrashKind = "channel" | "server" | "account" | "orphan";
+export type TrashKind = "channel" | "server" | "account" | "orphan" | "dm";
 export type TrashState = "deleting" | "done" | "restoring";
 
 export interface TrashMeta {
@@ -25,15 +25,17 @@ export interface TrashMeta {
   account?: { uuid: string };
   accountRestored?: boolean;
   dms?: { channelId: string; peer: string; label: string }[];
+  /** kind=dm: 지운 DM 하나(v2.1.2, 관리 앱). */
+  dm?: { channelId: string; members: [string, string]; label: string };
   plan?: { serverName?: string; channelNames?: Record<string, string> };
   files: string[];
 }
 
 export type TrashItem = TrashItemInfo;
 
-const ID_RE = /^\d{13}-(channel|server|account|orphan)-[0-9a-f]{8}$/;
+const ID_RE = /^\d{13}-(channel|server|account|orphan|dm)-[0-9a-f]{8}$/;
 const UUID_LOG_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/;
-const KINDS = new Set(["channel", "server", "account", "orphan"]);
+const KINDS = new Set(["channel", "server", "account", "orphan", "dm"]);
 const STATES = new Set(["deleting", "done", "restoring"]);
 
 export function isTrashId(s: unknown): s is string {
@@ -71,6 +73,9 @@ function validShape(m: TrashMeta): boolean {
     case "account":
       return !!m.account && isSafeAccountId(m.account.uuid) && Array.isArray(m.dms)
         && m.dms.every((x) => x && isUuid(x.channelId) && isSafeAccountId(x.peer) && isStr(x.label));
+    case "dm":
+      return !!m.dm && isUuid(m.dm.channelId) && isStr(m.dm.label) && Array.isArray(m.dm.members)
+        && m.dm.members.length === 2 && m.dm.members.every(isSafeAccountId) && m.dm.members[0] !== m.dm.members[1];
     case "orphan": {
       const [sub, file, extra] = m.name.split("/");
       return (sub === "servers" || sub === "dm") && isStr(file) && UUID_LOG_RE.test(file) && extra === undefined;
@@ -84,6 +89,7 @@ function escapeMeta(m: TrashMeta): TrashMeta {
   if (m.serverName !== undefined) m.serverName = escapeControls(m.serverName);
   for (const c of m.channels ?? []) c.name = escapeControls(c.name);
   for (const d of m.dms ?? []) d.label = escapeControls(d.label);
+  if (m.dm) m.dm.label = escapeControls(m.dm.label);
   if (m.plan?.serverName !== undefined) m.plan.serverName = escapeControls(m.plan.serverName);
   if (m.plan?.channelNames) for (const k of Object.keys(m.plan.channelNames)) m.plan.channelNames[k] = escapeControls(m.plan.channelNames[k]);
   return m;

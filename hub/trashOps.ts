@@ -13,7 +13,7 @@ import { NameConflict, RestoreReport } from "../shared/protocol.js";
 import { hubMsg, type HubKey } from "./messages.js";
 import type { Lang } from "../shared/i18n.js";
 
-export type TrashErrorCode = "trash_missing" | "trash_not_restorable" | "trash_bad_id" | "channel_limit" | "trash_busy" | "name_conflict";
+export type TrashErrorCode = "trash_missing" | "trash_not_restorable" | "trash_bad_id" | "channel_limit" | "trash_busy" | "name_conflict" | "dm_member_missing" | "dm_exists";
 export type RestoreResult =
   | { ok: true; report: RestoreReport }
   | { ok: false; code: TrashErrorCode; key: HubKey; params?: object; conflicts?: NameConflict[] };
@@ -77,6 +77,26 @@ export class TrashOps {
     const meta = this.d.trash.create("server", {
       deletedBy: by, name: srv.name, serverId: srv.id, serverName: srv.name,
       channels: srv.channels.map((c) => ({ id: c.id, name: c.name })),
+    });
+    this.finishDelete(meta);
+    return true;
+  }
+
+  /** DM 하나를 휴지통으로(v2.1.2, 관리 앱). DM 색인에 없는 값(서버 채널 ID·lobby·형식 밖)은 false. */
+  deleteDm(channelId: unknown, by: By): boolean {
+    if (typeof channelId !== "string") return false;
+    const pending = this.pendingDelete((m) => m.kind === "dm" && m.dm?.channelId === channelId);
+    if (pending) {
+      this.finishDelete(pending);
+      return true;
+    }
+    const rec = this.d.dm.get(channelId);
+    if (!rec) return false;
+    const [a, b] = rec.members;
+    const nameOf = (u: string) => this.d.accounts.get(u)?.name ?? u.slice(0, 8);
+    const meta = this.d.trash.create("dm", {
+      deletedBy: by, name: `${nameOf(a)} ↔ ${nameOf(b)}`,
+      dm: { channelId: rec.channelId, members: [a, b], label: rec.label },
     });
     this.finishDelete(meta);
     return true;
@@ -186,6 +206,15 @@ export class TrashOps {
         accounts.remove(uuid);
         break;
       }
+      case "dm": {
+        const { channelId, members } = meta.dm!;
+        channels.unregister(channelId); // 먼저 라우팅을 끊어 이후 append가 로그를 다시 만들지 않게 한다
+        this.moveLogIn(meta, "dm", channelId);
+        dm.remove(channelId);
+        accounts.removeDm(members[0], members[1]);
+        accounts.removeDm(members[1], members[0]);
+        break;
+      }
       case "orphan": {
         const [sub, file] = meta.name.split("/");
         if ((sub === "servers" || sub === "dm") && file) {
@@ -241,6 +270,12 @@ export class TrashOps {
       for (const c of conflicts) renamed.push({ kind: c.kind, from: c.name, to: c.to });
       meta.plan = { serverName, channelNames };
     }
+    if (meta.kind === "dm") {
+      const { channelId, members } = meta.dm!;
+      if (!this.d.accounts.get(members[0]) || !this.d.accounts.get(members[1])) return fail("dm_member_missing", "dm_member_missing");
+      const other = this.d.dm.findByPair(members[0], members[1]);
+      if (other && other.channelId !== channelId) return fail("dm_exists", "dm_exists");
+    }
     meta.state = "restoring";
     this.d.trash.writeMeta(meta);
     const report = this.finishRestore(meta);
@@ -266,6 +301,24 @@ export class TrashOps {
         servers.addChannelWithId(srv.id, { id: ch.id, name });
         channels.register({ id: ch.id, kind: "server", label: `${srv.name}/${name}`, members: null });
       }
+      trash.remove(meta.id);
+      report.itemRemoved = true;
+      return report;
+    }
+    if (meta.kind === "dm") {
+      const { channelId, members, label } = meta.dm!;
+      // 크래시 재실행 중 멤버가 사라졌으면 붙이지 않는다(setDm이 유령 계정을 만들지 않게) — 항목은 done으로 남겨 다시 시도.
+      if (!accounts.get(members[0]) || !accounts.get(members[1])) {
+        meta.state = "done";
+        trash.writeMeta(meta);
+        return report;
+      }
+      const file = `${channelId}.jsonl`;
+      if (meta.files.includes(file)) trash.moveOut(meta.id, file, channels.pathOf("dm", channelId));
+      dm.restore({ channelId, members: [members[0], members[1]], label });
+      channels.register({ id: channelId, kind: "dm", label, members: [members[0], members[1]] });
+      accounts.setDm(members[0], members[1], channelId);
+      accounts.setDm(members[1], members[0], channelId);
       trash.remove(meta.id);
       report.itemRemoved = true;
       return report;
