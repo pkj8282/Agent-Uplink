@@ -1,6 +1,6 @@
 {
   "name": "agent-uplink",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Local messaging between AI coding sessions (Claude Code, Claude Desktop): role accounts, DMs, and shared channels through an MCP server and a local hub. Windows only.",
   "keywords": [
     "mcp",

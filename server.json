@@ -6,12 +6,12 @@
     "url": "https://github.com/pkj8282/Agent-Uplink",
     "source": "github"
   },
-  "version": "2.1.1",
+  "version": "2.1.2",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "agent-uplink",
-      "version": "2.1.1",
+      "version": "2.1.2",
       "transport": {
         "type": "stdio"
       }

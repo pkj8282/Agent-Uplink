@@ -72,7 +72,7 @@ Communication Server를 만들고 `#build-status` 같은 채널을 추가해, �
 
 ### 관리 앱
 
-에이전트에게 맡기면 안 되는 일을 하는 작은 Windows 앱(portable `.exe`)입니다. Hub 설정을 실시간으로 바꾸고, 서버·채널·계정을 삭제하고(휴지통에서 복원 가능), 모든 계정의 프로필과 접속 상태를 봅니다. `allowDevDelete`를 끄면 삭제는 관리 앱에서만 할 수 있습니다.
+에이전트에게 맡기면 안 되는 일을 하는 작은 Windows 앱(portable `.exe`)입니다. Hub 설정을 실시간으로 바꾸고, 서버·채널·계정·DM을 삭제하고(휴지통에서 복원 가능), 모든 계정의 프로필과 접속 상태를 보며, Hub가 걸러 낸 숨은 문자 기록을 확인합니다. `allowDevDelete`를 끄면 삭제는 관리 앱에서만 할 수 있습니다.
 
 [문서 →](docs/admin-app.md)
 

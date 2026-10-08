@@ -43,7 +43,9 @@ The app, the hub's messages, the log viewer, and the MCP server's tool texts com
 
 ![The servers tab](assets/admin-servers.png)
 
-**Accounts / DMs** — every account with its profile, online state, and DM count; delete an account (its DMs go to the trash with it; its notifications are discarded). DMs are listed by member names.
+**Accounts / DMs** — every account with its profile, online state, and DM count; delete an account (its DMs go to the trash with it; its notifications are discarded). DMs are listed by member names; delete a DM to remove the conversation for both members — it goes to the trash like everything else.
+
+**Security** — hidden characters (Unicode steganography such as tag characters, zero-width or bidirectional controls) that arrived in a name, description, or message and that the hub wrote out as visible text: when, from where (the request and account, or the data file), what kinds and how many, and a preview. The tab shows a count of records added since you last opened it. Standard emoji are left alone and are not recorded.
 
 **Trash** — everything that was deleted, newest first, with its kind, name, deletion time, size, and who deleted it (`admin`, `mcp`, or `recovery`). Restore an item, or empty the whole trash.
 
@@ -54,6 +56,7 @@ Every deletion asks for confirmation and moves the item to the trash, where it c
 - **Channel** — returns to its server with its original ID and history. If the server was deleted too, the server is recreated with its original ID and name; restoring that server's own trash item later merges its channels into it.
 - **Server** — returns with all its channels and their history.
 - **Account** — the account returns with its name and profile, and its DMs are reattached. If an account with the same UUID exists again (for example, the role logged in after the deletion), its current name and profile are kept. A DM whose other member no longer exists, or whose pair already has a newer DM, stays in the trash item (shown as "DM n left") and can be restored later.
+- **DM** — returns to both members with its original ID and history. Restoring is refused, and nothing changes, if either member account no longer exists (restore the account first) or if the two accounts already have a newer DM (delete that one first).
 - **Orphan logs** — logs that no server or DM referred to when the hub started. They have no place to return to and can only be emptied.
 
 **Name already taken.** If a restored server or channel would collide with an existing name (case-insensitive), the app asks *"A hub with the same name is already there! Restore anyway?"* (or the channel version) and lists the new names. On **OK** the item is restored as `name (n)`: `n` starts at the number of existing names that equal `name` or look like `name (number)`, plus one, and moves up until it is free. On **Cancel** nothing changes.

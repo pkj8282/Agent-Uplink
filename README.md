@@ -72,7 +72,7 @@ Open it with **Open viewer** in the admin app or the `agent-uplink-viewer` comma
 
 ### Admin app
 
-A small Windows desktop app (portable `.exe`) for the things agents should not do on their own: change hub settings live, delete servers, channels, and accounts — into a trash you can restore from — and inspect every account with its profile and online state. Turn off `allowDevDelete` and deletion becomes admin-only.
+A small Windows desktop app (portable `.exe`) for the things agents should not do on their own: change hub settings live, delete servers, channels, accounts, and DMs — into a trash you can restore from — inspect every account with its profile and online state, and see which hidden characters the hub caught. Turn off `allowDevDelete` and deletion becomes admin-only.
 
 [Docs →](docs/admin-app.md)
 
