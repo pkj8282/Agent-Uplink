@@ -830,3 +830,13 @@ test("언어를 바꿔도 config.json 외 데이터 파일은 바뀌지 않는�
   assert.deepEqual(snapshot(), before);
   a.close(); hub.stop();
 });
+
+test("이스케이프 뒤 같은 이름: 백슬래시+n을 직접 쓴 서버 이름은 줄바꿈 이름과 중복(server_name_taken)", async () => {
+  const { hub, port } = await startTestHub();
+  const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  const LF = String.fromCharCode(10), B = String.fromCharCode(92);
+  assert.equal((await a.req("create_server", { name: `a${LF}b` })).ok, true);
+  const r = await a.req("create_server", { name: `a${B}nb` });
+  assert.equal(r.ok, false); assert.equal(r.code, "server_name_taken");
+  a.close(); hub.stop();
+});

@@ -38,3 +38,10 @@ test("validateName: 앞뒤 공백 제거, 1~64 코드포인트", () => {
     if (!r.ok) assert.deepEqual(r, { ok: false, code: "name_invalid", params: { kind: "server", max: 64 } });
   }
 });
+
+test("validateName: 위장 문자는 이스케이프, 길이는 원래 문자열 기준(v2.1.2)", () => {
+  const LF = String.fromCharCode(10), B = String.fromCharCode(92);
+  assert.deepEqual(validateName(`a${LF}b`, "server"), { ok: true, name: `a${B}nb` });
+  assert.deepEqual(validateName(`x${LF.repeat(62)}y`, "server"), { ok: true, name: `x${`${B}n`.repeat(62)}y` }); // 원래 64
+  assert.equal(validateName(`x${LF.repeat(63)}y`, "server").ok, false); // 원래 65
+});

@@ -1,5 +1,6 @@
 // 서버·채널 이름 비교와 충돌 회피(복원 시 '이름 (n)'), 이름 길이 검사.
 import { NAME_MAX } from "../shared/protocol.js";
+import { escapeControls } from "../shared/controlChars.js";
 
 export function nameKey(s: string): string {
   return s.trim().toLowerCase();
@@ -34,7 +35,10 @@ export function uniqueName(base: string, taken: string[]): string {
 
 export type NameKind = "account" | "server" | "channel";
 
-/** 서버·채널·계정 이름: 앞뒤 공백을 지운 뒤 1~NAME_MAX 코드포인트. 통과하면 trim된 이름. 실패는 언어 중립 값(문구는 Hub가 만든다). */
+/**
+ * 서버·채널·계정 이름: 앞뒤 공백을 지운 뒤 1~NAME_MAX 코드포인트(원래 문자열 기준). 통과하면 위장 문자를
+ * 이스케이프한 이름(v2.1.2 입력 경계). 실패는 언어 중립 값(문구는 Hub가 만든다).
+ */
 export function validateName(
   raw: unknown,
   kind: NameKind,
@@ -42,5 +46,5 @@ export function validateName(
   const name = typeof raw === "string" ? raw.trim() : "";
   const len = [...name].length;
   if (len === 0 || len > NAME_MAX) return { ok: false, code: "name_invalid", params: { kind, max: NAME_MAX } };
-  return { ok: true, name };
+  return { ok: true, name: escapeControls(name) };
 }

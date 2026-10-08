@@ -20,6 +20,7 @@ import { rebuildDmIndex } from "./recovery.js";
 import { hubMsg, type HubKey } from "./messages.js";
 import { effectiveLang, type Lang } from "../shared/i18n.js";
 import { currentLang } from "../shared/langConfig.js";
+import { escapeControls } from "../shared/controlChars.js";
 import {
   MAGIC,
   PROTOCOL_VERSION,
@@ -835,7 +836,8 @@ export class Hub {
           reply(this.err("description_invalid", "description_invalid"));
           return;
         }
-        reply({ ok: true, description: this.accounts.setDescription(uuid, d) });
+        // 길이는 원래 문자열 기준으로 위에서 검사했다. 저장은 위장 문자를 이스케이프한 값(v2.1.2 입력 경계).
+        reply({ ok: true, description: this.accounts.setDescription(uuid, escapeControls(d)) });
         return;
       }
 
