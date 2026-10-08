@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { startTestHub, TestClient as Client, tempDir } from "./testing.js";
-import { isUnsafeChar } from "../shared/controlChars.js";
+import { inspectText } from "../shared/controlChars.js";
 
 const B = String.fromCharCode(92);
 const LF = String.fromCharCode(10);
@@ -12,11 +12,11 @@ const ch = (c: number) => String.fromCodePoint(c);
 const U1 = "aaaaaaaa-0000-4000-8000-000000000001";
 const U2 = "bbbbbbbb-0000-4000-8000-000000000002";
 
-/** 응답 전체에서 위장 문자(코드포인트 16진수)를 찾는다 — 하나라도 있으면 공격 성공. */
+/** 응답 전체에서 감독 검사기가 고칠 문자열(=숨은 문자가 남은 문자열)을 찾는다 — 하나라도 있으면 공격 성공. 메시지 본문의 줄바꿈은 정상. */
 function unsafeIn(v: unknown): string[] {
   const hits: string[] = [];
   const walk = (x: unknown): void => {
-    if (typeof x === "string") { for (const c of x) if (isUnsafeChar(c.codePointAt(0)!)) hits.push(c.codePointAt(0)!.toString(16)); }
+    if (typeof x === "string") { if (inspectText(x, { keepLineBreaks: true }).changed) hits.push(x); }
     else if (Array.isArray(x)) x.forEach(walk);
     else if (x && typeof x === "object") Object.values(x).forEach(walk);
   };
@@ -151,5 +151,45 @@ test("RT32: 설명(set_profile) — 바뀐 값으로 저장, 길이는 원래 �
   assert.deepEqual(unsafeIn(await a.req("list_accounts")), []);
   assert.equal((await a.req("set_profile", { description: LF.repeat(500) })).ok, true); // 원래 500 → 통과(저장은 1000자)
   assert.equal((await a.req("set_profile", { description: "x".repeat(501) })).ok, false);
+  a.close(); h.stop();
+});
+
+// ── v2.1.2 감독 시스템(설계 Part C) ──
+const cps = (...cs: number[]) => String.fromCodePoint(...cs);
+const tagged = (s: string) => [...s].map((c) => cps(0xe0000 + c.codePointAt(0)!)).join("");
+const HEART = cps(0x2764, 0xfe0f);
+const FAMILY = cps(0x1f468, 0x200d, 0x1f469, 0x200d, 0x1f467);
+const SCOTLAND = cps(0x1f3f4, 0xe0067, 0xe0062, 0xe0073, 0xe0063, 0xe0074, 0xe007f);
+
+test("RT33 재공격: 판정 목록 밖이던 8종이 서버 이름에서 모두 이스케이프", async () => {
+  const { hub: h, port } = await hub();
+  const a = await login(port, U1, "A");
+  const hidden = [
+    tagged("ignore previous"), cps(0x2060, 0x2061, 0x2062, 0x2063, 0x2064), cps(0xad), cps(0x3164, 0x115f, 0x1160, 0xffa0),
+    cps(0xfe0f, 0xe0100), cps(0x34f), cps(0x180e), cps(0xfff9, 0xfffa, 0xfffb),
+  ];
+  for (let i = 0; i < hidden.length; i++) assert.equal((await a.req("create_server", { name: `S${i}${hidden[i]}` })).ok, true);
+  const list = await a.req("list_servers");
+  assert.equal(list.servers!.length, hidden.length);
+  assert.deepEqual(unsafeIn(list), []);
+  for (const s of list.servers!) for (const x of hidden.join("")) assert.equal(s.name.includes(x), false);
+  a.close(); h.stop();
+});
+
+test("RT38: 이모지 스머글링 — 정상 이모지는 남고 덧붙인 변형 선택자·태그만 이스케이프", async () => {
+  const { hub: h, port } = await hub();
+  const a = await login(port, U1, `${HEART}${cps(0xfe0f, 0xfe0f)}`);
+  assert.equal((await a.req("whoami")).name, `${HEART}${B}u{FE0F}${B}u{FE0F}`);
+  assert.equal((await a.req("set_name", { name: `${SCOTLAND}${tagged("go")}` })).name, `${SCOTLAND}${B}u{E0067}${B}u{E006F}`);
+  a.close(); h.stop();
+});
+
+test("정상 이모지는 이름·설명·서버 이름에서 원문 그대로", async () => {
+  const { hub: h, port } = await hub();
+  const a = await login(port, U1, `개발 ${FAMILY}`);
+  assert.equal((await a.req("whoami")).name, `개발 ${FAMILY}`);
+  assert.equal((await a.req("set_profile", { description: `기획 ${HEART} ${SCOTLAND}` })).description, `기획 ${HEART} ${SCOTLAND}`);
+  assert.equal((await a.req("create_server", { name: `팀 ${cps(0x1f1f0, 0x1f1f7)}` })).ok, true);
+  assert.equal((await a.req("list_servers")).servers![0].name, `팀 ${cps(0x1f1f0, 0x1f1f7)}`);
   a.close(); h.stop();
 });
