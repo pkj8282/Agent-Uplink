@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { TrashStore, isTrashId, isTrashFileName } from "./trash.js";
+import { TrashStore, isTrashId, isTrashFileName, parseAccountRecord } from "./trash.js";
 import { backupCorrupt } from "./fsutil.js";
 import { tempDir } from "./testing.js";
 
@@ -104,4 +104,10 @@ test("backupCorrupt는 손상 파일을 .corrupt-<ms>로 옮겨 보존한다", (
   assert.equal(b, `${f}.corrupt-123`);
   assert.equal(fs.existsSync(f), false);
   assert.equal(fs.readFileSync(b!, "utf8"), "{깨짐");
+});
+
+test("parseAccountRecord: 이름·설명의 위장 문자는 이스케이프(v2.1.2 휴지통 입구)", () => {
+  const LF = String.fromCharCode(10), B = String.fromCharCode(92);
+  const r = parseAccountRecord(JSON.stringify({ uuid: "u1", name: `A${LF}x`, createdAt: 1, description: `d${String.fromCodePoint(0x202e)}` }));
+  assert.deepEqual(r, { uuid: "u1", name: `A${B}nx`, createdAt: 1, description: `d${B}u{202E}` });
 });

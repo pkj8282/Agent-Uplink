@@ -6,6 +6,7 @@ import { randomBytes } from "node:crypto";
 import { writeFileAtomic } from "./fsutil.js";
 import { TrashItemInfo } from "../shared/protocol.js";
 import { isSafeAccountId, isUuid } from "./ids.js";
+import { escapeControls } from "../shared/controlChars.js";
 
 export type TrashKind = "channel" | "server" | "account" | "orphan";
 export type TrashState = "deleting" | "done" | "restoring";
@@ -77,6 +78,17 @@ function validShape(m: TrashMeta): boolean {
   }
 }
 
+/** 휴지통 입구(v2.1.2): 메타의 이름 필드를 이스케이프한다. orphan의 name은 내부 경로(servers/<id>.jsonl)라 그대로 둔다. */
+function escapeMeta(m: TrashMeta): TrashMeta {
+  if (m.kind !== "orphan") m.name = escapeControls(m.name);
+  if (m.serverName !== undefined) m.serverName = escapeControls(m.serverName);
+  for (const c of m.channels ?? []) c.name = escapeControls(c.name);
+  for (const d of m.dms ?? []) d.label = escapeControls(d.label);
+  if (m.plan?.serverName !== undefined) m.plan.serverName = escapeControls(m.plan.serverName);
+  if (m.plan?.channelNames) for (const k of Object.keys(m.plan.channelNames)) m.plan.channelNames[k] = escapeControls(m.plan.channelNames[k]);
+  return m;
+}
+
 /** account.json이 복원에 쓸 수 있는 모양인가. */
 export function parseAccountRecord(raw: string | null): { uuid: string; name: string; createdAt: number; description?: string } | null {
   if (raw === null) return null;
@@ -84,7 +96,11 @@ export function parseAccountRecord(raw: string | null): { uuid: string; name: st
     const r = JSON.parse(raw) as { uuid?: unknown; name?: unknown; createdAt?: unknown; description?: unknown };
     if (!isSafeAccountId(r.uuid) || !isStr(r.name) || typeof r.createdAt !== "number") return null;
     if (r.description !== undefined && !isStr(r.description)) return null;
-    return { uuid: r.uuid, name: r.name, createdAt: r.createdAt, ...(r.description ? { description: r.description } : {}) };
+    // 휴지통 입구(v2.1.2): 복원으로 계정에 들어갈 값이라 이스케이프한다.
+    return {
+      uuid: r.uuid, name: escapeControls(r.name), createdAt: r.createdAt,
+      ...(r.description ? { description: escapeControls(r.description) } : {}),
+    };
   } catch {
     return null;
   }
@@ -154,7 +170,7 @@ export class TrashStore {
       if (m.v !== 1 || m.id !== id || !KINDS.has(m.kind) || !STATES.has(m.state)) return null;
       if (!Array.isArray(m.files) || !m.files.every(isTrashFileName)) return null;
       if (typeof m.name !== "string" || typeof m.deletedAt !== "number") return null;
-      return validShape(m) ? m : null;
+      return validShape(m) ? escapeMeta(m) : null;
     } catch {
       return null;
     }
