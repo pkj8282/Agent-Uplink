@@ -413,3 +413,12 @@ test("구버전 Hub(admin_delete_dm 모름): deleteDm은 실패로 끝나고 예
   assert.equal(r.ok, false);
   f.close();
 });
+
+test("snapshot: 숨은 문자가 든 set_name 뒤 보안 기록(findings)이 온다", async () => {
+  const { hub, port, client } = await startHub();
+  const a = new Raw(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+  await a.req("set_name", { name: `B${String.fromCodePoint(0x200b)}` });
+  const snap = await client.snapshot();
+  assert.equal(snap.findings!.some((f) => f.where === "set_name" && f.account === "u1" && f.counts.zero_width === 1), true);
+  a.close(); hub.stop();
+});

@@ -115,6 +115,7 @@ export class AdminClient {
       accounts: r.snapshotAccounts ?? [],
       dms: r.snapshotDms ?? [],
       trash: r.trash, // 없으면 undefined(구버전 Hub) — 빈 목록과 구분한다
+      findings: r.securityFindings, // 〃(v2.1.2 이전 Hub)
     };
   }
 

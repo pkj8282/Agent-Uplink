@@ -1,5 +1,5 @@
 // 렌더러의 순수 로직(DOM 없음 → Node에서 테스트).
-import type { ConfigPatch, NameConflict, RestoreReport, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
+import type { ConfigPatch, NameConflict, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
 import { oneLine } from "../text.js";
 import type { AdminKey } from "../messages.js";
 import { tr } from "./lang.js";
@@ -174,6 +174,34 @@ export class LatestOnly {
   private n = 0;
   begin(): number { return ++this.n; }
   isLatest(t: number): boolean { return t === this.n; }
+}
+
+/** 마지막으로 본 시각 이후의 보안 기록 수(탭 알림). */
+export function unseenCount(findings: SecurityFinding[] | undefined, lastSeen: number): number {
+  return (findings ?? []).filter((f) => f.ts > lastSeen).length;
+}
+
+const FINDING_KEY: Record<string, AdminKey> = {
+  control: "fk_control", separator: "fk_separator", bidi: "fk_bidi", zero_width: "fk_zero_width", tag: "fk_tag",
+  variation_selector: "fk_variation_selector", filler: "fk_filler", format: "fk_format", ignorable: "fk_ignorable",
+  surrogate: "fk_surrogate", emoji_smuggling: "fk_emoji_smuggling",
+};
+
+/** 종류별 개수: "태그 문자(숨은 ASCII) 28 · 폭 0 문자 1". 모르는 종류(새 Hub)는 기타. */
+export function findingCounts(counts: Record<string, number>): string {
+  return Object.entries(counts)
+    .map(([k, n]) => `${tr(Object.hasOwn(FINDING_KEY, k) ? FINDING_KEY[k] : "fk_other")} ${n}`)
+    .join(" · ");
+}
+
+/** 출처: 요청이면 op·항목·계정 이름, 디스크면 파일 종류·항목. 이름은 위장 문자를 정리한다. */
+export function findingSource(f: SecurityFinding, accounts: SnapshotAccount[]): string {
+  const parts = [tr(f.source === "request" ? "src_request" : "src_disk"), displayName(f.where, 40), displayName(f.field, 40)];
+  if (f.source === "request" && f.account !== undefined) {
+    const name = accounts.find((a) => a.uuid === f.account)?.name;
+    parts.push(name !== undefined ? displayName(name) : tr("unknown_member", { id: displayName(f.account, 8) }));
+  }
+  return parts.join(" · ");
 }
 
 /** 그 계정이 멤버인 DM 수. */

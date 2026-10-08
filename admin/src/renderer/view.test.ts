@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle } from "./view.js";
+import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount } from "./view.js";
 import { setLang } from "./lang.js";
 import { hasHangul } from "../../../hub/testing.js";
 
@@ -215,6 +215,25 @@ test("휴지통 DM 라벨과 DM 오류 문구는 code로 정한다(ko/en)", () =
   try {
     assert.equal(hasHangul(deleteConfirmMessage({ kind: "dm", names: "A ↔ B" })), false);
     for (const code of ["dm_exists", "dm_member_missing", "dm_not_found"]) assert.equal(hasHangul(opErrorMessage(code, "x")), false);
+  } finally {
+    setLang("ko");
+  }
+});
+
+test("보안 기록: 본 뒤 새 기록 수, 종류 이름과 개수, 출처(요청은 계정 이름, 디스크는 파일 종류)", () => {
+  const f = (ts: number, extra: object = {}) => ({ ts, source: "request" as const, where: "send", field: "text", account: "u1", counts: { tag: 28, zero_width: 1 }, preview: "x", ...extra });
+  assert.equal(unseenCount([f(1), f(5), f(9)], 5), 1);
+  assert.equal(unseenCount(undefined, 0), 0);
+  assert.equal(findingCounts({ tag: 28, zero_width: 1 }), "태그 문자(숨은 ASCII) 28 · 폭 0 문자 1");
+  assert.equal(findingCounts({ weird: 2 }), "기타 2");
+  assert.equal(findingSource(f(1), [{ uuid: "u1", name: "기획" }]), "요청 · send · text · 기획");
+  assert.equal(findingSource(f(1, { source: "disk", where: "log", account: undefined }), []), "디스크 파일 · log · text");
+  const LF = String.fromCharCode(10);
+  assert.equal(findingSource(f(1), [{ uuid: "u1", name: `악${LF}성` }]).includes(LF), false);
+  setLang("en");
+  try {
+    assert.equal(hasHangul(findingCounts({ tag: 1, emoji_smuggling: 2, weird: 1 })), false);
+    assert.equal(hasHangul(findingSource(f(1), [])), false);
   } finally {
     setLang("ko");
   }

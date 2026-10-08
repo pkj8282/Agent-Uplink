@@ -39,6 +39,17 @@ export interface RestoreReport {
   itemRemoved: boolean;
 }
 
+/** 유니코드 스테가노그래피 감독 기록(Hub v2.1.2+). preview는 Hub가 이스케이프한 앞 80자. */
+export interface SecurityFinding {
+  ts: number;
+  source: "request" | "disk";
+  where: string;
+  field: string;
+  account?: string;
+  counts: Record<string, number>;
+  preview: string;
+}
+
 export interface Snapshot {
   config: AdminConfig;
   servers: SnapshotServer[];
@@ -46,6 +57,8 @@ export interface Snapshot {
   dms: SnapshotDm[];
   /** undefined = 휴지통을 지원하지 않는 구버전 Hub. */
   trash?: TrashItem[];
+  /** undefined = 보안 기록을 지원하지 않는 구버전 Hub. */
+  findings?: SecurityFinding[];
 }
 
 /** IPC 결과 봉투. hubDown은 Hub 미실행(접속 거부)일 때만 true. code는 Hub 오류 코드(관리 앱이 문구로 변환). */

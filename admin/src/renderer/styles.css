@@ -21,6 +21,7 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .tabs { display: flex; gap: 4px; padding: 12px 20px 0; border-bottom: 1px solid var(--line); }
 .tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); padding: 8px 12px; }
 .tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.tabs .badge { margin-left: 6px; padding: 0 6px; border-radius: 8px; background: var(--warn-bg); color: var(--warn-text); font-size: 11px; }
 main { padding: 16px 20px; }
 body:not([data-state="ready"]) main { opacity: .45; } /* 조작 차단은 main.inert가 맡는다 */
 .status { margin-left: auto; margin-right: 12px; color: var(--muted); font-size: 13px; }

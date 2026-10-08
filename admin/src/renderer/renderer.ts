@@ -1,8 +1,8 @@
-import type { AdminApi, AdminConfig, IpcResult, Snapshot, TrashItem } from "../types.js";
+import type { AdminApi, AdminConfig, IpcResult, SecurityFinding, Snapshot, TrashItem } from "../types.js";
 import {
   ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf,
-  emptyTrashConfirmMessage, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage,
-  restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle,
+  emptyTrashConfirmMessage, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage,
+  restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount,
 } from "./view.js";
 import type { FormMessage } from "./view.js";
 import { getLang, setLang, tr } from "./lang.js";
@@ -85,6 +85,7 @@ async function refresh(): Promise<void> {
   renderServers(r.data);
   renderAccounts(r.data);
   renderTrash(r.data);
+  renderSecurity(r.data);
   restoreFocus();
 }
 
@@ -230,12 +231,59 @@ function renderAccounts(s: Snapshot): void {
   }
 }
 
+// --- 보안 기록(v2.1.2) ---
+
+let securityFindings: SecurityFinding[] | undefined;
+const SEEN_KEY = "agent-uplink.securitySeen";
+
+/** 마지막으로 보안 탭을 본 시각(이 관리 앱의 저장소). 읽을 수 없으면 0 — 모두 새 기록으로 본다. */
+function lastSeen(): number {
+  try { return Number(localStorage.getItem(SEEN_KEY)) || 0; } catch { return 0; }
+}
+
+function updateBadge(): void {
+  const n = unseenCount(securityFindings, lastSeen());
+  const b = byId("security-badge");
+  b.textContent = String(n);
+  b.hidden = n === 0;
+}
+
+function markSecuritySeen(): void {
+  const latest = Math.max(0, ...(securityFindings ?? []).map((f) => f.ts));
+  try { localStorage.setItem(SEEN_KEY, String(latest)); } catch { /* 저장 못 해도 표시만 영향 */ }
+  updateBadge();
+}
+
+function renderSecurity(s: Snapshot): void {
+  securityFindings = s.findings;
+  const list = byId("security-list");
+  list.replaceChildren();
+  if (!s.findings) list.append(el("li", tr("security_unsupported"), "empty"));
+  else if (s.findings.length === 0) list.append(el("li", tr("security_empty"), "empty"));
+  else {
+    for (const f of [...s.findings].reverse()) { // 최근 기록이 위
+      const li = el("li", undefined, "row");
+      li.dataset.kind = "finding";
+      li.append(
+        el("span", new Date(f.ts).toLocaleString(localeOf(getLang())), "meta"),
+        el("span", findingSource(f, s.accounts), "name"),
+        el("span", findingCounts(f.counts), "flag"),
+        el("span", displayName(f.preview, 80), "desc"),
+      );
+      list.append(li);
+    }
+  }
+  if (byId("tab-security").hidden) updateBadge();
+  else markSecuritySeen();
+}
+
 function selectTab(name: string): void {
   for (const b of document.querySelectorAll<HTMLButtonElement>("[data-tab]")) {
     b.setAttribute("aria-selected", String(b.dataset.tab === name));
   }
   for (const p of document.querySelectorAll<HTMLElement>(".panel")) p.hidden = p.id !== `tab-${name}`;
   byId("lang-bar").hidden = name !== "settings";
+  if (name === "security") markSecuritySeen();
 }
 
 for (const b of document.querySelectorAll<HTMLButtonElement>("[data-tab]")) {

@@ -28,6 +28,7 @@
     <button type="button" role="tab" data-tab="servers" aria-selected="false" data-i18n="tab_servers"></button>
     <button type="button" role="tab" data-tab="accounts" aria-selected="false" data-i18n="tab_accounts"></button>
     <button type="button" role="tab" data-tab="trash" aria-selected="false" data-i18n="tab_trash"></button>
+    <button type="button" role="tab" data-tab="security" aria-selected="false"><span data-i18n="tab_security"></span><span id="security-badge" class="badge" hidden></span></button>
   </nav>
   <!-- Language stays usable with the hub down, so it lives outside the inert main (shown on the Settings tab only). -->
   <div id="lang-bar" class="form langbar">
@@ -56,6 +57,10 @@
     <section id="tab-trash" class="panel" hidden>
       <div class="trash-head"><span id="trash-summary" class="meta"></span><button id="empty-trash" type="button" class="danger" data-i18n="btn_empty_trash"></button></div>
       <ul id="trash-list" class="list"></ul>
+    </section>
+    <section id="tab-security" class="panel" hidden>
+      <p class="hint" data-i18n="security_intro"></p>
+      <ul id="security-list" class="list"></ul>
     </section>
   </main>
 </body>
