@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { toolTexts } from "./tools.js";
 import { MAX_TEXT_LENGTH } from "../shared/protocol.js";
+import { ROLE_NAME_MAX } from "./roles.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SKILL = path.join(ROOT, "skills", "agent-uplink");
@@ -184,4 +185,21 @@ test("Review Focus 4·5: 큰 인박스 대처, node 일괄 종료 안내 없음"
   assert.match(setup, /`read`/);
   assert.match(setup, /hub\.json/);
   assert.doesNotMatch(setup, /taskkill|pkill|killall/i);
+});
+
+test("역할 규칙은 코드 값과 같다", () => {
+  const roles = read("references/roles.md");
+  assert.ok(roles.includes(`1–${ROLE_NAME_MAX} characters`), "역할 이름 길이");
+  assert.ok(roles.includes("`=`") && roles.includes("`;`"), "금지 문자");
+  assert.ok(roles.includes(`up to ${num("mcp/index.ts", /description: z\.string\(\)\.max\((\d+)\)/)} characters`), "프로필 최대");
+  assert.ok(roles.includes('UPLINK_ACCOUNTS="role=<uuid>;role=<uuid>"'));
+  assert.ok(src("docs/configuration.md").includes("role=<uuid>;role=<uuid>"), "env 형식의 근거 문서");
+});
+
+test("Review Focus 3: 잡힌 역할을 빼앗지 않는다", () => {
+  assert.match(read("references/roles.md"), /do not try to take it over/i);
+});
+
+test("추천 역할 세트 자리는 사용자 작성 표시로 남아 있다", () => {
+  assert.match(read("references/roles.md"), /<!-- 사용자 작성: E-추천 -->/);
 });
