@@ -204,13 +204,23 @@ test("Review Focus 3: 잡힌 역할을 빼앗지 않는다", () => {
   assert.match(read("references/roles.md"), /do not try to take it over/i);
 });
 
-test("추천 역할 세트 자리는 사용자 작성 표시로 남아 있다", () => {
-  assert.match(read("references/roles.md"), /<!-- 사용자 작성: E-추천 -->/);
+test("사용자 작성 표시가 남지 않는다", () => {
+  const marks = enFiles().flatMap((f) => read(f).match(/<!-- 사용자 작성: [^>]* -->/g) ?? []);
+  assert.deepEqual(marks, []);
 });
 
-test("사용자 작성 표시는 E-추천 하나만 남는다", () => {
-  const marks = enFiles().flatMap((f) => read(f).match(/<!-- 사용자 작성: [^>]* -->/g) ?? []);
-  assert.deepEqual(marks, ["<!-- 사용자 작성: E-추천 -->"]);
+test("E: 추천 역할 세트 — 역할 4개·점수 기준·시작 안내", () => {
+  const e = section(read("references/roles.md"), "Recommended role sets");
+  for (const role of ["planner", "builder", "tester", "supervisor"]) assert.ok(e.includes(`- \`${role}\` — `), role);
+  assert.ok(e.includes("**Loss (0 or 5).**"), "손실 0/5");
+  assert.ok(e.includes("fewer than 3 → 5; fewer than 5 → 4; fewer than 8 → 3; fewer than 10 → 1; 10 or more → 0"), "단계 5/4/3/1/0");
+  assert.match(e, /very simple \([^)]*\) → 5; simple \([^)]*\) → 3; balanced \([^)]*\) → 2; complex \([^)]*\) → 0; very complex \([^)]*\) → 0/, "난이도 5/3/2/0/0");
+  for (const band of ["**7 to 10 — light:**", "**4 to 6 — uncertain:**", "**0 to 3 — heavy:**"]) assert.ok(e.includes(band), band);
+  assert.ok(e.includes("**Total = loss + size.**"), "합계");
+  assert.ok(e.includes('`use_account("planner", description)`'), "제안한 세션은 planner");
+  for (const role of ["builder", "tester", "supervisor"]) {
+    assert.ok(e.includes(`\`New session in <folder>: use_account("${role}") — you are the ${role}; `), `${role} 시작 안내`);
+  }
 });
 
 test("B: 언제 쓰고 언제 안 쓰나", () => {
