@@ -143,3 +143,45 @@ test("Review Focus 1·2: 미설치 안내와 pull 전용 문장", () => {
   assert.match(md, /\(references\/setup\.md\)/);
   assert.match(section(md, "Core flow"), /Nothing reaches you until you call `check` or `wait`/);
 });
+
+const INSTALL = "claude mcp add --scope user agent-uplink -- npx -y agent-uplink";
+const INSTALL_CMD = "claude mcp add --scope user agent-uplink -- cmd /c npx -y agent-uplink";
+
+test("설치 명령은 README·시작 문서와 같다", () => {
+  const setup = read("references/setup.md");
+  assert.ok(src("README.md").includes(INSTALL));
+  assert.ok(setup.includes(INSTALL));
+  assert.ok(src("docs/getting-started.md").includes(INSTALL_CMD));
+  assert.ok(setup.includes(INSTALL_CMD));
+});
+
+test("버전 고정 예시는 현재 패키지 버전이다", () => {
+  const version = JSON.parse(src("package.json")).version as string;
+  const pins = [...read("references/setup.md").matchAll(/agent-uplink@(\d+\.\d+\.\d+)/g)];
+  assert.ok(pins.length > 0, "버전 고정 예시가 있다");
+  for (const m of pins) assert.equal(m[1], version);
+});
+
+test("스킬의 UPLINK_ 환경 변수는 모두 설정 문서에 있다", () => {
+  const documented = new Set(src("docs/configuration.md").match(/UPLINK_[A-Z_]+/g));
+  for (const f of enFiles()) {
+    for (const v of read(f).match(/UPLINK_[A-Z_]+/g) ?? []) assert.ok(documented.has(v), `${f}: ${v}`);
+  }
+});
+
+test("문제 해결 표가 인용하는 오류 문구는 실제 메시지에 있다", () => {
+  const setup = read("references/setup.md");
+  const messages = src("mcp/messages.ts") + src("hub/messages.ts");
+  for (const p of ["already using this account", "Redeploy the same version", "old version", "was released", "No such account", "allowDevDelete=false"]) {
+    assert.ok(setup.includes(p), `setup.md에 없음: ${p}`);
+    assert.ok(messages.includes(p), `메시지 소스에 없음: ${p}`);
+  }
+});
+
+test("Review Focus 4·5: 큰 인박스 대처, node 일괄 종료 안내 없음", () => {
+  const setup = read("references/setup.md");
+  assert.match(setup, /inboxMaxBatch/);
+  assert.match(setup, /`read`/);
+  assert.match(setup, /hub\.json/);
+  assert.doesNotMatch(setup, /taskkill|pkill|killall/i);
+});
