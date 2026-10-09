@@ -10,6 +10,8 @@ For a project where separate sessions plan, build, and test.
 
 ## The loop
 
+If the project uses commits, report them as below; otherwise name the changed files instead of a hash.
+
 1. **Builder:** after each commit, one line — `Task <N> commit <hash> — <what changed>, <tests: passed/total>`. Flag any deviation from the plan as "ruling — please judge".
 2. **Tester / reviewer:** check the commit against the plan and spec. Run the tests on a snapshot of that commit, never in the builder's working tree. Reply with a verdict and findings:
    - verdict: approved / approved after fixes / blocked;

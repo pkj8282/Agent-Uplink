@@ -242,6 +242,10 @@ test("F-1: 인수인계 채널·read 먼저·최신 묶음·부수 효과는 사
   assert.match(h, /then `read` that channel/);
   assert.match(h, /the newest \(by date\) is current/);
   assert.match(h, /still needs the user's confirmation/);
+  // 서버는 모든 계정에 보인다 — 다른 프로젝트의 인수인계를 자기 것으로 읽지 않게.
+  assert.ok(h.includes("`[Handoff 1/3] (from <role> to <role>, <date>)`"), "첫 줄에 받는 역할");
+  assert.match(h, /in the project's server/, "handoff 채널은 그 프로젝트 서버 안");
+  assert.match(h, /addressed to your role/, "받는 쪽은 자기 역할 앞 묶음만");
 });
 
 test("F-2·F-3: 판정 등급·스냅샷·별도 커밋·사용자 결정·받음 회신", () => {
@@ -251,6 +255,8 @@ test("F-2·F-3: 판정 등급·스냅샷·별도 커밋·사용자 결정·받�
   assert.match(t, /separate commits/);
   assert.match(t, /go to the user/);
   assert.match(t, /received — starting/);
+  // 커밋이 없는 프로젝트에서 커밋 보고 형식을 사실처럼 끌어오지 않게(시험 ② 관찰 2).
+  assert.match(t, /If the project uses commits/, "커밋 전제는 조건부");
 });
 
 test("K: 뷰어 명령과 관리 앱 탭은 문서와 같다", () => {
