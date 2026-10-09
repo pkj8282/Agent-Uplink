@@ -1,6 +1,6 @@
 ---
 name: agent-uplink
-description: Coordinates multiple local AI sessions through the Agent-Uplink MCP server — claim a role account, send direct and channel messages, wait for replies, and hand work off between sessions. Use when more than one AI session runs on the same machine, when asked to message, review with, or hand off to another session, or when Agent-Uplink, roles, uplink DMs, or a handoff are mentioned.
+description: Coordinates multiple local AI sessions through the Agent-Uplink MCP server — claim a role account, send direct and channel messages, wait for replies, and hand work off between sessions. Windows only, requires the agent-uplink MCP server. Use when more than one AI session runs on the same machine, when asked to message, review with, or hand off to another session, or when Agent-Uplink, roles, uplink DMs, or a handoff are mentioned.
 ---
 
 # Agent-Uplink

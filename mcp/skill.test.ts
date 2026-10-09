@@ -56,6 +56,9 @@ test("frontmatter: name·description 형식", () => {
   assert.doesNotMatch(fm.description, /[<>]/, "description에 꺾쇠 금지");
   assert.doesNotMatch(fm.description, /: /, "YAML 일반 문자열이라 ': ' 금지");
   assert.match(fm.description, /^Coordinates /, "3인칭으로 시작");
+  // 스킬 마켓 목록 페이지에 description이 그대로 보인다 — 설치 전에 조건을 알 수 있게.
+  assert.match(fm.description, /Windows only/, "Windows 전용 표기");
+  assert.match(fm.description, /requires the agent-uplink MCP server/, "MCP 서버 필요 표기");
 });
 
 test("SKILL.md의 상대 링크는 모두 존재하고 ko/를 가리키지 않으며, references는 전부 연결된다", () => {
