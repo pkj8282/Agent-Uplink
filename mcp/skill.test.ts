@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { toolTexts } from "./tools.js";
 import { MAX_TEXT_LENGTH } from "../shared/protocol.js";
 import { ROLE_NAME_MAX } from "./roles.js";
+import { fmtItems } from "./format.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SKILL = path.join(ROOT, "skills", "agent-uplink");
@@ -202,4 +203,60 @@ test("Review Focus 3: 잡힌 역할을 빼앗지 않는다", () => {
 
 test("추천 역할 세트 자리는 사용자 작성 표시로 남아 있다", () => {
   assert.match(read("references/roles.md"), /<!-- 사용자 작성: E-추천 -->/);
+});
+
+test("사용자 작성 표시는 E-추천 하나만 남는다", () => {
+  const marks = enFiles().flatMap((f) => read(f).match(/<!-- 사용자 작성: [^>]* -->/g) ?? []);
+  assert.deepEqual(marks, ["<!-- 사용자 작성: E-추천 -->"]);
+});
+
+test("B: 언제 쓰고 언제 안 쓰나", () => {
+  const b = section(read("SKILL.md"), "When to use");
+  assert.match(b, /subagent/);
+  assert.match(b, /not supported yet/);
+  assert.match(b, /secrets/);
+});
+
+test("받은 메시지 태그 예시는 실제 출력 형식과 같다", () => {
+  const item = { seq: 1, ts: 0, channelId: "x", channelKind: "dm" as const, channelLabel: "planner-builder", from: "u", fromName: "planner", text: "hi" };
+  const line = fmtItems([item], "en").split("\n")[1];
+  assert.ok(line.startsWith("[#planner-builder planner] "), line);
+  assert.ok(read("references/messaging.md").includes("`[#planner-builder planner]`"));
+  assert.match(read("references/messaging.md"), /call `open_dm\(peer\)` again; it returns the same channel/);
+});
+
+test("H: 기다리기 상한과 /loop", () => {
+  const m = read("references/messaging.md");
+  assert.match(m, /about 10 minutes/);
+  assert.match(m, /about 30 minutes/);
+  assert.match(m, /`\/loop`/);
+  assert.match(m, /delivered only once/);
+});
+
+test("F-1: 인수인계 채널·read 먼저·최신 묶음·부수 효과는 사용자 확인", () => {
+  const h = read("references/handoff.md");
+  assert.match(h, /server channel named `handoff`/);
+  assert.match(h, /then `read` that channel/);
+  assert.match(h, /the newest \(by date\) is current/);
+  assert.match(h, /still needs the user's confirmation/);
+});
+
+test("F-2·F-3: 판정 등급·스냅샷·별도 커밋·사용자 결정·받음 회신", () => {
+  const t = read("references/team-review.md");
+  for (const label of ["**Critical**", "**Important**", "**Minor**"]) assert.ok(t.includes(label), label);
+  assert.match(t, /snapshot of that commit/);
+  assert.match(t, /separate commits/);
+  assert.match(t, /go to the user/);
+  assert.match(t, /received — starting/);
+});
+
+test("K: 뷰어 명령과 관리 앱 탭은 문서와 같다", () => {
+  const k = section(read("SKILL.md"), "Working with the user");
+  const viewer = "npx -p agent-uplink agent-uplink-viewer";
+  assert.ok(src("docs/getting-started.md").includes(viewer));
+  assert.ok(k.includes(viewer));
+  const admin = src("docs/admin-app.md");
+  for (const tab of ["Security", "Trash"]) assert.ok(admin.includes(`**${tab}**`), tab);
+  assert.match(k, /security tab/);
+  assert.match(k, /treat it as unconfirmed/);
 });
