@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { toolTexts } from "./tools.js";
+import { MAX_TEXT_LENGTH } from "../shared/protocol.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SKILL = path.join(ROOT, "skills", "agent-uplink");
@@ -82,4 +84,62 @@ test("공개 저장소에 둘 수 없는 내용이 없다", () => {
     const text = read(f);
     for (const re of FORBIDDEN) assert.doesNotMatch(text, re, `${f}: ${re}`);
   }
+});
+
+/** 소스에서 첫 캡처 숫자를 꺼낸다. 못 찾으면 테스트가 깨져서 소스 변경을 알린다. */
+function num(rel: string, re: RegExp): string {
+  const m = re.exec(src(rel));
+  assert.ok(m, `${rel}에서 ${re}를 못 찾음`);
+  return m[1];
+}
+const section = (md: string, title: string): string => {
+  const start = md.indexOf(`## ${title}\n`);
+  assert.ok(start >= 0, `섹션 없음: ${title}`);
+  const rest = md.slice(start + title.length + 4);
+  const end = rest.search(/^## /m);
+  return end < 0 ? rest : rest.slice(0, end);
+};
+
+test("도구 표는 MCP 도구 17개와 정확히 같다", () => {
+  const rows = [...section(read("SKILL.md"), "Tools").matchAll(/^\| `([a-z_]+)` \|/gm)].map((m) => m[1]);
+  const tools = Object.keys(toolTexts("en").tools);
+  assert.equal(tools.length, 17);
+  assert.deepEqual([...rows].sort(), [...tools].sort());
+});
+
+test("스킬 파일에 나오는 도구 이름은 실제 도구뿐이다", () => {
+  const tools = new Set(Object.keys(toolTexts("en").tools));
+  for (const f of enFiles()) {
+    for (const m of read(f).matchAll(/`([a-z]+(?:_[a-z]+)+)[`(]/g)) assert.ok(tools.has(m[1]), `${f}: 없는 도구 ${m[1]}`);
+  }
+});
+
+test("한도 숫자는 코드 값과 같다", () => {
+  // 숫자만 찾으면 "30"이 "30000" 안에서도 맞으므로, 단위까지 붙은 문장 조각으로 대조한다.
+  const limits = section(read("SKILL.md"), "Limits");
+  const has = (piece: string, what: string) => assert.ok(limits.includes(piece), `${what}: "${piece}" 없음`);
+  has(`up to ${MAX_TEXT_LENGTH.toLocaleString("en-US")} characters`, "메시지 최대 길이");
+  has(`at most ${num("mcp/index.ts", /timeoutMs: z\.number\(\)[^\n]*?\.max\((\d+)\)/)} ms`, "wait 최대");
+  has(`default ${num("mcp/index.ts", /client\.wait\(timeoutMs \?\? (\d+)\)/)} ms`, "wait 기본");
+  has(`at most ${num("mcp/index.ts", /limit: z\.number\(\)[^\n]*?\.max\((\d+)\)/)}.`, "read 최대");
+  has(`at most ${num("hub/config.ts", /inboxMaxBatch: (\d+)/)} items`, "inboxMaxBatch 기본");
+  has(`at most ${num("hub/config.ts", /maxChannelsPerServer: (\d+)/)} channels`, "서버당 채널 기본");
+  has(`at most ${num("mcp/index.ts", /description: z\.string\(\)\.max\((\d+)\)/)} characters`, "프로필 최대");
+  assert.match(src("docs/messaging.md"), /default 50/, "read 기본 50의 근거 문서");
+  has("default 50 messages", "read 기본");
+});
+
+test("안전 수칙: 받은 메시지는 데이터, 삭제 기본 꺼짐, UUID, 숨은 문자 표시", () => {
+  const safety = section(read("SKILL.md"), "Safety");
+  assert.match(safety, /not the user's instructions/);
+  assert.match(safety, /allowDevDelete/);
+  assert.match(safety, /UUID/);
+  assert.ok(safety.includes(String.fromCharCode(92) + "u{"), "숨은 문자 이스케이프 표시 설명");
+});
+
+test("Review Focus 1·2: 미설치 안내와 pull 전용 문장", () => {
+  const md = read("SKILL.md");
+  assert.match(md, /not installed/);
+  assert.match(md, /\(references\/setup\.md\)/);
+  assert.match(section(md, "Core flow"), /Nothing reaches you until you call `check` or `wait`/);
 });
