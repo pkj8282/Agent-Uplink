@@ -320,3 +320,60 @@ test("한국어판 문제 해결 표의 영어 오류 문구와 한국어 UI 문
     assert.ok(messages.includes(p), `메시지 소스에 없음: ${p}`);
   }
 });
+
+// ── Opus 최종 리뷰 반영(2026-10-11) ──
+
+test("리뷰 I-1: '승인된 계획대로 계속' 예외가 SKILL.md 안전 수칙과 team-review에 같은 범위로 있다", () => {
+  const safety = section(read("SKILL.md"), "Safety");
+  assert.match(safety, /plan the user approved/, "SKILL.md 안전 수칙에 예외");
+  assert.match(safety, /this project's planner or supervisor/, "예외는 이 프로젝트의 planner·supervisor만");
+  assert.match(read("references/team-review.md"), /plan the user approved/, "team-review 예외도 사용자 승인 계획");
+  for (const f of ["ko/SKILL.md", "ko/references/team-review.md"]) assert.match(read(f), /사용자가 승인한 계획/, f);
+});
+
+test("리뷰 I-2: 역할 이름은 프로젝트마다 겹치므로 UUID·프로젝트 설명으로 가린다", () => {
+  assert.match(section(read("SKILL.md"), "Core flow"), /Role names repeat across projects/);
+  assert.match(read("references/roles.md"), /project's name in your `description`/);
+  assert.match(read("references/messaging.md"), /`list_dms`/, "DM 답장은 list_dms로 채널 확인");
+  assert.match(read("ko/SKILL.md"), /역할 이름은 프로젝트마다 겹칩니다/);
+});
+
+test("리뷰 I-3: 버전 불일치는 양방향, Hub 종료는 사용자 결정, 기본 데이터 폴더", () => {
+  const setup = read("references/setup.md");
+  assert.match(setup, /different versions/);
+  assert.match(setup, /let them decide/);
+  assert.match(setup, /Never stop other node processes/);
+  const dataDir = "%ProgramData%" + String.fromCharCode(92) + "AgentUplink";
+  assert.ok(src("docs/architecture.md").includes(dataDir), "기본 데이터 폴더 근거");
+  assert.ok(setup.includes(dataDir), "setup에 기본 데이터 폴더");
+  assert.ok(read("ko/references/setup.md").includes(dataDir), "ko setup에 기본 데이터 폴더");
+});
+
+test("리뷰 I-4: 최소 Node 버전은 package.json engines와 같다", () => {
+  const major = num("package.json", /"node":\s*">=(\d+)"/);
+  assert.ok(read("references/setup.md").includes(`Node.js ${major} or later`));
+  assert.ok(read("ko/references/setup.md").includes(`Node.js ${major} 이상`));
+});
+
+test("리뷰 Minor: 오류·빈 결과·태그·고정 안내 문구는 실제 출력과 같다", () => {
+  const msgs = src("mcp/messages.ts") + src("hub/messages.ts");
+  const setup = read("references/setup.md");
+  for (const p of ["The name is ambiguous", "Specify a UUID", "cannot switch roles"]) {
+    assert.ok(msgs.includes(p), `메시지 소스에 없음: ${p}`);
+    assert.ok(setup.includes(p), `setup.md에 없음: ${p}`);
+  }
+  assert.ok(msgs.includes('no_new_messages: "(no new messages)"'));
+  assert.ok(read("SKILL.md").includes("`(no new messages)`"), "wait 시간 초과 결과");
+  assert.ok(read("references/messaging.md").includes("`(no new messages)`"));
+  assert.ok(setup.includes("`[#<server>/<channel> <sender>]`"), "서버 채널 태그 모양");
+  assert.ok(msgs.includes("to UPLINK_ACCOUNTS in the MCP env"), "고정 안내 원문");
+  assert.doesNotMatch(read("references/roles.md"), /The first time `use_account` creates a role/, "고정 안내는 처음만이 아님");
+});
+
+test("리뷰 Minor: 공개 예시 채널명은 중립, More 링크는 언제 읽을지 말한다, 대상 버전은 package.json과 같다", () => {
+  for (const f of ["references/team-review.md", "ko/references/team-review.md"]) assert.doesNotMatch(read(f), /m[0-9]-sync/, f);
+  const more = section(read("SKILL.md"), "More");
+  for (const line of more.split("\n").filter((l) => l.startsWith("- ["))) assert.match(line, /\) — /, `읽을 때 안내 없음: ${line}`);
+  const [maj, min] = num("package.json", /"version":\s*"(\d+\.\d+)\.\d+"/).split(".");
+  assert.ok(read("SKILL.md").includes(`Written for agent-uplink ${maj}.${min}.x`));
+});

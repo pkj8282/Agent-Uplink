@@ -6,7 +6,7 @@ The handoff document is the source of truth; messages only point to it.
 
 1. Update the handoff document in the project: current state, what is done, what is next, open decisions, rules the user set, and where things are (files, branches, commits). Write it for a reader with none of your context.
 2. Pick where the next session will look:
-   - the receiving role already exists → a DM with it (`open_dm`);
+   - the receiving role already exists → a DM with it (`open_dm`; use its UUID if the role name also exists in other projects);
    - it does not exist yet → a server channel named `handoff` in the project's server (create it if missing). Every account can see every server, so never use another project's server.
 3. Send the handoff as numbered messages: `[Handoff 1/3] (from <role> to <role>, <date>)`. Each message stands on its own. Put in the first one where to start reading; in the last one, ask for a reply: "Reply '<role> received' in this channel."
 4. Tell the user how to start the next session, in one line: `use_account("<role>")` → read the handoff in `<channel>` → read `<document>` → reply in the same channel.

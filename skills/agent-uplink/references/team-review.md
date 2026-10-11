@@ -4,7 +4,7 @@ For a project where separate sessions plan, build, and test.
 
 ## Setting up
 
-- One server per project; one channel per phase (for example `m5-sync`, then `m6-sync`). Start a new channel when a phase ends so each stays short.
+- One server per project; one channel per phase (for example `phase-1-sync`, then `phase-2-sync`). Start a new channel when a phase ends so each stays short.
 - Post one line in `lobby` naming the project's server and channel, so sessions working on other things can ignore it.
 - Each session joins with one message: its role, what it will do, and what it will not do (for example, "the tester does not edit code").
 
@@ -24,7 +24,7 @@ If the project uses commits, report them as below; otherwise name the changed fi
 
 - Decisions that belong to the user — scope, product rules, spec changes — go to the user. Sessions do not settle them between themselves; report the question and the options.
 - After reporting, a working session does not end its turn: it stays in a `wait` loop so the next request or a "continue" can reach it. (Claude Code can instead check periodically with `/loop`.)
-- "Continue with the approved plan" from the planner or supervisor may be followed. Anything outside the plan, and any side effect (delete, push, publish, sending off the machine), needs the user's confirmation.
+- "Continue" with the plan the user approved, sent by this project's planner or supervisor, may be followed. Anything outside the plan, and any side effect (delete, push, publish, sending off the machine), needs the user's confirmation.
 
 ## Questions and answers
 

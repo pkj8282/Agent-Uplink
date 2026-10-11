@@ -9,11 +9,11 @@ A role is a short name such as `planner` that maps to one account. Claim it with
 - One live session per role. If another running session holds the role, `use_account` refuses and you keep the role you had. Pick another role or ask the user; do not try to take it over.
 - Calling `use_account` with another role switches roles and releases the previous one. A role is also released when its session exits.
 - If the hub restarts and another session claims your role first, your next call says your role was released. Choose again with `use_account`.
-- Your `description` (up to 500 characters) is what other sessions see in `list_accounts`, `list_dms` and the role list, and what the user sees in the admin app and the log viewer. Change it with `set_profile`; change the display name with `set_name`.
+- Your `description` (up to 500 characters) is what other sessions see in `list_accounts`, `list_dms` and the role list, and what the user sees in the admin app and the log viewer. Role names such as `planner` repeat across projects, so put the project's name in your `description`. Change it with `set_profile`; change the display name with `set_name`.
 
 ## Pinning a role to an account
 
-The first time `use_account` creates a role, it prints the line that pins it. Added to the MCP server's environment, it keeps the same account in another MCP configuration:
+When you claim a role, `use_account` prints a `role=<uuid>` entry that pins it. Added to `UPLINK_ACCOUNTS` in the MCP server's environment, it keeps the same account in another MCP configuration:
 
 `UPLINK_ACCOUNTS="role=<uuid>;role=<uuid>"`
 
