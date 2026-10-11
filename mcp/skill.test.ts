@@ -279,3 +279,44 @@ test("K: 뷰어 명령과 관리 앱 탭은 문서와 같다", () => {
   assert.match(k, /security tab/);
   assert.match(k, /treat it as unconfirmed/);
 });
+
+test("한국어판은 영어판과 같은 파일 구성이고 frontmatter가 없다", () => {
+  const all = walk(SKILL);
+  const en = all.filter((f) => !f.startsWith("ko/")).sort();
+  const ko = all.filter((f) => f.startsWith("ko/")).map((f) => f.slice(3)).sort();
+  assert.deepEqual(ko, en);
+  assert.ok(!read("ko/SKILL.md").startsWith("---"), "ko/SKILL.md는 스킬로 발견되지 않게 frontmatter 없이");
+  assert.match(read("ko/SKILL.md"), /번역본/);
+});
+
+test("한국어판의 사용자 작성 표시는 영어판과 같다", () => {
+  for (const f of enFiles()) {
+    const marks = (s: string) => s.match(/<!-- 사용자 작성: [^>]* -->/g) ?? [];
+    assert.deepEqual(marks(read(`ko/${f}`)), marks(read(f)), f);
+  }
+});
+
+test("한국어판의 링크는 ko 안에서만 닫히고, 도구 표·버전 고정은 영어판과 같다", () => {
+  const targets = links(read("ko/SKILL.md"));
+  assert.deepEqual(targets, links(read("SKILL.md")), "같은 링크 구성");
+  for (const t of targets) assert.ok(fs.existsSync(path.join(SKILL, "ko", t)), `없는 링크: ko/${t}`);
+  for (const f of enFiles().filter((f) => f.startsWith("references/"))) {
+    assert.deepEqual(links(read(`ko/${f}`)), [], `ko/${f}가 다른 파일을 가리킴`);
+  }
+  const rows = (md: string) => [...md.matchAll(/^\| `([a-z_]+)` \|/gm)].map((m) => m[1]);
+  assert.deepEqual(rows(read("ko/SKILL.md")), rows(read("SKILL.md")));
+  const pins = (md: string) => md.match(/agent-uplink@\d+\.\d+\.\d+/g) ?? [];
+  assert.deepEqual(pins(read("ko/references/setup.md")), pins(read("references/setup.md")));
+});
+
+test("한국어판 문제 해결 표의 영어 오류 문구와 한국어 UI 문구는 실제 메시지에 있다", () => {
+  const setup = read("ko/references/setup.md");
+  const messages = src("mcp/messages.ts") + src("hub/messages.ts");
+  for (const p of [
+    "already using this account", "Redeploy the same version", "old version", "was released", "No such account", "allowDevDelete=false",
+    "이미 다른 세션이 사용 중인 계정입니다", "같은 버전으로 재배포하세요", "구버전", "선택이 해제되었습니다", "계정이 없습니다", "MCP 삭제가 꺼져 있습니다",
+  ]) {
+    assert.ok(setup.includes(p), `ko setup.md에 없음: ${p}`);
+    assert.ok(messages.includes(p), `메시지 소스에 없음: ${p}`);
+  }
+});
