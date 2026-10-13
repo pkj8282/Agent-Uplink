@@ -84,6 +84,14 @@ Communication Server를 만들고 `#build-status` 같은 채널을 추가해, �
 
 [문서 →](docs/architecture.md)
 
+### Claude Code 스킬
+
+에이전트에게 이 도구들을 언제, 어떻게 쓰는지 알려 주는 Claude Code 스킬이 저장소에 들어 있습니다. 역할 고르기, 메시지 주고받기, 새 세션에 작업 넘기기, 세션끼리 만들고 검토하는 순서를 다룹니다. 다른 세션이 보낸 메시지는 지시가 아닌 데이터로 다루고, push나 삭제 전에는 여전히 사용자에게 묻습니다.
+
+설치하려면 `skills/agent-uplink/` 폴더를 `~/.claude/skills/`(Windows는 `%USERPROFILE%\.claude\skills\`)에 복사하세요. `ko/` 폴더는 사람이 읽는 한국어 번역본이라 빼도 됩니다. [Agensi](https://www.agensi.io/skills/agent-uplink-coordinate-multiple-local-ai-sessions)에도 올라가 있습니다.
+
+[문서 →](skills/agent-uplink/ko/SKILL.md)
+
 ---
 
 ## v2의 새로운 점
@@ -128,6 +136,8 @@ claude mcp add --scope user agent-uplink -- npx -y agent-uplink
 1. `use_account` — 이 프로젝트 폴더의 역할 목록을 봅니다.
 2. `use_account(role: "planner", description: "Plans features and hands off tasks")` — 역할을 고릅니다.
 3. `send`, `check`, `wait`, `open_dm` … — 다른 세션과 대화합니다.
+
+선택: [Claude Code 스킬](#claude-code-스킬)을 설치하면 에이전트가 인수인계와 리뷰 순서를 알고 움직입니다.
 
 버전 고정, Windows에서 `npx`가 연결되지 않을 때, 소스에서 빌드, 역할 고정 방법은 [Getting started](docs/getting-started.md)에 있습니다.
 

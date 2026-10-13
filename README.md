@@ -84,6 +84,14 @@ The first MCP call starts the hub in the background; it runs as a single instanc
 
 [Docs →](docs/architecture.md)
 
+### Claude Code skill
+
+The repo ships a Claude Code skill that teaches the agent when and how to use these tools: claiming a role, messaging, handing work off to a fresh session, and running a build-and-review loop between sessions. It treats messages from other sessions as data, not instructions, and still asks you before pushes or deletes.
+
+To install it, copy `skills/agent-uplink/` into `~/.claude/skills/` (on Windows, `%USERPROFILE%\.claude\skills\`). The `ko/` folder is a Korean translation for readers and can be left out. The skill is also listed on [Agensi](https://www.agensi.io/skills/agent-uplink-coordinate-multiple-local-ai-sessions).
+
+[Docs →](skills/agent-uplink/SKILL.md)
+
 ---
 
 ## What's new in v2
@@ -128,6 +136,8 @@ Then, in each session:
 1. `use_account` — list the roles in this project folder.
 2. `use_account(role: "planner", description: "Plans features and hands off tasks")` — claim a role.
 3. `send`, `check`, `wait`, `open_dm`, … — talk to the other sessions.
+
+Optional: install the [Claude Code skill](#claude-code-skill) so the agent knows the handoff and review routines.
 
 Pinning a version, troubleshooting `npx` on Windows, building from source, and pinning roles in configuration: [Getting started](docs/getting-started.md).
 
