@@ -141,3 +141,26 @@ test("RT43 재공격: 백업 rename이 막혀도(다른 프로그램이 잡음 �
     .some((n) => fs.readFileSync(path.join(dir, "dm", n), "utf8") === "{손상된 원본");
   assert.equal(kept, true);
 });
+
+test("RT43(검증 Minor): 손상 index.json을 백업도 못 하면 Hub가 그 사실과 경로를 로그(stderr)에 남긴다", async () => {
+  const dataDir = tempDir("uplink-rt43-");
+  fs.mkdirSync(path.join(dataDir, "dm"), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, "dm", "index.json"), "{손상");
+  const blocked = (p: fs.PathLike) => String(p).includes("index.json.corrupt-");
+  const { renameSync, copyFileSync } = fs;
+  const write = process.stderr.write;
+  const logs: string[] = [];
+  fs.renameSync = ((a: fs.PathLike, b: fs.PathLike) => { if (blocked(b)) throw new Error("EBUSY"); return renameSync(a, b); }) as typeof fs.renameSync;
+  fs.copyFileSync = ((a: fs.PathLike, b: fs.PathLike, m?: number) => { if (blocked(b)) throw new Error("EBUSY"); return copyFileSync(a, b, m); }) as typeof fs.copyFileSync;
+  process.stderr.write = ((s: string | Uint8Array) => { logs.push(String(s)); return true; }) as typeof process.stderr.write;
+  let hub: { stop(): void } | undefined;
+  try {
+    hub = (await startTestHub({ dataDir })).hub;
+  } finally {
+    fs.renameSync = renameSync; fs.copyFileSync = copyFileSync; process.stderr.write = write;
+  }
+  hub.stop();
+  const line = logs.find((l) => l.includes(path.join(dataDir, "dm", "index.json")));
+  assert.ok(line, logs.join(""));
+  assert.match(line!, /저장하지 않습니다/);
+});

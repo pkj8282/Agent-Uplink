@@ -1,5 +1,6 @@
 import net from "node:net";
 import http from "node:http";
+import path from "node:path";
 import { encodeFrame, FrameDecoder, FrameTooLargeError } from "../shared/framing.js";
 import { renderViewerHtml, isAllowedHost } from "./viewer.js";
 import { ViewerAuth } from "./viewerAuth.js";
@@ -157,6 +158,12 @@ export class Hub {
     this.inbox = new InboxStore({ dir: this.opts.dataDir, guard });
     this.dm = new DmStore({ dir: this.opts.dataDir, guard });
     this.servers = new ServerStore({ dir: this.opts.dataDir, guard });
+    // 손상 원본을 백업하지 못해 이번 실행 동안 저장을 멈춘 색인은 알린다 — 이 실행에서 만든 DM·서버는 재시작 뒤 남지 않는다(v2.1.3).
+    for (const [store, sub] of [[this.dm, "dm"], [this.servers, "servers"]] as const) {
+      if (store.saveBlocked) {
+        process.stderr.write(`${this.msg("log_index_save_blocked", { file: path.join(this.opts.dataDir, sub, "index.json") })}\n`);
+      }
+    }
     this.trash = new TrashStore({ dir: this.opts.dataDir });
     this.trashOps = new TrashOps({
       dataDir: this.opts.dataDir, servers: this.servers, dm: this.dm, accounts: this.accounts,

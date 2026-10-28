@@ -60,6 +60,7 @@ export const HUB_MESSAGES = defineCatalog({
     // 콘솔(stderr)
     log_trash_defer: (p: { id: string; detail: string }) => `휴지통 항목 ${p.id} 복구를 미룹니다: ${p.detail}`,
     log_orphan_defer: (p: { name: string; detail: string }) => `고아 로그 ${p.name} 정리를 미룹니다: ${p.detail}`,
+    log_index_save_blocked: (p: { file: string }) => `손상된 ${p.file}을(를) 옮기거나 복사하지 못해, 원본을 지키려고 이번 실행 동안 이 파일에 저장하지 않습니다. 이번 실행에서 만든 DM·서버는 다시 시작하면 남지 않습니다. 파일을 잡고 있는 프로그램을 닫고 Hub를 다시 시작하세요.`,
     log_start_failed: (p: { detail: string }) => `Hub 시작 실패: ${p.detail}`,
     log_secure_failed: (p: { detail: string }) => `Hub 보안 준비 실패(종료합니다): ${p.detail}`,
     log_started: (p: { tcp: number; http: number }) => `Agent-Uplink Hub(v2) 시작: tcp=127.0.0.1:${p.tcp} viewer=http://127.0.0.1:${p.http}`,
@@ -140,6 +141,7 @@ export const HUB_MESSAGES = defineCatalog({
     dm_exists: "These two accounts already have a newer DM. Delete it first to restore this one.",
     log_trash_defer: (p: { id: string; detail: string }) => `Postponing recovery of trash item ${p.id}: ${p.detail}`,
     log_orphan_defer: (p: { name: string; detail: string }) => `Postponing cleanup of orphan log ${p.name}: ${p.detail}`,
+    log_index_save_blocked: (p: { file: string }) => `Could not move or copy the damaged ${p.file}, so to protect it the hub will not save to that file during this run. DMs and servers created now will not survive a restart. Close the program holding the file and restart the hub.`,
     log_start_failed: (p: { detail: string }) => `Hub failed to start: ${p.detail}`,
     log_secure_failed: (p: { detail: string }) => `Hub security setup failed (exiting): ${p.detail}`,
     log_started: (p: { tcp: number; http: number }) => `Agent-Uplink Hub (v2) started: tcp=127.0.0.1:${p.tcp} viewer=http://127.0.0.1:${p.http}`,
