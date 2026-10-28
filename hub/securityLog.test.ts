@@ -138,17 +138,26 @@ test("RT41: 시작 스캔 뒤 새 디스크 발견(받은편지함·휴지통 �
   assert.equal(again.recent(100).length, 0);
 });
 
-test("RT41: 시작 뒤 새 디스크 발견이 많아도(키 19,000개 + 새 1,000건) 저장을 한 번에 묶어 1초 안에 끝난다", async () => {
+test("RT41: 시작 뒤 새 디스크 발견이 많아도(키 19,000개 + 새 1,000건) disk-seen.json 저장은 한 번으로 묶인다", async () => {
   const dir = tempDir("uplink-seclog-");
   fs.mkdirSync(path.join(dir, "security"), { recursive: true });
   const keys = Array.from({ length: 19000 }, (_, i) => i.toString(16).padStart(32, "0"));
   fs.writeFileSync(path.join(dir, "security", "disk-seen.json"), JSON.stringify({ v: 1, keys }));
   const log = new SecurityLog({ dir });
   log.finishStartupScan();
-  const t0 = performance.now();
-  for (let i = 0; i < 1000; i++) log.guard(`late${i}${ZW}`, { ...DISK, where: "inbox", field: "text", account: "u1" });
-  await new Promise((r) => setImmediate(r));
-  const ms = performance.now() - t0;
-  assert.ok(ms < 1000, `${ms.toFixed(0)}ms`);
+  // 키마다 0.7MB 파일 전체를 다시 쓰면 이벤트 루프가 몇 초 멈춘다 — 시간 대신 저장 횟수를 센다(부하에 흔들리지 않게).
+  let saves = 0;
+  const rename = fs.renameSync;
+  fs.renameSync = ((a: fs.PathLike, b: fs.PathLike) => {
+    if (String(b).endsWith("disk-seen.json")) saves++;
+    return rename(a, b);
+  }) as typeof fs.renameSync;
+  try {
+    for (let i = 0; i < 1000; i++) log.guard(`late${i}${ZW}`, { ...DISK, where: "inbox", field: "text", account: "u1" });
+    await new Promise((r) => setImmediate(r));
+  } finally {
+    fs.renameSync = rename;
+  }
+  assert.equal(saves, 1);
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, "security", "disk-seen.json"), "utf8")).keys.length, 20000);
 });
