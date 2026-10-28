@@ -81,3 +81,55 @@ test("미리보기 경계에 이모지가 걸려도 숨은 문자가 남지 않�
   assert.equal(r.length, 1);
   assert.equal(inspectText(r[0].preview).changed, false);
 });
+
+// ── v2.1.3 RT41: 디스크 중복 제거가 최근 max건 밖에서도 맞는다(설계 ②) ──
+const ZW = cps(0x200b);
+/** Hub 시작 한 번: 옛 데이터 n건을 디스크 출처로 읽고 시작 스캔을 끝낸다. */
+function startOnce(dir: string, n: number, max = 500): SecurityLog {
+  const log = new SecurityLog({ dir, max });
+  for (let i = 0; i < n; i++) log.guard(`old${i}${ZW}`, { ...DISK, account: `u${i}` });
+  log.finishStartupScan();
+  return log;
+}
+
+test("RT41: 서로 다른 옛 데이터 발견 600건 — 다시 시작해도 다시 기록하지 않고 요청 기록(실제 공격)을 밀어내지 않는다", () => {
+  const dir = tempDir("uplink-seclog-");
+  const first = startOnce(dir, 600);
+  first.guard(`attack${ZW}`, REQ);
+  const linesBefore = fs.readFileSync(fileOf(dir), "utf8").split("\n").filter(Boolean).length;
+  const second = startOnce(dir, 600);
+  assert.equal(second.recent(500).some((f) => f.source === "request" && f.preview.startsWith("attack")), true);
+  assert.equal(fs.readFileSync(fileOf(dir), "utf8").split("\n").filter(Boolean).length, linesBefore);
+});
+
+test("RT41: disk-seen.json이 깨져 있어도 시작은 되고, 기록에 남은 디스크 발견으로 중복을 막는다", () => {
+  const dir = tempDir("uplink-seclog-");
+  startOnce(dir, 3);
+  fs.writeFileSync(path.join(dir, "security", "disk-seen.json"), "{깨짐");
+  const again = startOnce(dir, 3);
+  assert.equal(again.recent(100).length, 3);
+});
+
+test("RT41: 키는 seenMax개까지 — 가장 오래 보지 않은 키부터 빠지고, 다시 본 키는 남는다", () => {
+  const dir = tempDir("uplink-seclog-");
+  const at = (i: number) => ({ ...DISK, account: `u${i}` });
+  const log = new SecurityLog({ dir, seenMax: 3 });
+  for (const i of [0, 1, 2, 0, 3]) log.guard(`old${i}${ZW}`, at(i)); // 1이 가장 오래 안 본 키
+  log.finishStartupScan();
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, "security", "disk-seen.json"), "utf8")).keys.length, 3);
+  const again = new SecurityLog({ dir, seenMax: 3, max: 2 }); // 기록에서 채우는 몫을 줄여 파일 키만 보게 한다
+  const before = again.recent(100).length;
+  for (const i of [0, 2, 3]) again.guard(`old${i}${ZW}`, at(i));
+  assert.equal(again.recent(100).length, before);
+});
+
+test("RT41: 시작 스캔 뒤 새 디스크 발견(휴지통 복원 등)도 키를 저장해 다음 시작에 다시 기록하지 않는다", () => {
+  const dir = tempDir("uplink-seclog-");
+  const log = startOnce(dir, 1);
+  log.guard(`restored${ZW}`, { ...DISK, where: "log", field: "text", account: "u9" });
+  const again = new SecurityLog({ dir });
+  again.guard(`old0${ZW}`, { ...DISK, account: "u0" });
+  again.guard(`restored${ZW}`, { ...DISK, where: "log", field: "text", account: "u9" });
+  again.finishStartupScan();
+  assert.equal(again.recent(100).length, 2);
+});

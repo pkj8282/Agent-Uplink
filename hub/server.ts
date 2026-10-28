@@ -183,6 +183,7 @@ export class Hub {
     }
     // 이전 버전 삭제·크래시로 남은 로그를 휴지통으로(손상된 서버 인덱스면 서버 쪽은 건너뜀 — 손으로 되살릴 여지)
     this.trashOps.sweepOrphans({ servers: !this.servers.sweepBlocked, dm: true });
+    this.security.finishStartupScan();
   }
 
   startTcp(): Promise<void> {
