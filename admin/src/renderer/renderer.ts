@@ -1,7 +1,7 @@
 import type { AdminApi, AdminConfig, IpcResult, SecurityFinding, Snapshot, TrashItem } from "../types.js";
 import {
   ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf,
-  emptyTrashConfirmMessage, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage,
+  emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage,
   restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount,
 } from "./view.js";
 import type { FormMessage } from "./view.js";
@@ -117,7 +117,7 @@ let trashItems: TrashItem[] | undefined;
 function renderTrash(s: Snapshot): void {
   trashItems = s.trash;
   byId("trash-summary").textContent = trashSummary(s.trash);
-  byId<HTMLButtonElement>("empty-trash").disabled = !s.trash || s.trash.length === 0;
+  byId<HTMLButtonElement>("empty-trash").disabled = !s.trash || emptyTrashTargets(s.trash).count === 0;
   const list = byId("trash-list");
   list.replaceChildren();
   if (!s.trash) return;
@@ -151,14 +151,17 @@ async function restoreFlow(t: TrashItem, b: HTMLButtonElement): Promise<void> {
     r = await window.admin.restoreTrash(t.id, true);
   }
   await refresh();
-  showOpMsg(r.ok ? { text: restoreResultMessage(r.data), kind: "ok" } : { text: opErrorMessage(r.code, r.error), kind: "err" });
+  const leftoverOnly = t.dmLeftover !== undefined;
+  showOpMsg(r.ok ? { text: restoreResultMessage(r.data, { leftoverOnly }), kind: "ok" } : { text: opErrorMessage(r.code, r.error), kind: "err" });
 }
 
 byId("empty-trash").addEventListener("click", async () => {
-  const items = trashItems ?? [];
-  if (items.length === 0) return;
-  if (!window.confirm(emptyTrashConfirmMessage(items.length, items.reduce((s, t) => s + t.bytes, 0)))) return;
+  const b = byId<HTMLButtonElement>("empty-trash");
+  const target = emptyTrashTargets(trashItems ?? []);
+  if (target.count === 0) return;
+  if (!window.confirm(emptyTrashConfirmMessage(target.count, target.bytes))) return;
   showOpMsg(null);
+  b.disabled = true; // 작업 중 두 번 누르지 않게 — 끝나면 refresh가 다시 정한다
   const r = await window.admin.emptyTrash();
   await refresh();
   showOpMsg(r.ok ? { text: tr("trash_emptied", { count: r.data.removed }), kind: "ok" } : { text: opErrorMessage(r.code, r.error), kind: "err" });

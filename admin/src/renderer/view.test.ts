@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount } from "./view.js";
+import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount } from "./view.js";
 import { setLang } from "./lang.js";
 import { hasHangul } from "../../../hub/testing.js";
 
@@ -237,4 +237,28 @@ test("보안 기록: 본 뒤 새 기록 수, 종류 이름과 개수, 출처(요
   } finally {
     setLang("ko");
   }
+});
+
+// ── v2.1.3 ⑧ 남은 DM 재복원 결과 · ⑩ 휴지통 비우기 대상 ──
+test("⑧ 남은 DM 재복원이 0건이면 '복원했습니다'가 아니라 '복원된 DM이 없습니다' + 남은 DM 안내", () => {
+  const none = restoreResultMessage({ renamed: [], dmsRestored: 0, dmsLeft: 2, itemRemoved: false }, { leftoverOnly: true });
+  assert.doesNotMatch(none, /복원했습니다/);
+  assert.match(none, /^복원된 DM이 없습니다\./);
+  assert.match(none, /DM 2개는/);
+  assert.match(restoreResultMessage({ renamed: [], dmsRestored: 1, dmsLeft: 0, itemRemoved: true }, { leftoverOnly: true }), /^복원했습니다\./);
+  assert.match(restoreResultMessage({ renamed: [], dmsRestored: 0, dmsLeft: 0, itemRemoved: true }), /^복원했습니다\./); // 일반 복원은 그대로
+  setLang("en");
+  try {
+    assert.match(restoreResultMessage({ renamed: [], dmsRestored: 0, dmsLeft: 1, itemRemoved: false }, { leftoverOnly: true }), /^No DMs were restored\./);
+  } finally {
+    setLang("ko");
+  }
+});
+
+test("⑩ emptyTrashTargets: 진행 중(pending) 항목은 비우기 개수·크기에서 뺀다", () => {
+  const base = { kind: "channel" as const, name: "a", deletedAt: 0, deletedBy: "admin" as const, fileCount: 1, intact: true, restorable: true };
+  const items = [{ ...base, id: "1", bytes: 2048 }, { ...base, id: "2", bytes: 5, pending: true as const }, { ...base, id: "3", bytes: 10 }];
+  assert.deepEqual(emptyTrashTargets(items), { count: 2, bytes: 2058 });
+  assert.deepEqual(emptyTrashTargets([{ ...base, id: "4", bytes: 1, pending: true as const }]), { count: 0, bytes: 0 });
+  assert.deepEqual(emptyTrashTargets([]), { count: 0, bytes: 0 });
 });

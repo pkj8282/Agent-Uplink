@@ -124,8 +124,9 @@ export function conflictConfirmMessage(conflicts: NameConflict[]): string {
   return `${head}\n\n${lines.join("\n")}`;
 }
 
-export function restoreResultMessage(r: RestoreReport): string {
-  const parts = [tr("restored")];
+/** 복원 결과 문구. leftoverOnly = 이미 복원된 계정 항목의 남은 DM만 다시 붙이는 경우(항목에 dmLeftover가 있었음). */
+export function restoreResultMessage(r: RestoreReport, opts: { leftoverOnly?: boolean } = {}): string {
+  const parts = [tr(opts.leftoverOnly && r.dmsRestored === 0 ? "dm_restore_none" : "restored")];
   for (const x of r.renamed) parts.push(tr("renamed", { from: displayName(x.from), to: displayName(x.to) }));
   if (r.recreatedServer) parts.push(tr("server_recreated", { name: displayName(r.recreatedServer.name) }));
   if (r.dmsLeft) parts.push(tr("dms_left", { count: r.dmsLeft }));
@@ -149,6 +150,12 @@ const CODE_KEY: Record<string, AdminKey> = {
 export function opErrorMessage(code: string | undefined, fallback: string): string {
   const key = code && Object.hasOwn(CODE_KEY, code) ? CODE_KEY[code] : undefined;
   return key ? tr(key) : fallback;
+}
+
+/** 휴지통 비우기가 실제로 지울 항목(진행 중인 삭제·복원은 Hub가 남긴다). */
+export function emptyTrashTargets(items: TrashItem[]): { count: number; bytes: number } {
+  const done = items.filter((t) => !t.pending);
+  return { count: done.length, bytes: done.reduce((s, t) => s + t.bytes, 0) };
 }
 
 export function emptyTrashConfirmMessage(count: number, bytes: number): string {

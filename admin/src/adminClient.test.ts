@@ -422,3 +422,15 @@ test("snapshot: 숨은 문자가 든 set_name 뒤 보안 기록(findings)이 온
   assert.equal(snap.findings!.some((f) => f.where === "set_name" && f.account === "u1" && f.counts.zero_width === 1), true);
   a.close(); hub.stop();
 });
+
+test("⑥ 구버전 Hub(스냅샷에 securityFindings 없음, v2.1.1 이하)면 snapshot.findings는 undefined — 보안 탭은 '지원하지 않음'", async () => {
+  const f = await fakeServer((req, s) => {
+    if (answerHandshake(req, s)) { /* hello·auth */ }
+    else s.write(encodeFrame({ ok: true, id: req.id, config: { maxChannelsPerServer: 30, allowDevDelete: false, inboxMaxBatch: 200 }, snapshotServers: [], snapshotAccounts: [], snapshotDms: [], trash: [] }));
+  });
+  const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 1000 });
+  const snap = await c.snapshot();
+  assert.equal(snap.findings, undefined);
+  assert.deepEqual(snap.trash, []);
+  f.close();
+});

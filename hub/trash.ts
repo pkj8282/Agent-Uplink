@@ -273,6 +273,7 @@ export class TrashStore {
       };
       if (m.serverName !== undefined) item.serverName = m.serverName;
       if (m.kind === "account" && m.accountRestored) item.dmLeftover = m.dms?.length ?? 0;
+      if (m.state !== "done") item.pending = true;
       out.push(item);
     }
     return out;

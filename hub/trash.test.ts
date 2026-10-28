@@ -111,3 +111,13 @@ test("parseAccountRecord: 이름·설명의 위장 문자는 이스케이프(v2.
   const r = parseAccountRecord(JSON.stringify({ uuid: "u1", name: `A${LF}x`, createdAt: 1, description: `d${String.fromCodePoint(0x202e)}` }));
   assert.deepEqual(r, { uuid: "u1", name: `A${B}nx`, createdAt: 1, description: `d${B}u{202E}` });
 });
+
+test("⑩ 진행 중(done 아님) 항목은 list()에 pending: true — 비우기 확인창이 셀 항목과 구분한다(v2.1.3)", () => {
+  const t = new TrashStore({ dir: tmp() });
+  const busy = t.create("channel", { deletedBy: "admin", name: "a", serverId: S1, serverName: "Main", channels: [] }, 1759500000000);
+  const done = t.create("channel", { deletedBy: "admin", name: "b", serverId: S1, serverName: "Main", channels: [] }, 1759500000001);
+  done.state = "done"; t.writeMeta(done);
+  const items = t.list();
+  assert.equal(items.find((i) => i.id === busy.id)!.pending, true);
+  assert.equal("pending" in items.find((i) => i.id === done.id)!, false);
+});

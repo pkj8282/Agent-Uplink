@@ -27,6 +27,8 @@ export interface TrashItem {
   intact: boolean;
   restorable: boolean;
   dmLeftover?: number;
+  /** 삭제·복원이 아직 끝나지 않은 항목(Hub v2.1.3+). 비우기는 이것을 지우지 않는다. */
+  pending?: true;
 }
 
 export interface NameConflict { kind: "server" | "channel"; name: string; to: string; }
