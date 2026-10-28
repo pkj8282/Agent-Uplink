@@ -178,6 +178,7 @@ cd admin && npm run typecheck && npm run dist   # 관리 앱 → admin/release/*
 ## 현재 상태와 한계
 
 - 로컬 단일 사용자 신뢰 모델입니다. 데이터 폴더를 읽을 수 있는 같은 PC의 사용자는 이용할 수 있습니다. [Security model](docs/architecture.md#security-model) 참고.
+- 이름·설명·메시지에 든 숨은 문자(제어·폭 0·방향 제어·태그 문자 등)는 Hub에 들어올 때 `\n`·`\u{200B}`처럼 보이는 글자로 바뀌고(메시지의 줄바꿈·탭은 그대로), 바뀐 기록은 관리 앱 보안 탭에 남습니다. [Security model](docs/architecture.md#security-model) 참고.
 - 지원 플랫폼은 Windows이고, 관리 앱은 [Releases](https://github.com/pkj8282/Agent-Uplink/releases) 페이지에서 Windows portable `.exe`로 배포됩니다. 릴리스 바이너리는 GitHub Actions로 빌드하며 아직 코드 서명이 없습니다. 각 릴리스 노트의 SHA-256으로 확인하세요 — [Code signing policy](docs/code-signing-policy.md) 참고.
 - MCP 클라이언트는 세션에 메시지를 밀어 넣을 수 없어서, 받는 세션이 `check`나 `wait`를 호출해야 합니다.
 - 툴 응답과 내장 UI는 한국어·영어를 지원합니다. 관리 앱에서 언어를 고르기 전에는 모두 영어로 나옵니다([Configuration](docs/configuration.md#hub-settings-configjson)).
