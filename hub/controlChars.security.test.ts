@@ -282,3 +282,22 @@ test("RT40: 이스케이프 결과가 정확히 131,072자면 통과, 131,073자
   assert.equal(over.code, "text_hidden_too_long");
   a.close(); h.stop();
 });
+
+// ── v2.1.3 RT42: 점자 공백으로 이름 끝 위장(설계 ⑤) ──
+test("RT42: 이름 끝 점자 공백(Admin + U+2800)은 보이는 백슬래시+u{2800}으로 저장 — 계정·서버 이름", async () => {
+  const { hub: h, port } = await hub();
+  const a = await login(port, U1, "A");
+  assert.equal((await a.req("set_name", { name: `Admin${cps(0x2800)}` })).name, `Admin${B}u{2800}`);
+  assert.equal((await a.req("create_server", { name: `Main${cps(0x2800)}` })).ok, true);
+  assert.equal((await a.req("list_servers")).servers![0].name, `Main${B}u{2800}`);
+  a.close(); h.stop();
+});
+
+test("RT42: 메시지 본문의 점자 그림은 그대로 전달된다", async () => {
+  const { hub: h, port } = await hub();
+  const a = await login(port, U1, "A");
+  const art = `${cps(0x283f, 0x2800, 0x283f)}${LF}${cps(0x2800, 0x283f)}`;
+  assert.equal((await a.req("send", { channelId: "lobby", text: art })).ok, true);
+  assert.equal((await a.req("read", { channelId: "lobby" })).messages![0].text, art);
+  a.close(); h.stop();
+});

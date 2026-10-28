@@ -122,3 +122,30 @@ test("clipText: 코드포인트 기준으로 자르되 경계에 걸린 이모�
   assert.equal(clipText(`ab${HEART}c`, 10), `ab${HEART}c`);
   assert.equal(clipText("가나다", 2), "가나");
 });
+
+// ── v2.1.3 ⑤ RT42: 점자 공백 U+2800 ──
+const BRAILLE_BLANK = ch(0x2800);
+
+test("RT42: 점자 공백은 이름·설명에서 보이게(백슬래시+u{2800}), 한 줄 출력에서는 공백, 종류는 filler", () => {
+  assert.equal(isUnsafeChar(0x2800), true);
+  assert.equal(kindOf(0x2800), "filler");
+  assert.equal(escapeControls(`Admin${BRAILLE_BLANK}`), `Admin${B}u{2800}`);
+  assert.deepEqual(inspectText(`Admin${BRAILLE_BLANK}`).counts, { filler: 1 });
+  assert.equal(oneLine(`Admin${BRAILLE_BLANK}x`), "Admin x");
+});
+
+test("RT42: 메시지 본문(keepLineBreaks)의 점자 그림은 그대로, 기록 없음", () => {
+  const art = `${ch(0x283f)}${BRAILLE_BLANK}${ch(0x283f)}${ch(10)}${BRAILLE_BLANK}${ch(0x283f)}`;
+  const r = inspectText(art, { keepLineBreaks: true });
+  assert.equal(r.text, art);
+  assert.equal(r.changed, false);
+});
+
+// ── v2.1.3 ④: 설계상 이스케이프하는 정상 시퀀스(숨은 정보 통로가 될 수 있어서) — 바꾸려면 설계부터 ──
+test("④ 고정: 텍스트 표현 FE0E·한자 이체자 선택자(IVS)·ZWNJ·이모지 뒤 중복 FE0F는 이스케이프된다", (t) => {
+  t.diagnostic(`Node ICU Unicode ${process.versions.unicode} — RGI 이모지 판정은 이 버전을 따른다`);
+  assert.equal(escapeControls(`${ch(0x2194)}${ch(0xfe0e)}`), `${ch(0x2194)}${B}u{FE0E}`); // ↔︎ 텍스트 표현
+  assert.equal(escapeControls(`${ch(0x845b)}${ch(0xe0100)}`), `${ch(0x845b)}${B}u{E0100}`); // 葛 + IVS
+  assert.equal(escapeControls(`${ch(0x645)}${ch(0x6cc)}${ch(0x200c)}${ch(0x62e)}`), `${ch(0x645)}${ch(0x6cc)}${B}u{200C}${ch(0x62e)}`); // 페르시아어 ZWNJ
+  assert.equal(escapeControls(`${ch(0x1f600)}${ch(0xfe0f)}`), `${ch(0x1f600)}${B}u{FE0F}`); // 😀 + 불필요한 FE0F
+});
