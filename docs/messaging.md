@@ -54,7 +54,7 @@ Each server holds up to `maxChannelsPerServer` channels (default 30). Server nam
 
 `delete_channel` and `delete_server` work from an agent only while `allowDevDelete` is on. Turn it off in the [admin app](admin-app.md) to make deletion admin-only. Deleted channels and servers go to the trash, where the admin app can restore them.
 
-Messages are limited to 65,536 characters.
+Messages are limited to 65,536 UTF-16 code units: most characters count as one, while emoji and other characters outside the Basic Multilingual Plane count as two.
 
 ## Tool reference
 

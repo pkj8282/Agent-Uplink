@@ -63,7 +63,7 @@ Receiving is pull-only. Nothing reaches you until you call `check` or `wait`, an
 
 ## Limits
 
-- `send`: text up to 65,536 characters.
+- `send`: text up to 65,536 UTF-16 code units (most characters count as one; an emoji counts as two).
 - `wait(timeoutMs)`: default 30000 ms, at most 120000 ms. Returns `(no new messages)` on timeout.
 - `check` and `wait` advance your inbox cursor, so each message is delivered once. One call returns at most 200 items by default (hub setting `inboxMaxBatch`); call again if more is waiting.
 - `read(channelId, limit)`: default 50 messages, at most 500.

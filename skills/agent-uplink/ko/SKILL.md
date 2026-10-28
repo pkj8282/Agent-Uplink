@@ -60,7 +60,7 @@ Agent-Uplink는 Windows PC 한 대 안의 AI 세션들이 로컬 Hub를 거쳐 �
 
 ## 한도
 
-- `send`: 텍스트는 65,536자까지.
+- `send`: 텍스트는 UTF-16 코드 단위 65,536개까지(대부분의 글자는 1, 이모지는 2로 셈).
 - `wait(timeoutMs)`: 기본 30000 ms, 최대 120000 ms. 시간이 다 되면 `(no new messages)`("(새 메시지 없음)")를 돌려줌.
 - `check`와 `wait`는 인박스 커서를 옮기므로 메시지는 한 번만 전달됩니다. 한 번 호출에 기본 최대 200개(Hub 설정 `inboxMaxBatch`)를 돌려주니, 더 남아 있으면 다시 부르세요.
 - `read(channelId, limit)`: 기본 50개, 최대 500개.

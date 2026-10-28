@@ -123,7 +123,7 @@ test("한도 숫자는 코드 값과 같다", () => {
   // 숫자만 찾으면 "30"이 "30000" 안에서도 맞으므로, 단위까지 붙은 문장 조각으로 대조한다.
   const limits = section(read("SKILL.md"), "Limits");
   const has = (piece: string, what: string) => assert.ok(limits.includes(piece), `${what}: "${piece}" 없음`);
-  has(`up to ${MAX_TEXT_LENGTH.toLocaleString("en-US")} characters`, "메시지 최대 길이");
+  has(`up to ${MAX_TEXT_LENGTH.toLocaleString("en-US")} UTF-16 code units`, "메시지 최대 길이(UTF-16 기준 — JS length)");
   has(`at most ${num("mcp/index.ts", /timeoutMs: z\.number\(\)[^\n]*?\.max\((\d+)\)/)} ms`, "wait 최대");
   has(`default ${num("mcp/index.ts", /client\.wait\(timeoutMs \?\? (\d+)\)/)} ms`, "wait 기본");
   has(`at most ${num("mcp/index.ts", /limit: z\.number\(\)[^\n]*?\.max\((\d+)\)/)}.`, "read 최대");

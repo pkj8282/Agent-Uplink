@@ -121,12 +121,12 @@ export class Hub {
     return hubMsg(this.lang(), key, params);
   }
 
-  /** 오류 응답: 판단용 code와 표시용 문구. */
   /** 이름 요청의 감독(validateName에 넘긴다). */
   private nameGuard(where: string, account: unknown): (s: string) => string {
     return (s) => this.security.guard(s, { source: "request", where, field: "name", ...(typeof account === "string" ? { account } : {}) });
   }
 
+  /** 오류 응답: 판단용 code와 표시용 문구. */
   protected err(code: string, key: HubKey, params?: object): { ok: false; code: string; error: string } {
     return { ok: false, code, error: this.msg(key, params) };
   }
