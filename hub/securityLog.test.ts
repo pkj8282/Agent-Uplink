@@ -117,19 +117,38 @@ test("RT41: 키는 seenMax개까지 — 가장 오래 보지 않은 키부터 �
   for (const i of [0, 1, 2, 0, 3]) log.guard(`old${i}${ZW}`, at(i)); // 1이 가장 오래 안 본 키
   log.finishStartupScan();
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, "security", "disk-seen.json"), "utf8")).keys.length, 3);
-  const again = new SecurityLog({ dir, seenMax: 3, max: 2 }); // 기록에서 채우는 몫을 줄여 파일 키만 보게 한다
-  const before = again.recent(100).length;
+  fs.rmSync(fileOf(dir)); // 기록 파일 없이 disk-seen.json만으로 판정되는지 본다
+  const again = new SecurityLog({ dir, seenMax: 3 });
   for (const i of [0, 2, 3]) again.guard(`old${i}${ZW}`, at(i));
-  assert.equal(again.recent(100).length, before);
+  assert.equal(again.recent(100).length, 0);
+  again.guard(`old1${ZW}`, at(1)); // 빠진 키는 다시 기록된다
+  assert.equal(again.recent(100).length, 1);
 });
 
-test("RT41: 시작 스캔 뒤 새 디스크 발견(휴지통 복원 등)도 키를 저장해 다음 시작에 다시 기록하지 않는다", () => {
+test("RT41: 시작 스캔 뒤 새 디스크 발견(받은편지함·휴지통 복원 등)도 키를 저장해 다음 시작에 다시 기록하지 않는다", async () => {
   const dir = tempDir("uplink-seclog-");
   const log = startOnce(dir, 1);
   log.guard(`restored${ZW}`, { ...DISK, where: "log", field: "text", account: "u9" });
+  await new Promise((r) => setImmediate(r)); // 저장은 지금 하는 일이 끝난 뒤 한 번에
+  fs.rmSync(fileOf(dir)); // 기록 파일 없이 disk-seen.json만으로 판정되는지 본다
   const again = new SecurityLog({ dir });
   again.guard(`old0${ZW}`, { ...DISK, account: "u0" });
   again.guard(`restored${ZW}`, { ...DISK, where: "log", field: "text", account: "u9" });
   again.finishStartupScan();
-  assert.equal(again.recent(100).length, 2);
+  assert.equal(again.recent(100).length, 0);
+});
+
+test("RT41: 시작 뒤 새 디스크 발견이 많아도(키 19,000개 + 새 1,000건) 저장을 한 번에 묶어 1초 안에 끝난다", async () => {
+  const dir = tempDir("uplink-seclog-");
+  fs.mkdirSync(path.join(dir, "security"), { recursive: true });
+  const keys = Array.from({ length: 19000 }, (_, i) => i.toString(16).padStart(32, "0"));
+  fs.writeFileSync(path.join(dir, "security", "disk-seen.json"), JSON.stringify({ v: 1, keys }));
+  const log = new SecurityLog({ dir });
+  log.finishStartupScan();
+  const t0 = performance.now();
+  for (let i = 0; i < 1000; i++) log.guard(`late${i}${ZW}`, { ...DISK, where: "inbox", field: "text", account: "u1" });
+  await new Promise((r) => setImmediate(r));
+  const ms = performance.now() - t0;
+  assert.ok(ms < 1000, `${ms.toFixed(0)}ms`);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, "security", "disk-seen.json"), "utf8")).keys.length, 20000);
 });

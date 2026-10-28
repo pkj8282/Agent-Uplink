@@ -9,19 +9,20 @@ const prop = (p: string) => `${BACKSLASH}p{${p}}`;
  * 위험 문자: 제어(Cc)·서식(Cf)·줄/문단 구분자(Zl/Zp)·기본 무시 문자(Default_Ignorable_Code_Point)·짝 없는 서로게이트(Cs).
  * 줄바꿈·방향 제어·폭 0 문자와 유니코드 스테가노그래피에 쓰이는 태그 문자·변형 선택자·채움 문자가 모두 여기에 든다.
  * 정상 이모지 안의 ZWJ·변형 선택자·태그는 inspectText가 이모지 묶음으로 먼저 떼어 보호한다.
- * 점자 공백 U+2800(v2.1.3)도 넣는다 — 보이는 기호(So)지만 빈칸으로 보여 이름 끝 위장에 쓰인다. 메시지 본문은 점자 그림·문서를 위해 그대로 둔다(kept).
+ * 빈칸으로 보이는 기호(v2.1.3)도 넣는다 — 점자 공백 U+2800, 빈 음표 머리 U+1D159, 거란 소자 채움 U+16FE4. 위험 범주는 아니지만 이름 끝 위장에 쓰인다. 메시지 본문은 점자 그림·문서를 위해 그대로 둔다(kept).
  */
 const UNSAFE_SET = `[${["Cc", "Cf", "Zl", "Zp", "Default_Ignorable_Code_Point", "Cs"].map(prop).join("")}]`;
 const UNSAFE = new RegExp(`^${UNSAFE_SET}$`, "v");
-const BRAILLE_BLANK = 0x2800;
+const BLANKS = [0x2800, 0x1d159, 0x16fe4];
+const isBlank = (c: number) => BLANKS.includes(c);
 /** 사전 검사: 위험 문자가 하나도 없으면 ③·④ 모두 바꿀 것이 없다 — 긴 본문·로그 적재에서 이모지 분리 비용을 건너뛴다. */
-const ANY_UNSAFE = new RegExp(`${UNSAFE_SET}|${String.fromCodePoint(BRAILLE_BLANK)}`, "v");
+const ANY_UNSAFE = new RegExp(`${UNSAFE_SET}|[${String.fromCodePoint(...BLANKS)}]`, "v");
 const FORMAT = new RegExp(`^${prop("Cf")}$`, "v");
 const RGI_ALL = new RegExp(prop("RGI_Emoji"), "gv");
 const RGI_ONE = new RegExp(`^${prop("RGI_Emoji")}$`, "v");
 
 export function isUnsafeChar(c: number): boolean {
-  return c === BRAILLE_BLANK || UNSAFE.test(String.fromCodePoint(c));
+  return isBlank(c) || UNSAFE.test(String.fromCodePoint(c));
 }
 
 export type FindingKind =
@@ -36,7 +37,7 @@ export function kindOf(c: number): FindingKind {
   if ((c >= 0x200b && c <= 0x200d) || (c >= 0x2060 && c <= 0x2064) || c === 0xfeff || c === 0x180e || c === 0x034f) return "zero_width";
   if (c >= 0xe0000 && c <= 0xe007f) return "tag";
   if ((c >= 0xfe00 && c <= 0xfe0f) || (c >= 0xe0100 && c <= 0xe01ef)) return "variation_selector";
-  if (c === 0x3164 || c === 0xffa0 || c === 0x115f || c === 0x1160 || c === BRAILLE_BLANK) return "filler";
+  if (c === 0x3164 || c === 0xffa0 || c === 0x115f || c === 0x1160 || isBlank(c)) return "filler";
   if (c >= 0xd800 && c <= 0xdfff) return "surrogate";
   if (FORMAT.test(String.fromCodePoint(c))) return "format";
   return "ignorable";
@@ -49,7 +50,7 @@ interface Seg { emoji: boolean; text: string }
 
 const NAMED: Record<number, string> = { 0x0a: "n", 0x0d: "r", 0x09: "t" };
 const add = (counts: Counts, k: FindingKind, n = 1) => { counts[k] = (counts[k] ?? 0) + n; };
-const kept = (c: number, keepLineBreaks: boolean) => keepLineBreaks && (c === 0x0a || c === 0x0d || c === 0x09 || c === BRAILLE_BLANK);
+const kept = (c: number, keepLineBreaks: boolean) => keepLineBreaks && (c === 0x0a || c === 0x0d || c === 0x09 || isBlank(c));
 const isControl = (c: number) => c < 0x20 || (c >= 0x7f && c <= 0x9f);
 /** 가장 긴 RGI 이모지 시퀀스(약 10 코드포인트)보다 넉넉한 여유 — 앞부분만 잘라 처리해도 max 안의 이모지는 온전하다. */
 const EMOJI_SLACK = 32;

@@ -149,3 +149,12 @@ test("④ 고정: 텍스트 표현 FE0E·한자 이체자 선택자(IVS)·ZWNJ·
   assert.equal(escapeControls(`${ch(0x645)}${ch(0x6cc)}${ch(0x200c)}${ch(0x62e)}`), `${ch(0x645)}${ch(0x6cc)}${B}u{200C}${ch(0x62e)}`); // 페르시아어 ZWNJ
   assert.equal(escapeControls(`${ch(0x1f600)}${ch(0xfe0f)}`), `${ch(0x1f600)}${B}u{FE0F}`); // 😀 + 불필요한 FE0F
 });
+
+test("RT42 재공격(검증 Minor): 빈칸으로 보이는 U+1D159·U+16FE4도 점자 공백과 같이 — 이름은 이스케이프, 본문은 그대로", () => {
+  for (const c of [0x1d159, 0x16fe4]) {
+    const hex = c.toString(16).toUpperCase();
+    assert.equal(kindOf(c), "filler", hex);
+    assert.equal(escapeControls(`Admin${ch(c)}`), `Admin${B}u{${hex}}`, hex);
+    assert.equal(inspectText(`x${ch(c)}y`, { keepLineBreaks: true }).changed, false, hex);
+  }
+});

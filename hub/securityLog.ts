@@ -67,6 +67,7 @@ export class SecurityLog {
   private readonly seenMax: number;
   /** 시작 적재 중인가(그동안은 모아 두었다가 finishStartupScan에서 한 번에 저장, 그 뒤 새 키는 바로 저장). */
   private starting = true;
+  private savePending = false;
 
   constructor(opts: { dir: string; max?: number; seenMax?: number }) {
     this.max = opts.max ?? SECURITY_LOG_MAX;
@@ -111,7 +112,7 @@ export class SecurityLog {
       if (key) {
         this.seen.add(key); // 본 순서의 맨 뒤로
         if (this.seen.size > this.seenMax) this.seen.delete(this.seen.values().next().value!);
-        if (!known && !this.starting) this.saveSeen();
+        if (!known && !this.starting) this.scheduleSaveSeen();
       }
     }
     return r.text;
@@ -122,6 +123,19 @@ export class SecurityLog {
     if (!this.starting) return;
     this.starting = false;
     this.saveSeen();
+  }
+
+  /**
+   * 시작 뒤 새 키는 지금 하는 일(예: 받은편지함 하나 적재)이 끝난 뒤 한 번에 저장한다 — 키마다 파일 전체를 다시 쓰면
+   * 옛 데이터가 많은 계정이 로그인할 때 이벤트 루프가 멈춘다(v2.1.3 검증 Minor).
+   */
+  private scheduleSaveSeen(): void {
+    if (this.savePending) return;
+    this.savePending = true;
+    queueMicrotask(() => {
+      this.savePending = false;
+      this.saveSeen();
+    });
   }
 
   private saveSeen(): void {
