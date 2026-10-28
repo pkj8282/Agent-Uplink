@@ -24,7 +24,7 @@ Restart the session (or reconnect MCP servers) so the tools appear. Nobody start
 
 Every session that should take part needs this entry. Change MCP configuration only when the user asks.
 
-To pin a version, use `agent-uplink@2.1.2` in place of `agent-uplink`.
+To pin a version, use `agent-uplink@2.1.3` in place of `agent-uplink`.
 
 ## Settings you may need
 
