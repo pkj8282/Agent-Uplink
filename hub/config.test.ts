@@ -27,7 +27,7 @@ test("기존 설정을 읽고 누락 키는 기본값으로 채운다", () => {
 
 test("saveConfig는 원자적으로 저장하고 loadConfig가 읽는다", () => {
   const dir = tmp();
-  saveConfig(dir, { maxChannelsPerServer: 7, allowDevDelete: false, inboxMaxBatch: 50 });
+  saveConfig(dir, { maxChannelsPerServer: 7, allowDevDelete: false, inboxMaxBatch: 50, language: "ko" });
   const c = loadConfig(dir);
   assert.equal(c.maxChannelsPerServer, 7);
   assert.equal(c.allowDevDelete, false);

@@ -14,7 +14,7 @@ test("v3 프로토콜 상수", () => {
 test("open_dm/list_dms 요청 타입과 dms/channelId 응답 필드가 존재한다(컴파일+형태)", () => {
   const a: Request = { op: "open_dm", id: 1, peer: "u2" };
   const b: Request = { op: "list_dms", id: 2 };
-  const r: Response = { ok: true, id: 1, channelId: "c", dms: [{ peer: "u2", peerName: "B", channelId: "c" }] };
+  const r: Response = { ok: true, id: 1, channelId: "c", dms: [{ peer: "u2", peerName: "B", channelId: "c", peerDescription: "", peerOnline: false }] };
   assert.equal(a.op, "open_dm");
   assert.equal(b.op, "list_dms");
   assert.equal(r.dms![0].peerName, "B");

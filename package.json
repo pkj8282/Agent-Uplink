@@ -39,7 +39,8 @@
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc",
-    "prepublishOnly": "npm run clean && npm run build",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
+    "prepublishOnly": "npm run clean && npm run typecheck && npm run build",
     "test": "tsx --test --test-force-exit \"**/*.test.ts\"",
     "start:hub": "tsx hub/index.ts",
     "start:mcp": "tsx mcp/index.ts"

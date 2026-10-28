@@ -60,6 +60,15 @@ test("배포 직전 클린 빌드(prepublishOnly)", () => {
   assert.match(pkg.scripts.prepublishOnly, /build/);
 });
 
+test("배포 전 typecheck: 테스트 파일까지(tsconfig.test.json) 검사한다", () => {
+  assert.match(pkg.scripts.typecheck, /tsc --noEmit/);
+  assert.match(pkg.scripts.typecheck, /tsconfig\.test\.json/);
+  assert.match(pkg.scripts.prepublishOnly, /typecheck/);
+  const tc = json("tsconfig.test.json");
+  assert.equal(tc.compilerOptions.noEmit, true);
+  assert.ok(!(tc.exclude as string[]).some((e) => e.includes("test")), "테스트 파일을 빼지 않는다");
+});
+
 test("npx 사용자는 lockfile 없이 받으므로 의존 범위의 하한은 테스트한(lockfile) 버전의 major.minor", () => {
   const lock = json("package-lock.json");
   for (const dep of Object.keys(pkg.dependencies)) {
