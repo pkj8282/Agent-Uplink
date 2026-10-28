@@ -37,6 +37,7 @@ At start the hub also repairs what it can:
 
 - A corrupted `dm\index.json` is kept as `index.json.corrupt-<time>` and rebuilt from the accounts' DM records, so existing conversations continue on the same channels.
 - A corrupted `servers\index.json` is kept the same way. Server structure cannot be rebuilt, so the channel logs are left where they are — on this and every later start, as long as an `index.json.corrupt-*` backup remains. Delete the backup once you have restored the index from it (or given up on it) to resume orphan cleanup for server logs.
+- If the damaged file cannot be moved (another program holds it), the hub copies it to `index.json.corrupt-<time>-<random>` instead. If even that fails, the hub runs from memory and does not write that index until the next start, so the only copy of the damaged file is never overwritten.
 - Channel and DM logs that no index refers to (left over from crashes or from deletions in v2.0.0) are moved into the trash as *orphan* items. This is skipped for server logs when `servers\index.json` was corrupted.
 
 Server and channel names are unique within their scope, compared case-insensitively.

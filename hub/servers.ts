@@ -33,7 +33,10 @@ export class ServerStore {
     }
   }
 
-  constructor(opts: { dir: string; guard?: Guard }) {
+  /** 손상 원본을 백업하지 못했는가 — 그 실행 동안 index.json을 쓰지 않는다(유일한 원본을 덮어쓰지 않게, v2.1.3). */
+  saveBlocked = false;
+
+  constructor(opts: { dir: string; guard?: Guard; backup?: (file: string) => string | null }) {
     const guard = opts.guard ?? plainGuard;
     const at = { source: "disk" as const, where: "servers" };
     const dir = path.join(opts.dir, "servers");
@@ -51,13 +54,14 @@ export class ServerStore {
         }
       } catch {
         // 손상: 원본을 보존하고 빈 상태로 시작(개별 채널 로그는 보존, 고아 정리는 건너뜀)
-        backupCorrupt(this.file);
+        if (!(opts.backup ?? backupCorrupt)(this.file)) this.saveBlocked = true;
         this.corrupt = true;
       }
     }
   }
 
   private save(): void {
+    if (this.saveBlocked) return;
     const obj: Record<string, ServerRecord> = {};
     for (const [id, rec] of this.servers) obj[id] = rec;
     try {

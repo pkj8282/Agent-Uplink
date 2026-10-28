@@ -5,6 +5,8 @@ import path from "node:path";
 import net from "node:net";
 import { encodeFrame, FrameDecoder } from "../shared/framing.js";
 import { startTestHub, TestClient, tempDir } from "./testing.js";
+import { DmStore } from "./dm.js";
+import { ServerStore } from "./servers.js";
 
 function tmp(): string { return tempDir("uplink-rec-"); }
 
@@ -82,4 +84,60 @@ test("servers/index.json이 손상되면 .corrupt-로 보존하고 서버 로그
   assert.equal(fs.readdirSync(path.join(dataDir, "servers")).some((f) => f.startsWith("index.json.corrupt-")), true);
   assert.deepEqual(fs.readdirSync(path.join(dataDir, "trash")), []);
   hub.stop();
+});
+
+// ── v2.1.3 RT43: 손상 index.json의 백업이 실패하면 그 실행 동안 덮어쓰지 않는다(설계 ⑨) ──
+test("RT43: dm/index.json 손상 + 백업 실패 → DM을 새로 만들어도 원본 바이트가 그대로", () => {
+  const dir = tempDir("uplink-rt43-");
+  fs.mkdirSync(path.join(dir, "dm"), { recursive: true });
+  const f = path.join(dir, "dm", "index.json");
+  fs.writeFileSync(f, "{손상된 원본");
+  const dm = new DmStore({ dir, backup: () => null });
+  assert.equal(dm.corrupt, true);
+  assert.equal(dm.saveBlocked, true);
+  const rec = dm.create("u1", "u2", "A↔B");
+  assert.equal(dm.get(rec.channelId)?.label, "A↔B"); // 메모리로는 동작
+  assert.equal(fs.readFileSync(f, "utf8"), "{손상된 원본");
+});
+
+test("RT43: servers/index.json 손상 + 백업 실패 → 서버를 만들어도 원본 바이트가 그대로", () => {
+  const dir = tempDir("uplink-rt43-");
+  fs.mkdirSync(path.join(dir, "servers"), { recursive: true });
+  const f = path.join(dir, "servers", "index.json");
+  fs.writeFileSync(f, "{손상된 원본");
+  const s = new ServerStore({ dir, backup: () => null });
+  assert.equal(s.saveBlocked, true);
+  assert.equal(s.sweepBlocked, true);
+  s.createServer("Main");
+  assert.equal(fs.readFileSync(f, "utf8"), "{손상된 원본");
+});
+
+test("RT43: 백업이 되면 지금처럼 저장한다(saveBlocked false)", () => {
+  const dir = tempDir("uplink-rt43-");
+  fs.mkdirSync(path.join(dir, "dm"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "dm", "index.json"), "{x");
+  const dm = new DmStore({ dir });
+  assert.equal(dm.saveBlocked, false);
+  dm.create("u1", "u2", "L");
+  assert.equal(Object.keys(JSON.parse(fs.readFileSync(path.join(dir, "dm", "index.json"), "utf8"))).length, 1);
+});
+
+test("RT43 재공격: 백업 rename이 막혀도(다른 프로그램이 잡음 등) 손상 원본 내용이 어딘가(.corrupt-* 또는 원래 파일)에 남는다", () => {
+  const dir = tempDir("uplink-rt43-");
+  fs.mkdirSync(path.join(dir, "dm"), { recursive: true });
+  const f = path.join(dir, "dm", "index.json");
+  fs.writeFileSync(f, "{손상된 원본");
+  const orig = fs.renameSync;
+  fs.renameSync = ((a: fs.PathLike, b: fs.PathLike) => {
+    if (String(b).includes(".corrupt-")) throw Object.assign(new Error("EBUSY"), { code: "EBUSY" });
+    return orig(a, b);
+  }) as typeof fs.renameSync;
+  try {
+    new DmStore({ dir }).create("u1", "u2", "L");
+  } finally {
+    fs.renameSync = orig;
+  }
+  const kept = fs.readdirSync(path.join(dir, "dm")).filter((n) => n.startsWith("index.json"))
+    .some((n) => fs.readFileSync(path.join(dir, "dm", n), "utf8") === "{손상된 원본");
+  assert.equal(kept, true);
 });

@@ -15,8 +15,10 @@ export class DmStore {
   private records = new Map<string, DmRecord>(); // channelId → record
   /** index.json을 읽지 못했는가(계정 역색인으로 재구성 — recovery.ts). */
   corrupt = false;
+  /** 손상 원본을 백업하지 못했는가 — 그 실행 동안 index.json을 쓰지 않는다(유일한 원본을 덮어쓰지 않게, v2.1.3). */
+  saveBlocked = false;
 
-  constructor(opts: { dir: string; guard?: Guard }) {
+  constructor(opts: { dir: string; guard?: Guard; backup?: (file: string) => string | null }) {
     const guard = opts.guard ?? plainGuard;
     const dir = path.join(opts.dir, "dm");
     fs.mkdirSync(dir, { recursive: true });
@@ -30,13 +32,14 @@ export class DmStore {
         }
       } catch {
         // 손상: 원본을 보존하고 빈 상태로 시작 → Hub가 계정 역색인으로 재구성한다(개별 DM 로그는 보존)
-        backupCorrupt(this.file);
+        if (!(opts.backup ?? backupCorrupt)(this.file)) this.saveBlocked = true;
         this.corrupt = true;
       }
     }
   }
 
   private save(): void {
+    if (this.saveBlocked) return;
     const obj: Record<string, DmRecord> = {};
     for (const [id, rec] of this.records) obj[id] = rec;
     try {

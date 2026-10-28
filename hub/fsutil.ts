@@ -27,12 +27,22 @@ export function writeSecretFile(file: string, data: string): void {
   }
 }
 
-/** 읽을 수 없는 파일을 같은 폴더의 '<이름>.corrupt-<ms>'로 옮겨 보존한다(실패 시 null). */
+/**
+ * 읽을 수 없는 파일을 같은 폴더의 '<이름>.corrupt-<ms>'로 옮겨 보존한다. 옮기지 못하면(다른 프로그램이 잡고 있음 등)
+ * '<이름>.corrupt-<ms>-<hex>'로 복사한다(v2.1.3). 둘 다 실패하면 null — 호출자는 원본을 덮어쓰지 말아야 한다.
+ */
 export function backupCorrupt(file: string, now: number = Date.now()): string | null {
   const dest = `${file}.corrupt-${now}`;
   try {
     fs.renameSync(file, dest);
     return dest;
+  } catch {
+    // 아래 복사로
+  }
+  const copy = `${dest}-${randomBytes(4).toString("hex")}`;
+  try {
+    fs.copyFileSync(file, copy, fs.constants.COPYFILE_EXCL);
+    return copy;
   } catch {
     return null;
   }
