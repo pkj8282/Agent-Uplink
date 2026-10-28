@@ -246,3 +246,39 @@ test("디스크 출처: 로그·받은편지함 본문도 정리(줄바꿈 유�
   // 두 번째 시작에서는 받은편지함이 이미 소비됐을 수 있다 — 같은 기록이 다시 늘지 않는지만 본다
   assert.equal(await diskCount(), first);
 });
+
+// ── v2.1.3 RT40: 본문 이스케이프 증폭(설계 ①) — 이스케이프 뒤 길이 상한 ──
+const ZWSP = cps(0x200b); // 이스케이프하면 8자(\u{200B})
+
+test("RT40: 폭 0 문자 65,536개 send는 거부(text_hidden_too_long)되고 채널에 남지 않으며 탐지 기록은 남는다", async () => {
+  const { hub: h, port, token } = await hub();
+  const a = await login(port, U1, "A");
+  const r = await a.req("send", { channelId: "lobby", text: ZWSP.repeat(65536) });
+  assert.equal(r.ok, false);
+  assert.equal(r.code, "text_hidden_too_long");
+  assert.match(r.error!, /131072/);
+  assert.deepEqual((await a.req("read", { channelId: "lobby" })).messages, []);
+  const admin = await adminOf(port);
+  const f = (await admin.req("admin_snapshot", { token })).securityFindings!;
+  assert.equal(f.some((x) => x.where === "send" && x.counts.zero_width === 65536), true);
+  admin.close(); a.close(); h.stop();
+});
+
+test("RT40: 숨은 문자가 조금 섞인 최대 길이 글(ZWSP 100개)은 통과", async () => {
+  const { hub: h, port } = await hub();
+  const a = await login(port, U1, "A");
+  const r = await a.req("send", { channelId: "lobby", text: "가".repeat(65436) + ZWSP.repeat(100) });
+  assert.equal(r.ok, true, r.error);
+  assert.equal((await a.req("read", { channelId: "lobby" })).messages![0].text.length, 65436 + 800);
+  a.close(); h.stop();
+});
+
+test("RT40: 이스케이프 결과가 정확히 131,072자면 통과, 131,073자면 거부", async () => {
+  const { hub: h, port } = await hub();
+  const a = await login(port, U1, "A");
+  const z = 9363; // 원문 56,168 + 9,363 = 65,531자 → 이스케이프 뒤 56,168 + 74,904 = 131,072자
+  assert.equal((await a.req("send", { channelId: "lobby", text: "a".repeat(131072 - 8 * z) + ZWSP.repeat(z) })).ok, true);
+  const over = await a.req("send", { channelId: "lobby", text: "a".repeat(131073 - 8 * z) + ZWSP.repeat(z) });
+  assert.equal(over.code, "text_hidden_too_long");
+  a.close(); h.stop();
+});

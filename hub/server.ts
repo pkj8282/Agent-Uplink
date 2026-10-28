@@ -26,6 +26,7 @@ import {
   PROTOCOL_VERSION,
   LOBBY_CHANNEL_ID,
   MAX_TEXT_LENGTH,
+  MAX_STORED_TEXT_LENGTH,
   Channel,
   InboxItem,
   Request,
@@ -681,6 +682,11 @@ export class Hub {
         const name = this.accounts.get(uuid)!.name;
         // 본문 감독(v2.1.2): 길이는 원래 기준으로 위에서 검사했다. 줄바꿈·탭은 유지, 숨은 문자는 이스케이프·기록.
         const text = this.security.guard(req.text, { source: "request", where: "send", field: "text", account: uuid, keepLineBreaks: true });
+        // 이스케이프 뒤 상한(v2.1.3): 거부해도 위의 탐지 기록은 남긴다(시도 자체가 감독 대상).
+        if (text.length > MAX_STORED_TEXT_LENGTH) {
+          reply(this.err("text_hidden_too_long", "text_hidden_too_long", { max: MAX_STORED_TEXT_LENGTH }));
+          return;
+        }
         const msg = this.channels.append(ch.id, uuid, name, text);
         reply({ ok: true, seq: msg.seq });
         this.fanout(ch, msg.from, name, text, msg.ts);
