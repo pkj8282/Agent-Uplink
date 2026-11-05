@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { encodeFrame, FrameDecoder } from "./framing.js";
 import { newNonce, isNonce, clientProof, hubProof, proofEquals, readClientKeyFile } from "./auth.js";
-import type { AdminConfig, ConfigPatch, IpcResult, NameConflict, RestoreReport, Snapshot } from "./types.js";
+import type { AdminConfig, ConfigPatch, ConnProfile, ConnStatus, IpcResult, NameConflict, RestoreReport, Snapshot } from "./types.js";
 import { effectiveLang, type Lang } from "./i18n.js";
 import { readLanguageFile } from "./langFile.js";
 import { adminMsg, LEGACY_UNKNOWN_OP, type AdminKey } from "./messages.js";
@@ -135,6 +135,27 @@ export class AdminClient {
   async deleteServer(serverId: string): Promise<void> { await this.call("admin_delete_server", { serverId }); }
   async deleteAccount(uuid: string): Promise<void> { await this.call("admin_delete_account", { uuid }); }
   async deleteDm(channelId: string): Promise<void> { await this.call("admin_delete_dm", { channelId }); }
+
+  // ───── 통신(v3.0) — 화면은 2단계 ─────
+  async connStatus(): Promise<ConnStatus> {
+    const r = await this.call("admin_conn_status", {});
+    return { server: r.server ?? null, members: r.members ?? [], joined: r.joined ?? [], userName: r.userName ?? null };
+  }
+  async connSetUser(name: string): Promise<string> { return (await this.call("admin_conn_set_user", { name })).name; }
+  async connEnableServer(o: { port: number; bindHost?: string; profile: ConnProfile; spaceName: string; burnOnJoin: boolean }): Promise<number> {
+    return (await this.call("admin_conn_enable_server", o)).port;
+  }
+  async connDisableServer(): Promise<void> { await this.call("admin_conn_disable_server", {}); }
+  async connCreateServer(name: string): Promise<string> { return (await this.call("admin_conn_create_server", { name })).serverId; }
+  async connCreateChannel(serverId: string, name: string): Promise<string> { return (await this.call("admin_conn_create_channel", { serverId, name })).channelId; }
+  async connSetShared(serverIds: string[]): Promise<void> { await this.call("admin_conn_set_shared", { serverIds }); }
+  /** ipWarning: 직접 연결 초대 — 참여자에게 이 PC의 주소(공인 IP면 지역·통신사)가 보인다는 경고를 띄워야 함. */
+  async connCreateInvite(label: string, host: string, expiresInMs: number): Promise<{ code: string; ipWarning: boolean }> {
+    const r = await this.call("admin_conn_create_invite", { label, host, expiresInMs });
+    return { code: r.code, ipWarning: r.ipWarning === true };
+  }
+  async connJoin(code: string): Promise<string> { return (await this.call("admin_conn_join", { code })).spaceId; }
+  async connRevoke(memberId: string): Promise<void> { await this.call("admin_conn_revoke", { memberId }); }
 
   /** 뷰어를 열 1회용 티켓 URL. */
   async viewerTicket(): Promise<string> {

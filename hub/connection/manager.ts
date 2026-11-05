@@ -542,6 +542,24 @@ export class ConnectionManager implements ConnStatusSource {
     return null;
   }
 
+  // ───────── 관리 앱(관리 op) ─────────
+
+  status(): {
+    server: { enabled: boolean; port: number; profile: ProfileId; spaceName: string; burnOnJoin: boolean; shared: string[]; listening: boolean } | null;
+    members: { memberId: string; userName: string; joinedAt: number; revoked: boolean; online: boolean }[];
+    joined: { spaceId: string; spaceName: string; hostUser: string; connected: boolean }[];
+    userName: string | null;
+  } {
+    const cfg = this.store.serverConfig();
+    const online = new Set([...this.peers].map((p) => p.memberId));
+    return {
+      server: cfg ? { enabled: cfg.enabled, port: cfg.port, profile: cfg.profile, spaceName: cfg.spaceName, burnOnJoin: cfg.burnOnJoin, shared: cfg.shared, listening: this.listening } : null,
+      members: this.store.members().map((m) => ({ memberId: m.memberId, userName: m.userName, joinedAt: m.joinedAt, revoked: m.revoked, online: online.has(m.memberId) })),
+      joined: this.store.joined().map((j) => ({ spaceId: j.spaceId, spaceName: j.spaceName, hostUser: j.hostUser, connected: !!this.spaces.get(j.spaceId)?.client.connected })),
+      userName: this.store.userName(),
+    };
+  }
+
   // ───────── 시험용 ─────────
 
   setTapForTest(fn: ((o: object) => void) | null): void {

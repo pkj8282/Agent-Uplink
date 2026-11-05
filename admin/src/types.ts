@@ -33,6 +33,15 @@ export interface TrashItem {
 
 export interface NameConflict { kind: "server" | "channel"; name: string; to: string; }
 
+/** 통신 상태(v3.0, admin_conn_status). */
+export type ConnProfile = "tls13-aes256gcm" | "tls13-chacha20";
+export interface ConnStatus {
+  server: { enabled: boolean; port: number; profile: ConnProfile; spaceName: string; burnOnJoin: boolean; shared: string[]; listening: boolean } | null;
+  members: { memberId: string; userName: string; joinedAt: number; revoked: boolean; online: boolean }[];
+  joined: { spaceId: string; spaceName: string; hostUser: string; connected: boolean }[];
+  userName: string | null;
+}
+
 export interface RestoreReport {
   renamed: { kind: "server" | "channel"; from: string; to: string }[];
   recreatedServer?: { id: string; name: string };

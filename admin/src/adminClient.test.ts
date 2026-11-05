@@ -434,3 +434,30 @@ test("⑥ 구버전 Hub(스냅샷에 securityFindings 없음, v2.1.1 이하)면 
   assert.deepEqual(snap.trash, []);
   f.close();
 });
+
+test("conn_ops_via_admin_client: 관리 앱 클라이언트로 통신 서버 켜기·초대·상태·해지(v3.0)", async () => {
+  const { hub, client } = await startHub();
+  try {
+    const port = await (await import("../../hub/testing.js")).freePort();
+    assert.equal(await client.connSetUser("에이"), "에이");
+    assert.equal(await client.connEnableServer({ port, bindHost: "127.0.0.1", profile: "tls13-chacha20", spaceName: "팀", burnOnJoin: true }), port);
+    const serverId = await client.connCreateServer("팀작업");
+    const channelId = await client.connCreateChannel(serverId, "main");
+    assert.equal(typeof channelId, "string");
+    await client.connSetShared([serverId]);
+    const inv = await client.connCreateInvite("B", "127.0.0.1", 60_000);
+    assert.match(inv.code, /^UPLINK1-/);
+    assert.equal(inv.ipWarning, true);
+    const st = await client.connStatus();
+    assert.equal(st.server?.spaceName, "팀");
+    assert.deepEqual(st.server?.shared, [serverId]);
+    assert.equal(st.userName, "에이");
+    const bad = await toResult(() => client.connRevoke("nope"));
+    assert.equal(bad.ok, false);
+    if (!bad.ok) assert.equal(bad.code, "member_not_found");
+    const j = await toResult(() => client.connJoin("UPLINK1-AAAA"));
+    assert.equal(j.ok, false);
+    await client.connDisableServer();
+    assert.equal((await client.connStatus()).server?.enabled, false);
+  } finally { hub.stop(); }
+});

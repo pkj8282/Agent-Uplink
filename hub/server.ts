@@ -23,12 +23,14 @@ import { effectiveLang, type Lang } from "../shared/i18n.js";
 import { currentLang } from "../shared/langConfig.js";
 import { SecurityLog } from "./securityLog.js";
 import { ConnectionManager } from "./connection/manager.js";
+import { isProfileId } from "../shared/cryptoProfile.js";
 import {
   MAGIC,
   PROTOCOL_VERSION,
   LOBBY_CHANNEL_ID,
   MAX_TEXT_LENGTH,
   MAX_STORED_TEXT_LENGTH,
+  NAME_MAX,
   Channel,
   InboxItem,
   MessageOrigin,
@@ -223,6 +225,66 @@ export class Hub {
       ...(this.opts.connBackoffMs ? { backoffMs: this.opts.connBackoffMs } : {}),
     });
     this.setConnStatusSource(this.conn);
+  }
+
+  /** 통신 관리 op(v3.0, 관리 토큰 확인 뒤에만 호출). MCP 세션은 쓸 수 없다. */
+  private async connAdmin(q: { op: string } & Record<string, unknown>): Promise<Omit<Response, "id"> & Record<string, unknown>> {
+    const c = this.conn;
+    const fail = (code: string, key: HubKey, params?: object) => this.err(code, key, params);
+    const thrown = (e: unknown) => {
+      const code = (e as Error).message;
+      if (code === "name_invalid") return fail("name_invalid", "name_invalid", { kind: "account", max: NAME_MAX });
+      if (code === "server_not_enabled" || code === "server_not_found") return fail(code, code === "server_not_enabled" ? "server_not_enabled" : "server_not_found", { id: q.serverId });
+      if (code === "server_not_configured") return fail("server_not_enabled", "server_not_enabled");
+      return fail("conn_op_failed", "conn_op_failed", { code: (e as NodeJS.ErrnoException).code ?? code });
+    };
+    try {
+      switch (q.op) {
+        case "admin_conn_status":
+          return { ok: true, ...c.status() };
+        case "admin_conn_set_user":
+          return { ok: true, name: c.setUserName(String(q.name ?? "")) };
+        case "admin_conn_enable_server": {
+          const port = q.port;
+          if (typeof port !== "number" || !Number.isInteger(port) || port < 0 || port > 65535) return fail("port_invalid", "port_invalid");
+          if (!isProfileId(q.profile)) return fail("profile_invalid", "profile_invalid");
+          const bindHost = typeof q.bindHost === "string" && q.bindHost.length > 0 && q.bindHost.length <= 255 ? q.bindHost : undefined;
+          const actual = await c.enableServer({ port, profile: q.profile, spaceName: String(q.spaceName ?? ""), burnOnJoin: q.burnOnJoin !== false, ...(bindHost ? { bindHost } : {}) });
+          return { ok: true, port: actual };
+        }
+        case "admin_conn_disable_server":
+          await c.disableServer();
+          return { ok: true };
+        case "admin_conn_create_server":
+          return { ok: true, serverId: c.createCommsServer(String(q.name ?? "")) };
+        case "admin_conn_create_channel":
+          return { ok: true, channelId: c.createCommsChannel(String(q.serverId ?? ""), String(q.name ?? "")) };
+        case "admin_conn_set_shared": {
+          const ids = q.serverIds;
+          if (!Array.isArray(ids) || ids.length > 100 || !ids.every((x) => typeof x === "string")) return fail("shared_invalid", "shared_invalid");
+          c.setShared(ids as string[]);
+          return { ok: true };
+        }
+        case "admin_conn_create_invite": {
+          const host = q.host;
+          if (typeof host !== "string" || host.trim().length === 0 || host.length > 253) return fail("host_invalid", "host_invalid");
+          const ms = q.expiresInMs;
+          if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 1 || ms > 30 * 24 * 3600_000) return fail("expires_invalid", "expires_invalid");
+          const label = typeof q.label === "string" ? q.label.slice(0, 64) : "";
+          return { ok: true, ...c.createInvite(label, host.trim(), ms) };
+        }
+        case "admin_conn_join": {
+          const r = await c.join(String(q.code ?? ""));
+          return r.ok ? { ok: true, spaceId: r.spaceId } : fail(r.code, "conn_op_failed", { code: r.code });
+        }
+        case "admin_conn_revoke":
+          return c.revoke(String(q.memberId ?? "")) ? { ok: true } : fail("member_not_found", "member_not_found");
+        default:
+          return fail("unknown_op", "unknown_op");
+      }
+    } catch (e) {
+      return thrown(e);
+    }
   }
 
   /** 시험용: 채널이 등록돼 있는가. */
@@ -944,6 +1006,17 @@ export class Hub {
         reply({ ok: true, removed: this.trash.empty() });
         return;
       }
+
+      default:
+        if (req.op.startsWith("admin_conn_")) {
+          if (!adminAuth()) return;
+          void this.connAdmin(req as unknown as { op: string } & Record<string, unknown>).then((r) => reply(r));
+          return;
+        }
+        break;
+    }
+
+    switch (req.op) {
 
       case "set_profile": {
         const uuid = needLogin();
