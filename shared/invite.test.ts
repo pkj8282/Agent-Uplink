@@ -59,3 +59,11 @@ test("invite_garbage: 빈 값·깨진 문자·다른 버전·너무 긴 값", ()
   assert.deepEqual(decodeInvite(forge(code, (p) => { p.v = 2; }), now), { ok: false, code: "invite_version" });
   assert.deepEqual(decodeInvite(forge(code, (p) => { p.endpoint = { type: "direct", host: "", port: 99999 }; }), now), { ok: false, code: "invite_malformed" });
 });
+
+test("RT-C14_space_id_path_traversal: 공간 ID는 참여자 PC의 폴더 이름이 되므로 안전한 문자만", () => {
+  for (const bad of ["../../evil", "a/b", "a\\b", "..", "x".repeat(65), "공간"]) {
+    const code = encodeInvite({ ...base, spaceId: bad }, k.privateKeyPem); // 서명은 맞는(악의적 서버가 만든) 코드
+    assert.deepEqual(decodeInvite(code, now), { ok: false, code: "invite_malformed" }, bad);
+  }
+  assert.equal(decodeInvite(encodeInvite({ ...base, spaceId: "0c5f2a1e-9a7b-4c1d-8e2f-123456789abc" }, k.privateKeyPem), now).ok, true);
+});

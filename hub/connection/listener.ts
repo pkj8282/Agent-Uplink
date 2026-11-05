@@ -47,6 +47,8 @@ export interface ConnListenerDeps {
   log(code: string, detail: object): void;
   /** 원격 이름 감독(숨은 문자 이스케이프) — 없으면 validateName 기본 정리. */
   cleanName?: (s: string) => string;
+  /** 시험용: 이 리스너가 내보내는 모든 프레임(응답·이벤트)을 본다. */
+  tap?: (obj: object) => void;
 }
 
 const AFTER_AUTH = new Set<string>(CONN_OPS_AFTER_AUTH);
@@ -127,7 +129,11 @@ export class ConnListener {
       }
     });
 
-    const send = (obj: object) => { if (!sock.destroyed) sock.write(encodeFrame(obj)); };
+    const send = (obj: object) => {
+      if (sock.destroyed) return;
+      this.deps.tap?.(obj);
+      sock.write(encodeFrame(obj));
+    };
     const becomePeer = (memberId: string, userName: string) => {
       peer = {
         memberId,

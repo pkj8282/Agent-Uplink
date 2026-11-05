@@ -26,6 +26,9 @@ export type ConnRequest =
   | { op: "c_read"; id: number; channelId: string; limit?: number }
   | { op: "c_accounts"; id: number; accounts: { uuid: string; name: string; description: string }[] };
 
+/** id를 뺀 요청 본문(유니온 각 갈래별로 — 보내는 쪽이 id를 붙인다). */
+export type ConnRequestBody = ConnRequest extends unknown ? (ConnRequest extends infer R ? (R extends ConnRequest ? Omit<R, "id"> : never) : never) : never;
+
 export interface SharedServer {
   serverId: string;
   name: string;

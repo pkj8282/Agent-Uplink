@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { encodeFrame, FrameDecoder } from "../../shared/framing.js";
 import { signB64, spkiFingerprint, type SigningKeys } from "../../shared/connCrypto.js";
 import { PROFILES, type ProfileId } from "../../shared/cryptoProfile.js";
-import { CONN_EKM_LABEL, CONN_MAGIC, authSigData, joinSigData, type ConnEvent, type ConnRequest } from "../../shared/connProtocol.js";
+import { CONN_EKM_LABEL, CONN_MAGIC, authSigData, joinSigData, type ConnEvent, type ConnRequestBody } from "../../shared/connProtocol.js";
 import type { InvitePayload } from "../../shared/invite.js";
 import type { JoinedSpace } from "./store.js";
 
@@ -18,7 +18,7 @@ const CLIENT_MAX_FRAME = 4 * 1024 * 1024;
 
 interface Channel {
   sock: tls.TLSSocket;
-  req(r: Omit<ConnRequest, "id">): Promise<any>;
+  req(r: ConnRequestBody): Promise<any>;
   ekm: string;
 }
 
@@ -118,7 +118,7 @@ export async function joinSpace(
     const h = await o.ch.req({ op: "c_hello" });
     if (!h.ok || h.magic !== CONN_MAGIC || typeof h.challenge !== "string") return { ok: false, code: "join_failed" };
     const sig = signB64(keys.privateKeyPem, joinSigData(h.challenge, o.ch.ekm, invite.token, keys.publicKeyB64));
-    const r = await o.ch.req({ op: "c_join", token: invite.token, hubKey: keys.publicKeyB64, userName, sig } as Omit<ConnRequest, "id">);
+    const r = await o.ch.req({ op: "c_join", token: invite.token, hubKey: keys.publicKeyB64, userName, sig });
     if (!r.ok || typeof r.memberId !== "string") return { ok: false, code: "join_failed" };
     return {
       ok: true,
@@ -177,7 +177,7 @@ export class ConnClient {
     ch?.sock.destroy();
   }
 
-  async request(req: Omit<ConnRequest, "id">): Promise<any> {
+  async request(req: ConnRequestBody): Promise<any> {
     if (!this.ch) return { ok: false, code: "connection_lost" };
     return this.ch.req(req);
   }
@@ -201,7 +201,7 @@ export class ConnClient {
     }
     const h = await o.ch.req({ op: "c_hello" });
     const a = h.ok && typeof h.challenge === "string"
-      ? await o.ch.req({ op: "c_auth", memberId: sp.memberId, sig: signB64(this.opts.keys.privateKeyPem, authSigData(h.challenge, o.ch.ekm, sp.memberId)) } as Omit<ConnRequest, "id">)
+      ? await o.ch.req({ op: "c_auth", memberId: sp.memberId, sig: signB64(this.opts.keys.privateKeyPem, authSigData(h.challenge, o.ch.ekm, sp.memberId)) })
       : { ok: false, code: "auth_failed" };
     if (this.stopped) { o.ch.sock.destroy(); return; }
     if (!a.ok) {

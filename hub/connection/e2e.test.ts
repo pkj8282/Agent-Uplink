@@ -1,0 +1,196 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { startHubPair, startTestHub, TestClient } from "../testing.js";
+import { MAX_TEXT_LENGTH } from "../../shared/protocol.js";
+
+async function login(port: number, uuid: string, area?: "connection"): Promise<TestClient> {
+  const c = new TestClient(port);
+  await c.ready();
+  const r = await c.req("login", { uuid, ...(area ? { area } : {}) });
+  if (!r.ok) throw new Error(`login ${uuid}: ${r.code}`);
+  return c;
+}
+
+test("b_connection_session_talks_to_a_shared_channel: A·B 연결 계정이 공유 채널로 주고받고, 출처가 붙는다", async () => {
+  const p = await startHubPair();
+  try {
+    const a = await login(p.A.port, "a-conn", "connection");
+    const b = await login(p.B.port, "b-conn", "connection");
+    const sent = await b.req("send", { channelId: p.remoteChannelId, text: "B에서 안녕" });
+    assert.equal(sent.ok, true, sent.code);
+    let got: any[] = [];
+    for (let i = 0; i < 100 && got.length === 0; i++) { got = (await a.req("check")).items ?? []; if (!got.length) await new Promise((r) => setTimeout(r, 20)); }
+    assert.equal(got[0].text, "B에서 안녕");
+    assert.deepEqual(got[0].origin, { scope: "remote", spaceName: "팀", hubUser: "비" });
+    // A → B
+    assert.equal((await a.req("send", { channelId: p.channelId, text: "A에서 답" })).ok, true);
+    let back: any[] = [];
+    for (let i = 0; i < 100 && back.length === 0; i++) { back = (await b.req("check")).items ?? []; if (!back.length) await new Promise((r) => setTimeout(r, 20)); }
+    assert.equal(back.length, 1, JSON.stringify(back)); // 자기 메시지 메아리는 받지 않음
+    assert.equal(back[0].text, "A에서 답");
+    assert.deepEqual(back[0].origin, { scope: "remote", spaceName: "팀", hubUser: "에이" });
+    assert.equal(back[0].channelId, p.remoteChannelId);
+    const hist = await b.req("read", { channelId: p.remoteChannelId });
+    assert.deepEqual(hist.messages?.map((m) => m.text), ["B에서 안녕", "A에서 답"]);
+    a.close(); b.close();
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});
+
+test("unshare_stops_events_and_never_leaks_names: 공유 안 된 서버는 이름도 안 가고, 공유를 끄면 이벤트가 끊긴다", async () => {
+  const p = await startHubPair();
+  const wire: string[] = [];
+  p.mA.setTapForTest((o) => wire.push(JSON.stringify(o)));
+  try {
+    const secret = p.mA.createCommsServer("비밀작업");
+    const secretCh = p.mA.createCommsChannel(secret, "기밀채널");
+    const a = await login(p.A.port, "a-conn", "connection");
+    const b = await login(p.B.port, "b-conn", "connection");
+    await a.req("send", { channelId: secretCh, text: "공유 안 된 내용" });
+    p.mA.setShared([p.serverId]); // shared 이벤트 재전송 — 여전히 비밀작업 없음
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(wire.some((w) => w.includes("비밀작업") || w.includes(secret) || w.includes(secretCh) || w.includes("공유 안 된 내용")), false);
+    // 공유 해제 → 그 채널 메시지 이벤트 없음, B 거울 채널 사라짐
+    p.mA.setShared([]);
+    await p.until(() => !p.B.hub.hasChannelForTest(p.remoteChannelId));
+    const before = wire.length;
+    await a.req("send", { channelId: p.channelId, text: "해제 뒤" });
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(wire.slice(before).some((w) => w.includes("해제 뒤")), false);
+    assert.equal(((await b.req("check")).items ?? []).length, 0);
+    a.close(); b.close();
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});
+
+test("remote_text_guarded_both_ends: 숨은 문자는 A 입구와 B 입구에서 각각 감독", async () => {
+  const p = await startHubPair();
+  try {
+    const a = await login(p.A.port, "a-conn", "connection");
+    const b = await login(p.B.port, "b-conn", "connection");
+    assert.equal((await b.req("send", { channelId: p.remoteChannelId, text: "숨은​글자" })).ok, true);
+    let got: any[] = [];
+    for (let i = 0; i < 100 && got.length === 0; i++) { got = (await a.req("check")).items ?? []; if (!got.length) await new Promise((r) => setTimeout(r, 20)); }
+    assert.equal(got[0].text, "숨은\\u{200B}글자");
+    // A가 감독을 건너뛴(위조된) 이벤트를 보내도 B가 다시 감독한다
+    p.mA.broadcastForTest({ event: "msg", channelId: p.channelId, seq: 999, ts: Date.now(), from: "host:x", fromName: "위조​", text: "가짜⁣본문", origin: { scope: "remote", spaceName: "팀", hubUser: "에​이" } });
+    let fake: any[] = [];
+    for (let i = 0; i < 100 && fake.length === 0; i++) { fake = (await b.req("check")).items ?? []; if (!fake.length) await new Promise((r) => setTimeout(r, 20)); }
+    const f = fake.find((x) => x.text.includes("가짜"));
+    assert.ok(f, JSON.stringify(fake));
+    assert.equal(f.text, "가짜\\u{2063}본문");
+    assert.equal(f.fromName.includes("​"), false);
+    assert.equal(f.origin.hubUser.includes("​"), false);
+    a.close(); b.close();
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});
+
+test("RT-C11_oversize_remote: 상한을 넘는 원격 본문은 거부·저장 0", async () => {
+  const p = await startHubPair();
+  try {
+    const r = await p.mB.requestSpaceForTest(p.spaceId, { op: "c_send", channelId: p.channelId, from: { uuid: "x", name: "x" }, text: "a".repeat(MAX_TEXT_LENGTH + 1) });
+    assert.equal(r.code, "text_too_long");
+    const a = await login(p.A.port, "a-conn", "connection");
+    assert.deepEqual((await a.req("read", { channelId: p.channelId })).messages, []);
+    a.close();
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});
+
+test("RT-C12_local_account_cannot_use_remote_channel: B의 로컬 계정은 원격 채널을 못 쓴다", async () => {
+  const p = await startHubPair();
+  try {
+    const l = await login(p.B.port, "b-local");
+    assert.equal((await l.req("send", { channelId: p.remoteChannelId, text: "x" })).code, "channel_forbidden");
+    assert.equal((await l.req("read", { channelId: p.remoteChannelId })).code, "channel_forbidden");
+    const al = await login(p.A.port, "a-local");
+    assert.equal((await al.req("send", { channelId: p.channelId, text: "x" })).code, "channel_forbidden");
+    l.close(); al.close();
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});
+
+test("RT-C13_member_cannot_send_to_unshared_channel: 구성원은 공유 안 된 채널에 못 쓴다", async () => {
+  const p = await startHubPair();
+  try {
+    const secret = p.mA.createCommsServer("비밀작업");
+    const secretCh = p.mA.createCommsChannel(secret, "기밀채널");
+    const r = await p.mB.requestSpaceForTest(p.spaceId, { op: "c_send", channelId: secretCh, from: { uuid: "x", name: "x" }, text: "침입" });
+    assert.equal(r.code, "channel_forbidden");
+    const rr = await p.mB.requestSpaceForTest(p.spaceId, { op: "c_read", channelId: secretCh });
+    assert.equal(rr.code, "channel_forbidden");
+    const ll = await p.mB.requestSpaceForTest(p.spaceId, { op: "c_send", channelId: "lobby", from: { uuid: "x", name: "x" }, text: "로비 침입" });
+    assert.equal(ll.code, "channel_forbidden");
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});
+
+test("restart_reconnects_without_dup: A Hub 재시작 뒤 B가 다시 붙고 메시지는 한 번씩만", async () => {
+  const p = await startHubPair();
+  let A2: Awaited<ReturnType<typeof startTestHub>> | null = null;
+  try {
+    const a = await login(p.A.port, "a-conn", "connection");
+    const b = await login(p.B.port, "b-conn", "connection");
+    await a.req("send", { channelId: p.channelId, text: "재시작 전" });
+    let items: any[] = [];
+    for (let i = 0; i < 100 && items.length === 0; i++) { items = (await b.req("check")).items ?? []; if (!items.length) await new Promise((r) => setTimeout(r, 20)); }
+    assert.equal(items.length, 1);
+    a.close();
+    p.A.hub.stop();
+    await p.until(() => !p.mB.hasLiveConnection());
+    A2 = await startTestHub({ dataDir: p.A.dataDir, connBackoffMs: [50, 100] });
+    await p.until(() => p.mB.hasLiveConnection(), 10_000);
+    const a2 = await login(A2.port, "a-conn", "connection");
+    await a2.req("send", { channelId: p.channelId, text: "재시작 뒤" });
+    const all: any[] = [];
+    for (let i = 0; i < 100; i++) {
+      all.push(...((await b.req("check")).items ?? []));
+      if (all.some((x) => x.text === "재시작 뒤")) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    await new Promise((r) => setTimeout(r, 200));
+    all.push(...((await b.req("check")).items ?? []));
+    assert.deepEqual(all.map((x) => x.text), ["재시작 뒤"]);
+    const hist = await b.req("read", { channelId: p.remoteChannelId });
+    assert.deepEqual(hist.messages?.map((m) => m.text), ["재시작 전", "재시작 뒤"]);
+    a2.close(); b.close();
+  } finally { A2?.hub.stop(); p.B.hub.stop(); }
+});
+
+test("remote_accounts_listed_for_connection_accounts: 연결 계정에게만 원격 계정이 보인다", async () => {
+  const p = await startHubPair();
+  try {
+    const a = await login(p.A.port, "a-conn", "connection");
+    await a.req("set_profile", { description: "A쪽 기획" });
+    const b = await login(p.B.port, "b-conn", "connection");
+    let remote: any;
+    for (let i = 0; i < 150 && !remote; i++) {
+      remote = (await b.req("list_accounts")).accounts?.find((x) => x.remote && x.name === "a-conn".slice(0, 8));
+      if (!remote) await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.ok(remote);
+    assert.equal(remote.remote.hubUser, "에이");
+    assert.equal(remote.remote.spaceName, "팀");
+    const l = await login(p.B.port, "b-local");
+    assert.equal((await l.req("list_accounts")).accounts?.some((x) => x.remote), false);
+    // A 쪽에서도 B의 연결 계정이 보인다
+    let fromB: any;
+    for (let i = 0; i < 150 && !fromB; i++) {
+      fromB = (await a.req("list_accounts")).accounts?.find((x) => x.remote?.hubUser === "비");
+      if (!fromB) await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.ok(fromB);
+    a.close(); b.close(); l.close();
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});
+
+test("servers_listed_for_connection_accounts: 연결 계정의 list_servers에 통신·원격 서버가 따로 표시", async () => {
+  const p = await startHubPair();
+  try {
+    const b = await login(p.B.port, "b-conn", "connection");
+    const s = await b.req("list_servers");
+    const rem = s.servers?.find((x: any) => x.remote);
+    assert.ok(rem, JSON.stringify(s.servers));
+    assert.equal(rem.name, "팀작업");
+    const ch = await b.req("list_channels", { serverId: rem.serverId });
+    assert.deepEqual(ch.channels?.map((c) => c.channelId), [p.remoteChannelId]);
+    const bl = await login(p.B.port, "b-local");
+    assert.equal(((await bl.req("list_servers")).servers ?? []).some((x: any) => x.remote || x.area), false);
+    b.close(); bl.close();
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});

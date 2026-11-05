@@ -25,6 +25,8 @@ export interface Channel {
   kind: ChannelKind;
   label: string;
   members: string[] | null; // null = 전체 공개(모든 계정), 배열 = 해당 uuid만(DM)
+  /** 연결 계정 전용 채널(v3.0: Connection Communications·원격 거울). 로컬 계정은 보내기·읽기 불가. */
+  area?: "connection";
 }
 
 export interface Message {
@@ -34,6 +36,7 @@ export interface Message {
   from: string; // 발신 계정 uuid
   fromName: string;
   text: string;
+  origin?: MessageOrigin;
 }
 
 export interface InboxItem {
@@ -45,6 +48,7 @@ export interface InboxItem {
   from: string;
   fromName: string;
   text: string;
+  origin?: MessageOrigin;
 }
 
 export interface AccountInfo {
@@ -53,6 +57,8 @@ export interface AccountInfo {
   description?: string;
   online?: boolean;
   area?: "connection";
+  /** 다른 Hub의 연결 계정(v3.0) — 연결 계정에게만 보인다. */
+  remote?: { spaceName: string; hubUser: string };
 }
 
 export interface AccountStatus {
@@ -155,7 +161,7 @@ export interface Response {
   channelId?: string; // open_dm / create_channel
   dms?: { peer: string; peerName: string; channelId: string; peerDescription: string; peerOnline: boolean }[]; // list_dms
   serverId?: string; // create_server
-  servers?: { serverId: string; name: string; channelCount: number }[]; // list_servers
+  servers?: { serverId: string; name: string; channelCount: number; area?: "connection"; remote?: { spaceName: string; hubUser: string } }[]; // list_servers
   channels?: { channelId: string; name: string }[]; // list_channels
   config?: { maxChannelsPerServer: number; allowDevDelete: boolean; inboxMaxBatch: number }; // admin_snapshot/set_config
   snapshotServers?: { id: string; name: string; channels: { id: string; name: string }[] }[]; // admin_snapshot

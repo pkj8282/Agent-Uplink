@@ -22,6 +22,7 @@ import { hubMsg, type HubKey } from "./messages.js";
 import { effectiveLang, type Lang } from "../shared/i18n.js";
 import { currentLang } from "../shared/langConfig.js";
 import { SecurityLog } from "./securityLog.js";
+import { ConnectionManager } from "./connection/manager.js";
 import {
   MAGIC,
   PROTOCOL_VERSION,
@@ -30,6 +31,7 @@ import {
   MAX_STORED_TEXT_LENGTH,
   Channel,
   InboxItem,
+  MessageOrigin,
   Request,
   Response,
 } from "../shared/protocol.js";
@@ -53,6 +55,8 @@ export interface HubOptions {
   dataDir: string;
   idleShutdownMs: number;
   limits?: Partial<HubLimits>;
+  /** 통신 참여 재접속 간격(시험용, v3.0). */
+  connBackoffMs?: number[];
 }
 
 interface Waiter {
@@ -110,6 +114,8 @@ export class Hub {
   private stateBySock = new Map<net.Socket, ConnState>(); // 삽입 순 = 오래된 순
   /** 통신 연결 상태(v3.0) — 새 연결 계정 로그인 조건. 통신 관리자가 붙기 전에는 항상 연결 없음. */
   protected connStatus: ConnStatusSource = { hasLiveConnection: () => false };
+  /** 통신 관리자(v3.0). 데이터 적재 때 만든다 — 통신 설정이 없으면 아무 일도 하지 않는다. */
+  conn!: ConnectionManager;
 
   setConnStatusSource(src: ConnStatusSource): void {
     this.connStatus = src;
@@ -154,6 +160,12 @@ export class Hub {
       this.loadData();
       this.isReady = true;
       this.markReady();
+      // 통신(v3.0): 설정이 있을 때만 리스너·참여 연결을 연다. 실패해도 로컬 Hub는 계속 동작한다.
+      try {
+        await this.conn.start();
+      } catch (e) {
+        process.stderr.write(`${this.msg("log_conn_start_failed", { detail: (e as Error).message })}\n`);
+      }
     } catch (e) {
       this.markFailed(e as Error);
       throw e;
@@ -202,6 +214,20 @@ export class Hub {
     // 이전 버전 삭제·크래시로 남은 로그를 휴지통으로(손상된 서버 인덱스면 서버 쪽은 건너뜀 — 손으로 되살릴 여지)
     this.trashOps.sweepOrphans({ servers: !this.servers.sweepBlocked, dm: true });
     this.security.finishStartupScan();
+    this.conn = new ConnectionManager({
+      dataDir: this.opts.dataDir,
+      accounts: this.accounts,
+      channels: this.channels,
+      guard: this.security.guard,
+      deliver: (ch, msg, skip) => this.fanout(ch, msg.from, msg.fromName, msg.text, msg.ts, msg.origin, skip),
+      ...(this.opts.connBackoffMs ? { backoffMs: this.opts.connBackoffMs } : {}),
+    });
+    this.setConnStatusSource(this.conn);
+  }
+
+  /** 시험용: 채널이 등록돼 있는가. */
+  hasChannelForTest(id: string): boolean {
+    return !!this.channels?.getChannel(id);
   }
 
   startTcp(): Promise<void> {
@@ -331,6 +357,7 @@ export class Hub {
 
   stop(): void {
     this.stopped = true;
+    void this.conn?.stop();
     this.cancelIdle();
     this.tcp.close();
     this.http.close();
@@ -510,6 +537,7 @@ export class Hub {
           }
         }
         const acc = this.accounts.getOrCreate(req.uuid, loginName, area);
+        if (!existingAcc && area === "connection") this.conn.accountsChanged();
         // 다른 계정으로 전환: 이전 계정으로 걸어 둔 wait를 빈 결과로 끝낸다.
         // (남겨 두면 이전 계정 앞 메시지가 이 연결로 새거나, 새 주인이 받지 못하고 유실된다.)
         if (state.uuid && state.uuid !== acc.uuid && state.waiter) {
@@ -552,12 +580,16 @@ export class Hub {
           return;
         }
         reply({ ok: true, name: this.accounts.setName(uuid, v.name) });
+        if (this.accounts.get(uuid)?.area === "connection") this.conn.accountsChanged();
         return;
       }
 
       case "list_accounts": {
         // 역할 선택 전에도 누가 있는지 볼 수 있도록 로그인은 불필요(인증된 연결만).
-        reply({ ok: true, accounts: this.accounts.list().map((a) => ({ ...a, online: this.isOnline(a.uuid) })) });
+        const localAccounts = this.accounts.list().map((a) => ({ ...a, online: this.isOnline(a.uuid) }));
+        // 다른 Hub의 연결 계정(v3.0)은 연결 계정에게만 보인다.
+        const viewerIsConn = !!state.uuid && this.accounts.get(state.uuid)?.area === "connection";
+        reply({ ok: true, accounts: viewerIsConn ? [...localAccounts, ...this.conn.remoteAccounts()] : localAccounts });
         return;
       }
 
@@ -611,13 +643,12 @@ export class Hub {
       }
 
       case "list_servers": {
-        if (!needLogin()) return;
-        reply({
-          ok: true,
-          servers: this.servers
-            .listServers()
-            .map((s) => ({ serverId: s.id, name: s.name, channelCount: s.channels.length })),
-        });
+        const me = needLogin();
+        if (!me) return;
+        const localServers = this.servers.listServers().map((s) => ({ serverId: s.id, name: s.name, channelCount: s.channels.length }));
+        // 연결 계정(v3.0)에게는 통신 서버(Connection Communications)와 원격 공유 서버도.
+        const meIsConn = this.accounts.get(me)?.area === "connection";
+        reply({ ok: true, servers: meIsConn ? [...localServers, ...this.conn.serversFor()] : localServers });
         return;
       }
 
@@ -650,9 +681,15 @@ export class Hub {
       }
 
       case "list_channels": {
-        if (!needLogin()) return;
+        const me = needLogin();
+        if (!me) return;
         const srv = this.servers.getServer(req.serverId);
         if (!srv) {
+          const connChannels = this.accounts.get(me)?.area === "connection" && typeof req.serverId === "string" ? this.conn.channelsFor(req.serverId) : null;
+          if (connChannels) {
+            reply({ ok: true, channels: connChannels });
+            return;
+          }
           reply(this.err("server_not_found", "server_not_found", { id: req.serverId }));
           return;
         }
@@ -710,7 +747,23 @@ export class Hub {
           reply(this.err("channel_forbidden", "channel_forbidden"));
           return;
         }
-        const name = this.accounts.get(uuid)!.name;
+        const sender = this.accounts.get(uuid)!;
+        // 통신 채널(v3.0)은 연결 계정만.
+        if (ch.area === "connection" && sender.area !== "connection") {
+          reply(this.err("channel_forbidden", "channel_forbidden"));
+          return;
+        }
+        if (ch.id.startsWith("r:")) {
+          // 원격 채널: 통신 서버로 보내고, 저장·전달은 서버의 메아리 이벤트가 맡는다.
+          void this.conn.sendRemote(ch.id, sender, req.text).then((r) => {
+            if (r.ok) reply({ ok: true, seq: r.seq });
+            else if (r.code === "connection_lost") reply(this.err("connection_lost", "connection_lost"));
+            else if (r.code === "text_too_long") reply(this.err("text_too_long", "text_too_long", { max: MAX_TEXT_LENGTH }));
+            else reply(this.err(r.code, "remote_send_failed", { code: r.code }));
+          });
+          return;
+        }
+        const name = sender.name;
         // 본문 감독(v2.1.2): 길이는 원래 기준으로 위에서 검사했다. 줄바꿈·탭은 유지, 숨은 문자는 이스케이프·기록.
         const text = this.security.guard(req.text, { source: "request", where: "send", field: "text", account: uuid, keepLineBreaks: true });
         // 이스케이프 뒤 상한(v2.1.3): 거부해도 위의 탐지 기록은 남긴다(시도 자체가 감독 대상).
@@ -721,6 +774,7 @@ export class Hub {
         const msg = this.channels.append(ch.id, uuid, name, text);
         reply({ ok: true, seq: msg.seq });
         this.fanout(ch, msg.from, name, text, msg.ts);
+        if (ch.area === "connection") this.conn.onLocalMessage(ch, msg);
         return;
       }
 
@@ -733,6 +787,10 @@ export class Hub {
           return;
         }
         if (ch.members && !ch.members.includes(uuid)) {
+          reply(this.err("channel_forbidden", "channel_forbidden"));
+          return;
+        }
+        if (ch.area === "connection" && this.accounts.get(uuid)?.area !== "connection") {
           reply(this.err("channel_forbidden", "channel_forbidden"));
           return;
         }
@@ -897,6 +955,7 @@ export class Hub {
         }
         // 길이는 원래 문자열 기준으로 위에서 검사했다. 저장은 위장 문자를 이스케이프한 값(v2.1.2 입력 경계).
         reply({ ok: true, description: this.accounts.setDescription(uuid, this.security.guard(d, { source: "request", where: "set_profile", field: "description", account: uuid })) });
+        if (this.accounts.get(uuid)?.area === "connection") this.conn.accountsChanged();
         return;
       }
 
@@ -997,10 +1056,12 @@ export class Hub {
   }
 
   /** 채널 메시지를 수신 대상 계정들의 인박스에 append하고, 대기자를 깨운다. */
-  protected fanout(ch: Channel, from: string, fromName: string, text: string, ts: number): void {
+  protected fanout(ch: Channel, from: string, fromName: string, text: string, ts: number, origin?: MessageOrigin, skipUuid?: string): void {
     const recipients = ch.members ?? this.accounts.allUuids();
     for (const uuid of recipients) {
-      if (uuid === from) continue;
+      if (uuid === from || uuid === skipUuid) continue;
+      // 통신 채널(v3.0)은 연결 계정에게만 전달한다.
+      if (ch.area === "connection" && this.accounts.get(uuid)?.area !== "connection") continue;
       this.inbox.append(uuid, {
         ts,
         channelId: ch.id,
@@ -1009,6 +1070,7 @@ export class Hub {
         from,
         fromName,
         text,
+        ...(origin ? { origin } : {}),
       });
       this.wake(uuid);
     }

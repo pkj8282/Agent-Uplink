@@ -27,6 +27,7 @@ const PREFIX = "UPLINK";
 const VERSION_TAG = "UPLINK1-";
 const MAX_CODE_LENGTH = 4096;
 const MAX_FIELD = 256;
+const SPACE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 const isStr = (x: unknown, max = MAX_FIELD): x is string => typeof x === "string" && x.length > 0 && x.length <= max;
 
@@ -79,7 +80,8 @@ export function decodeInvite(code: string, nowMs: number): { ok: true; invite: I
   if (!p || typeof p !== "object" || typeof s !== "string") return bad("invite_malformed");
   const q = p as Record<string, unknown>;
   if (q.v !== 1) return bad("invite_version");
-  if (q.kind !== "join" || !isStr(q.spaceId) || !isStr(q.spaceName) || !validEndpoint(q.endpoint)
+  // spaceId는 참여자 PC의 폴더 이름(connection/remote/<spaceId>)이 된다 → 경로에 안전한 문자만(RT-C14).
+  if (q.kind !== "join" || typeof q.spaceId !== "string" || !SPACE_ID_RE.test(q.spaceId) || !isStr(q.spaceName) || !validEndpoint(q.endpoint)
     || !isStr(q.serverKey, 1024) || !isStr(q.token) || typeof q.expiresAt !== "number" || !isStr(q.hostUser)) {
     return bad("invite_malformed");
   }

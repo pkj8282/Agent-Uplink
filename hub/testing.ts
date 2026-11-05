@@ -56,10 +56,14 @@ export function seedLanguage(dataDir: string, language: LangSetting): void {
 }
 
 /** language 기본값 "ko": 기존 테스트의 한국어 문구 단정을 유지한다. 영어·N/A 경로는 명시해서 시험한다. */
-export async function startTestHub(opts: { dataDir?: string; http?: boolean; limits?: Partial<HubLimits>; language?: LangSetting } = {}): Promise<{ hub: Hub; port: number; dataDir: string }> {
+export async function startTestHub(opts: { dataDir?: string; http?: boolean; limits?: Partial<HubLimits>; language?: LangSetting; connBackoffMs?: number[] } = {}): Promise<{ hub: Hub; port: number; dataDir: string }> {
   const dataDir = opts.dataDir ?? tempDir("uplink-t-");
   seedLanguage(dataDir, opts.language ?? "ko");
-  const hub = new Hub({ tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0, ...(opts.limits ? { limits: opts.limits } : {}) });
+  const hub = new Hub({
+    tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0,
+    ...(opts.limits ? { limits: opts.limits } : {}),
+    ...(opts.connBackoffMs ? { connBackoffMs: opts.connBackoffMs } : {}),
+  });
   await hub.startTcp();
   if (opts.http) await hub.startHttp();
   await hub.secure(TEST_SECURE_DEPS);
@@ -97,6 +101,43 @@ export async function startConnServer(opts: { dataDir?: string; profile?: Profil
     }, keys.privateKeyPem);
   };
   return { dataDir, store, listener, port, keys, invite, peers, handled };
+}
+
+/** 비어 있는 로컬 포트 하나(통신 서버 재시작 시험용 — 같은 포트로 다시 뜬다). */
+export function freePort(): Promise<number> {
+  return new Promise((res, rej) => {
+    const s = net.createServer();
+    s.once("error", rej);
+    s.listen(0, "127.0.0.1", () => { const p = (s.address() as net.AddressInfo).port; s.close(() => res(p)); });
+  });
+}
+
+/** 통신 Hub 두 개(v3.0): A = 통신 서버(공유 통신 서버 "팀작업"/채널 "main"), B = A에 참여한 Hub. 둘 다 127.0.0.1에서만 연다. */
+export async function startHubPair(opts: { burn?: boolean } = {}) {
+  const connPort = await freePort();
+  const A = await startTestHub({ connBackoffMs: [50, 100] });
+  const B = await startTestHub({ connBackoffMs: [50, 100] });
+  const mA = A.hub.conn;
+  const mB = B.hub.conn;
+  mA.setUserName("에이");
+  mB.setUserName("비");
+  await mA.enableServer({ port: connPort, bindHost: "127.0.0.1", profile: "tls13-chacha20", spaceName: "팀", burnOnJoin: opts.burn ?? true });
+  const serverId = mA.createCommsServer("팀작업");
+  const channelId = mA.createCommsChannel(serverId, "main");
+  mA.setShared([serverId]);
+  const { code } = mA.createInvite("B", "127.0.0.1", 60_000);
+  const j = await mB.join(code);
+  if (!j.ok) throw new Error(`join 실패: ${j.code}`);
+  const until = async (cond: () => boolean, ms = 5000) => {
+    const end = Date.now() + ms;
+    while (!cond()) {
+      if (Date.now() > end) throw new Error("조건 시간 초과");
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  };
+  const remoteChannelId = `r:${j.spaceId}:${channelId}`;
+  await until(() => mB.hasLiveConnection() && B.hub.hasChannelForTest(remoteChannelId));
+  return { A, B, mA, mB, connPort, serverId, channelId, spaceId: j.spaceId, remoteChannelId, until };
 }
 
 /** 정상 사용자의 v3 핸드셰이크(hello → auth → Hub 증명 확인). */

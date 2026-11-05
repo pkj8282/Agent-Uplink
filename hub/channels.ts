@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Channel, Message } from "../shared/protocol.js";
+import { Channel, Message, MessageOrigin } from "../shared/protocol.js";
 import { Guard, plainGuard } from "./securityLog.js";
 
 interface Entry {
@@ -32,13 +32,14 @@ export class ChannelStore {
     return this.pathOf(ch.kind, ch.id);
   }
 
-  register(ch: Channel): void {
+  /** file: 로그 파일을 직접 정할 때(v3.0 통신 채널 — connection/ 아래). */
+  register(ch: Channel, file?: string): void {
     const existing = this.entries.get(ch.id);
     if (existing) {
       existing.channel = ch; // 메타 갱신(멱등)
       return;
     }
-    const file = this.pathFor(ch);
+    file ??= this.pathFor(ch);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const entry: Entry = { channel: ch, ring: [], seq: 0, file };
     if (fs.existsSync(file)) {
@@ -50,6 +51,13 @@ export class ChannelStore {
           const at = { source: "disk" as const, where: "log", account: String(m.from) };
           if (typeof m.fromName === "string") m.fromName = this.guard(m.fromName, { ...at, field: "fromName" });
           if (typeof m.text === "string") m.text = this.guard(m.text, { ...at, field: "text", keepLineBreaks: true });
+          if (m.origin && typeof m.origin === "object") {
+            m.origin = {
+              scope: "remote",
+              spaceName: this.guard(String(m.origin.spaceName ?? ""), { ...at, field: "spaceName" }),
+              hubUser: this.guard(String(m.origin.hubUser ?? ""), { ...at, field: "hubUser" }),
+            };
+          }
           entry.ring.push(m);
           if (m.seq > entry.seq) entry.seq = m.seq;
         } catch {
@@ -64,10 +72,10 @@ export class ChannelStore {
     return this.entries.get(id)?.channel;
   }
 
-  append(channelId: string, from: string, fromName: string, text: string): Message {
+  append(channelId: string, from: string, fromName: string, text: string, origin?: MessageOrigin): Message {
     const e = this.entries.get(channelId);
     if (!e) throw new Error(`Channel not found: ${channelId}`);
-    const msg: Message = { seq: ++e.seq, ts: Date.now(), channelId, from, fromName, text };
+    const msg: Message = { seq: ++e.seq, ts: Date.now(), channelId, from, fromName, text, ...(origin ? { origin } : {}) };
     e.ring.push(msg);
     if (e.ring.length > this.ringSize) e.ring.shift();
     try {
@@ -76,6 +84,29 @@ export class ChannelStore {
       // 디스크 오류 시에도 인메모리 유지
     }
     return msg;
+  }
+
+  /**
+   * 원격 거울(v3.0): 통신 서버가 정한 seq를 그대로 저장한다. 이미 가진 seq 이하면 버리고 null(재접속 중복 제거).
+   */
+  appendExternal(channelId: string, m: Omit<Message, "channelId">): Message | null {
+    const e = this.entries.get(channelId);
+    if (!e || !Number.isSafeInteger(m.seq) || m.seq <= e.seq) return null;
+    const msg: Message = { ...m, channelId };
+    e.seq = m.seq;
+    e.ring.push(msg);
+    if (e.ring.length > this.ringSize) e.ring.shift();
+    try {
+      fs.appendFileSync(e.file, JSON.stringify(msg) + "\n");
+    } catch {
+      // 디스크 오류 시에도 인메모리 유지
+    }
+    return msg;
+  }
+
+  /** 등록된 채널 ID 목록. */
+  ids(): string[] {
+    return [...this.entries.keys()];
   }
 
   recent(channelId: string, limit: number): Message[] {
