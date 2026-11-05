@@ -124,3 +124,17 @@ test("revoke_disconnects_live_member: 해지하면 연결 중인 구성원이 �
     A.c.close(); B.c.close();
   } finally { A.hub.stop(); B.hub.stop(); }
 });
+
+test("burn_flag_default_off: 파기 플래그는 사용자가 켰을 때만(설계: 기본 꺼짐)", async () => {
+  const t = await hubWithToken();
+  try {
+    const req = (op: string, p: object = {}) => t.c.req(op, { token: t.token, ...p }) as Promise<any>;
+    await req("admin_conn_enable_server", { port: await freePort(), bindHost: "127.0.0.1", profile: "tls13-chacha20", spaceName: "팀" });
+    assert.equal((await req("admin_conn_status")).server.burnOnJoin, false);
+    await req("admin_conn_enable_server", { port: await freePort(), bindHost: "127.0.0.1", profile: "tls13-chacha20", spaceName: "팀", burnOnJoin: "yes" });
+    assert.equal((await req("admin_conn_status")).server.burnOnJoin, false);
+    await req("admin_conn_enable_server", { port: await freePort(), bindHost: "127.0.0.1", profile: "tls13-chacha20", spaceName: "팀", burnOnJoin: true });
+    assert.equal((await req("admin_conn_status")).server.burnOnJoin, true);
+    t.c.close();
+  } finally { t.hub.stop(); }
+});

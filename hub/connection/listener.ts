@@ -184,7 +184,7 @@ export class ConnListener {
           const store = this.deps.store;
           const existing = store.members().find((m) => m.hubKey === q.hubKey);
           if (existing?.revoked) { this.deps.log("join_failed", { ip }); return fail("join_failed"); }
-          const use = store.useInvite(q.token, q.hubKey, Date.now(), store.serverConfig()?.burnOnJoin ?? true);
+          const use = store.useInvite(q.token, q.hubKey, Date.now(), store.serverConfig()?.burnOnJoin === true);
           if (use !== "ok") { this.deps.log("join_failed", { ip, reason: use }); return fail("join_failed"); }
           const memberId = existing?.memberId ?? randomUUID();
           store.addMember({ memberId, hubKey: q.hubKey, userName: name.name, joinedAt: existing?.joinedAt ?? Date.now(), revoked: false });

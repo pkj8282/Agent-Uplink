@@ -249,7 +249,7 @@ export class Hub {
           if (typeof port !== "number" || !Number.isInteger(port) || port < 0 || port > 65535) return fail("port_invalid", "port_invalid");
           if (!isProfileId(q.profile)) return fail("profile_invalid", "profile_invalid");
           const bindHost = typeof q.bindHost === "string" && q.bindHost.length > 0 && q.bindHost.length <= 255 ? q.bindHost : undefined;
-          const actual = await c.enableServer({ port, profile: q.profile, spaceName: String(q.spaceName ?? ""), burnOnJoin: q.burnOnJoin !== false, ...(bindHost ? { bindHost } : {}) });
+          const actual = await c.enableServer({ port, profile: q.profile, spaceName: String(q.spaceName ?? ""), burnOnJoin: q.burnOnJoin === true /* 설계: 파기는 사용자가 켰을 때만 */, ...(bindHost ? { bindHost } : {}) });
           return { ok: true, port: actual };
         }
         case "admin_conn_disable_server":
