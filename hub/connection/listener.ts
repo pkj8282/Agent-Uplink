@@ -21,6 +21,8 @@ export interface ConnLimits {
   preAuthMaxFrame: number;
   maxFrame: number;
   attemptsPerIpPerMinute: number;
+  /** 한 IP가 동시에 가질 수 있는 인증 전 연결 수 — 전체 자리를 한 곳이 차지해 구성원이 못 붙는 일을 막는다(RT-C15). */
+  maxPreAuthPerIp: number;
 }
 
 export const DEFAULT_CONN_LIMITS: ConnLimits = {
@@ -29,6 +31,7 @@ export const DEFAULT_CONN_LIMITS: ConnLimits = {
   preAuthMaxFrame: 16 * 1024,
   maxFrame: 1024 * 1024,
   attemptsPerIpPerMinute: 10,
+  maxPreAuthPerIp: 4,
 };
 
 export interface ConnPeer {
@@ -58,6 +61,7 @@ export class ConnListener {
   private srv: tls.Server | null = null;
   private socketsByMember = new Map<string, Set<tls.TLSSocket>>();
   private attempts = new Map<string, number[]>();
+  private preAuthByIp = new Map<string, number>();
 
   constructor(private readonly deps: ConnListenerDeps) {
     this.limits = { ...DEFAULT_CONN_LIMITS, ...deps.limits };
@@ -116,12 +120,28 @@ export class ConnListener {
     const ip = sock.remoteAddress ?? "?";
     const challenge = randomBytes(32).toString("base64");
     const ekm = sock.exportKeyingMaterial(32, CONN_EKM_LABEL, Buffer.alloc(0)).toString("base64");
+    const held = this.preAuthByIp.get(ip) ?? 0;
+    if (held >= this.limits.maxPreAuthPerIp) {
+      this.deps.log("preauth_per_ip", { ip });
+      sock.destroy();
+      return;
+    }
+    this.preAuthByIp.set(ip, held + 1);
+    let preAuthHeld = true;
+    const releasePreAuth = () => {
+      if (!preAuthHeld) return;
+      preAuthHeld = false;
+      const n = (this.preAuthByIp.get(ip) ?? 1) - 1;
+      if (n <= 0) this.preAuthByIp.delete(ip);
+      else this.preAuthByIp.set(ip, n);
+    };
     let peer: ConnPeer | null = null;
     let decoder = new FrameDecoder({ maxFrame: this.limits.preAuthMaxFrame });
     const timer = setTimeout(() => { if (!peer) sock.destroy(); }, this.limits.preAuthTimeoutMs);
     sock.setNoDelay(true);
     sock.on("error", () => {});
     sock.on("close", () => {
+      releasePreAuth();
       clearTimeout(timer);
       if (peer) {
         this.socketsByMember.get(peer.memberId)?.delete(sock);
@@ -142,6 +162,7 @@ export class ConnListener {
         close: () => sock.destroy(),
       };
       clearTimeout(timer);
+      releasePreAuth();
       decoder = new FrameDecoder({ maxFrame: this.limits.maxFrame });
       let set = this.socketsByMember.get(memberId);
       if (!set) this.socketsByMember.set(memberId, (set = new Set()));

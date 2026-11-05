@@ -51,6 +51,18 @@ export class ConnectionManager implements ConnStatusSource {
   private memberAccounts = new Map<string, { uuid: string; name: string; description: string }[]>();
   private spaces = new Map<string, SpaceState>();
   private tap: ((o: object) => void) | null = null;
+  /** 구성원별 최근 전송 시각(설계 5.2 "참여자별 메시지 속도 제한", RT-C16). */
+  private sendTimes = new Map<string, number[]>();
+
+  /** 구성원 한 명은 10초에 60개까지. */
+  private allowSend(memberId: string): boolean {
+    const now = Date.now();
+    const list = (this.sendTimes.get(memberId) ?? []).filter((t) => now - t < 10_000);
+    const ok = list.length < 60;
+    if (ok) list.push(now);
+    this.sendTimes.set(memberId, list);
+    return ok;
+  }
   /** 최근 통신 기록(보안·연결 사건) — 관리 앱 표시는 2단계. */
   readonly events: { ts: number; code: string; detail: object }[] = [];
 
@@ -276,6 +288,10 @@ export class ConnectionManager implements ConnStatusSource {
         return reply({ ok: true, messages: this.deps.channels.recent(ch.id, limit).map((m) => this.wire(m)) });
       }
       case "c_send": {
+        if (!this.allowSend(p.memberId)) {
+          this.log("rate_limited", { memberId: p.memberId });
+          return fail("rate_limited");
+        }
         const ch = this.sharedChannel(req.channelId);
         if (!ch) return fail("channel_forbidden");
         if (typeof req.text !== "string" || req.text.length === 0) return fail("text_invalid");

@@ -194,3 +194,16 @@ test("servers_listed_for_connection_accounts: 연결 계정의 list_servers에 �
     b.close(); bl.close();
   } finally { p.A.hub.stop(); p.B.hub.stop(); }
 });
+
+test("RT-C16_member_send_rate_limit: 구성원 한 명이 메시지를 쏟아내면 rate_limited", async () => {
+  const p = await startHubPair();
+  try {
+    const codes: string[] = [];
+    for (let i = 0; i < 61; i++) {
+      const r = await p.mB.requestSpaceForTest(p.spaceId, { op: "c_send", channelId: p.channelId, from: { uuid: "x", name: "x" }, text: `m${i}` });
+      codes.push(r.ok ? "ok" : r.code);
+    }
+    assert.equal(codes.filter((c) => c === "ok").length, 60);
+    assert.equal(codes[60], "rate_limited");
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});

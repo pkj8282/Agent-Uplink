@@ -232,3 +232,20 @@ test("join_bad_user_name: 빈 이름·긴 이름은 참여 거부(토큰은 소�
     for (const x of [c, c2, c3]) x.sock.destroy();
   } finally { await s.listener.close(); }
 });
+
+test("RT-C15_preauth_slots_per_ip: 한 IP가 인증 전 연결로 자리를 다 차지하지 못한다", async () => {
+  const s = await setup({ limits: { maxPreAuthPerIp: 3 } });
+  try {
+    const held: Raw[] = [];
+    for (let i = 0; i < 3; i++) held.push(await rawConn(s.port));
+    const extra = await rawConn(s.port).catch(() => null);
+    const outcome = extra ? await Promise.race([extra.closed.then(() => "closed"), new Promise((r) => setTimeout(() => r("open"), 1500))]) : "closed";
+    assert.equal(outcome, "closed");
+    assert.ok(s.logs.includes("preauth_per_ip"));
+    // 인증을 마친 연결은 자리를 비운다 → 새 연결 가능
+    assert.equal((await join(held[0], s.token, generateSigningKeys())).res.ok, true);
+    const again = await rawConn(s.port);
+    assert.equal((await again.req("c_hello")).ok, true);
+    for (const c of [...held, again]) c.sock.destroy();
+  } finally { await s.listener.close(); }
+});
