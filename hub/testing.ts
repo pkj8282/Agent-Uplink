@@ -11,6 +11,11 @@ import { Response } from "../shared/protocol.js";
 import { Hub, HubLimits } from "./server.js";
 import { SecureDeps } from "./secure.js";
 import type { LangSetting } from "../shared/i18n.js";
+import { newJoinToken } from "../shared/connCrypto.js";
+import { encodeInvite, type InvitePayload } from "../shared/invite.js";
+import type { ProfileId } from "../shared/cryptoProfile.js";
+import { ConnectionStore } from "./connection/store.js";
+import { ConnListener, type ConnPeer } from "./connection/listener.js";
 
 /** win32 경로(PowerShell·icacls)를 건너뛴다 — 실제 경로는 secure.test.ts가 주입·통합 테스트로 검증한다. */
 export const TEST_SECURE_DEPS: SecureDeps = {
@@ -60,6 +65,38 @@ export async function startTestHub(opts: { dataDir?: string; http?: boolean; lim
   await hub.secure(TEST_SECURE_DEPS);
   registerTestHub(hub.tcpAddress.port, dataDir);
   return { hub, port: hub.tcpAddress.port, dataDir };
+}
+
+/** 통신 리스너만 띄운 시험 서버(v3.0). invite()는 127.0.0.1:port를 가리키는 초대 코드를 만든다. */
+export async function startConnServer(opts: { dataDir?: string; profile?: ProfileId; burn?: boolean; port?: number } = {}) {
+  const dataDir = opts.dataDir ?? tempDir("conn-srv-");
+  const store = new ConnectionStore({ dataDir });
+  const profile = opts.profile ?? "tls13-chacha20";
+  if (!store.serverConfig()) {
+    store.setServerConfig({ enabled: true, port: 0, profile, spaceId: "space-test", spaceName: "시험공간", burnOnJoin: opts.burn ?? true, shared: [] });
+  }
+  const peers: ConnPeer[] = [];
+  const handled: string[] = [];
+  const listener = new ConnListener({
+    store,
+    onPeer: (p) => peers.push(p),
+    onPeerGone: (p) => { const i = peers.indexOf(p); if (i >= 0) peers.splice(i, 1); },
+    handle: (_p, req, reply) => { handled.push(req.op); reply({ ok: true, echo: req.op }); },
+    log: () => {},
+  });
+  const port = await listener.listen(opts.port ?? 0, "127.0.0.1");
+  const keys = store.identity();
+  const invite = (label = "B", overrides: Partial<InvitePayload> = {}): string => {
+    const token = newJoinToken();
+    store.addInvite(token, label, Date.now() + 60_000);
+    const cfg = store.serverConfig()!;
+    return encodeInvite({
+      v: 1, kind: "join", spaceId: cfg.spaceId, spaceName: cfg.spaceName, profile: cfg.profile,
+      endpoint: { type: "direct", host: "127.0.0.1", port }, serverKey: keys.publicKeyB64, token,
+      expiresAt: Date.now() + 60_000, hostUser: "에이", ...overrides,
+    }, keys.privateKeyPem);
+  };
+  return { dataDir, store, listener, port, keys, invite, peers, handled };
 }
 
 /** 정상 사용자의 v3 핸드셰이크(hello → auth → Hub 증명 확인). */
