@@ -39,7 +39,7 @@ export class HubClient {
   private readonly port: number;
   /** MCP 프로세스 1개 = 세션 1개. 같은 프로세스의 재연결은 독점 검사를 통과한다. */
   readonly sessionToken = randomUUID();
-  private account: { uuid: string; name?: string; exclusive: boolean } | null;
+  private account: { uuid: string; name?: string; exclusive: boolean; area?: "connection" } | null;
   private readonly hubEntry: string;
   private readonly nodeArgs: string[];
   private readonly dataDir: string;
@@ -73,9 +73,9 @@ export class HubClient {
   onAccountLost: ((reason: string) => void) | null = null;
 
   /** 계정을 독점 선택해 로그인한다. 거부되면 기존 계정 상태를 그대로 둔다. */
-  async selectAccount(uuid: string, name?: string): Promise<Response> {
+  async selectAccount(uuid: string, name?: string, area?: "connection"): Promise<Response> {
     await this.ensureLink();
-    const next = { uuid, name, exclusive: true };
+    const next = { uuid, name, exclusive: true, ...(area ? { area } : {}) };
     const r = await this.request("login", this.loginParams(next));
     if (r.ok) this.account = next;
     return r;
@@ -134,7 +134,8 @@ export class HubClient {
     this.attach(sock);
     await this.handshake();
     if (this.account) {
-      const r = await this.request("login", this.loginParams(this.account));
+      // 재연결 재로그인(resume): 연결 계정은 Hub 재시작 직후 통신 연결이 아직 안 붙었어도 이어 쓴다(v3.0).
+      const r = await this.request("login", { ...this.loginParams(this.account), resume: true });
       if (!r.ok) {
         if (this.account.exclusive) {
           // Hub 재시작 사이 다른 세션이 이 역할을 가져갔다: 연결은 유지하고 계정 선택만 해제해
@@ -149,9 +150,10 @@ export class HubClient {
     }
   }
 
-  private loginParams(a: { uuid: string; name?: string; exclusive: boolean }): object {
+  private loginParams(a: { uuid: string; name?: string; exclusive: boolean; area?: "connection" }): object {
     return {
       uuid: a.uuid,
+      ...(a.area ? { area: a.area } : {}),
       ...(a.name ? { name: a.name } : {}),
       ...(a.exclusive ? { exclusive: true, sessionToken: this.sessionToken } : {}),
     };

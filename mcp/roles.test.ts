@@ -44,7 +44,7 @@ test("RoleStore: 새 역할은 생성·저장되고 다른 인스턴스(재시�
   assert.equal(first.persisted, true);
   const s2 = new RoleStore({ dataDir, cwd: "c:\\proj", platform: "win32" });
   assert.deepEqual(s2.resolve("기획"), { uuid: first.uuid, source: "local", persisted: true });
-  assert.deepEqual(s2.list(), [{ role: "기획", uuid: first.uuid, source: "local" }]);
+  assert.deepEqual(s2.list(), [{ role: "기획", uuid: first.uuid, source: "local", area: "local" }]);
   const dir = path.join(dataDir, "state", "roles", folderKey("C:\\Proj"));
   assert.equal(fs.readFileSync(path.join(dir, "folder.txt"), "utf8"), path.resolve("C:\\Proj"));
 });

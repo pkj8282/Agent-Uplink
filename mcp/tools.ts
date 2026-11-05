@@ -25,7 +25,11 @@ const KO: ToolTexts = {
   tools: {
     use_account: {
       description: "이 세션의 계정(역할)을 선택합니다. 인자 없이 호출하면 이 폴더의 역할 목록(설명·사용 중 여부)을 봅니다. role을 주면 그 역할 계정으로 로그인합니다(없으면 새로 만듦). 같은 역할은 재시작 후에도 같은 계정입니다. 다른 세션이 쓰는 역할은 고를 수 없습니다.",
-      params: { role: "역할 이름(예: 기획, 구현). 생략하면 목록만 봅니다.", description: "역할 설명(프로필). 다른 세션·관리 도구에 보입니다." },
+      params: {
+        role: "역할 이름(예: 기획, 구현). 생략하면 목록만 봅니다.",
+        description: "역할 설명(프로필). 다른 세션·관리 도구에 보입니다.",
+        area: "계정 영역: local(기본) 또는 connection(다른 PC와 통신하는 연결 계정 — 통신 서버에 연결돼 있을 때만). 한 세션은 한 영역만 씁니다.",
+      },
     },
     whoami: { description: "내 계정(UUID·이름·역할·설명)을 봅니다. 아직 역할을 고르지 않았으면 역할 목록을 보여줍니다.", params: {} },
     set_profile: {
@@ -76,7 +80,11 @@ const EN: ToolTexts = {
   tools: {
     use_account: {
       description: "Selects this session's account (role). Called with no arguments, it lists the roles for this folder (description and whether in use). With role, it logs in to that role's account (creating it if needed). The same role maps to the same account after restarts. A role used by another session cannot be selected.",
-      params: { role: "Role name (e.g. planner, builder). Omit to only list roles.", description: "Role description (profile). Visible to other sessions and the admin app." },
+      params: {
+        role: "Role name (e.g. planner, builder). Omit to only list roles.",
+        description: "Role description (profile). Visible to other sessions and the admin app.",
+        area: "Account area: local (default) or connection (a connection account that talks to other PCs — only while connected to a communication server). A session uses one area only.",
+      },
     },
     whoami: { description: "Shows my account (UUID, name, role, description). If no role is selected yet, shows the role list.", params: {} },
     set_profile: {

@@ -69,13 +69,14 @@ server.registerTool(
     inputSchema: {
       role: z.string().max(200).optional().describe(T.tools.use_account.params.role),
       description: z.string().max(500).optional().describe(T.tools.use_account.params.description),
+      area: z.enum(["local", "connection"]).optional().describe(T.tools.use_account.params.area),
     },
     annotations: SET,
   },
-  async ({ role, description }) => {
+  async ({ role, description, area }) => {
     try {
       if (role === undefined) return text(await session.listText());
-      const r = await session.use(role, description);
+      const r = await session.use(role, description, area ?? "local");
       return text(r.text, !r.ok);
     } catch (e) { return text((e as Error).message, true); }
   },

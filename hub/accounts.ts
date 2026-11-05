@@ -11,6 +11,8 @@ export interface Account {
   dm: Record<string, string>;
   inboxCursor: number;
   description?: string;
+  /** 연결 계정 영역(v3.0). 없으면 로컬 — 로컬 계정 파일 형식은 2.1.3 그대로. */
+  area?: "connection";
 }
 
 export class AccountStore {
@@ -48,10 +50,11 @@ export class AccountStore {
     }
   }
 
-  getOrCreate(uuid: string, name?: string): Account {
+  getOrCreate(uuid: string, name?: string, area?: "connection"): Account {
     const found = this.accounts.get(uuid);
     if (found) return found;
     const a: Account = { uuid, name: name ?? uuid.slice(0, 8), createdAt: Date.now(), dm: {}, inboxCursor: 0 };
+    if (area === "connection") a.area = "connection";
     this.accounts.set(uuid, a);
     this.save(a);
     return a;
@@ -79,7 +82,7 @@ export class AccountStore {
   }
 
   list(): AccountInfo[] {
-    return [...this.accounts.values()].map((a) => ({ uuid: a.uuid, name: a.name, description: a.description ?? "" }));
+    return [...this.accounts.values()].map((a) => ({ uuid: a.uuid, name: a.name, description: a.description ?? "", ...(a.area ? { area: a.area } : {}) }));
   }
 
   setDescription(uuid: string, description: string): string {

@@ -52,6 +52,7 @@ export interface AccountInfo {
   name: string;
   description?: string;
   online?: boolean;
+  area?: "connection";
 }
 
 export interface AccountStatus {
@@ -60,6 +61,7 @@ export interface AccountStatus {
   name: string;
   description: string;
   online: boolean;
+  area?: "connection";
 }
 
 export interface TrashItemInfo {
@@ -107,7 +109,7 @@ export type Request =
   | { op: "hello"; id: number }
   | { op: "auth"; id: number; nonce: string; proof: string }
   | { op: "viewer_ticket"; id: number }
-  | { op: "login"; id: number; uuid: string; name?: string; exclusive?: boolean; sessionToken?: string }
+  | { op: "login"; id: number; uuid: string; name?: string; exclusive?: boolean; sessionToken?: string; area?: "connection"; resume?: boolean }
   | { op: "set_profile"; id: number; description: string }
   | { op: "account_status"; id: number; uuids: string[] }
   | { op: "whoami"; id: number }

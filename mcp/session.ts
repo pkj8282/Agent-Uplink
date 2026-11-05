@@ -1,7 +1,7 @@
 // 계정 선택 상태와 역할 흐름(use_account). MCP 툴 배선과 분리해 Hub를 상대로 테스트한다.
 // 판단은 Hub의 code로만 한다(구버전 Hub는 code가 없어 LEGACY_* 문장 비교로 보완). 문구는 표시용이다.
 import { HubClient } from "./hubClient.js";
-import { RoleStore, validateRoleName } from "./roles.js";
+import { RoleStore, validateRoleName, type RoleArea, type RoleEntry } from "./roles.js";
 import { oneLine } from "./text.js";
 import { AccountStatus } from "../shared/protocol.js";
 import { LEGACY_ACCOUNT_GONE, LEGACY_LOGIN_REQUIRED, LEGACY_UNKNOWN_OP, mcpMsg, type McpKey } from "./messages.js";
@@ -32,9 +32,12 @@ export class AccountSession {
   private sel: Selection | null;
   /** 선택이 외부 요인(역할을 다른 세션이 가져감)으로 해제됐을 때 다음 안내에 한 번 붙일 문구. */
   private lostNotice: string | null = null;
+  /** 이 세션의 계정 영역(v3.0) — 첫 선택 성공 때 고정. 고정 계정(UPLINK_ACCOUNT)은 로컬. */
+  private area: RoleArea | null;
 
   constructor(private readonly client: HubClient, private readonly roles: RoleStore | null, pinnedUuid?: string) {
     this.sel = pinnedUuid ? { uuid: pinnedUuid, role: null } : null;
+    this.area = pinnedUuid ? "local" : null;
     client.onAccountLost = (reason) => {
       const role = this.sel?.role;
       this.sel = null;
@@ -62,38 +65,48 @@ export class AccountSession {
   async listText(): Promise<string> {
     if (!this.roles) return this.m("pinned_session");
     const entries = this.roles.list();
+    const connEntries = this.roles.list("connection");
+    const all = [...entries, ...connEntries];
     const statuses = new Map<string, AccountStatus>();
-    if (entries.length > 0) {
-      const r = await this.client.accountStatus(entries.map((e) => e.uuid));
+    if (all.length > 0) {
+      const r = await this.client.accountStatus(all.map((e) => e.uuid));
       if (!r.ok) return isUnknownOp(r) ? this.m("old_hub") : this.m("role_status_failed", { detail: hubText(r.error) });
       for (const st of r.statuses ?? []) statuses.set(st.uuid, st);
     }
-    const lines = entries.map((e) => {
+    const line = (e: RoleEntry) => {
       const st = statuses.get(e.uuid);
       const state = !st?.exists ? this.m("state_missing") : st.online ? this.m("state_in_use") : this.m("state_free");
       const pinned = e.source === "env" ? this.m("env_pinned_suffix") : "";
       const desc = st?.description ? ` — ${oneLine(st.description, 120)}` : "";
       const mine = this.sel?.uuid === e.uuid ? this.m("current_session_suffix") : "";
       return `- ${e.role} [${state}]${pinned}${desc}${mine}`;
-    });
-    const body = lines.length > 0 ? lines.join("\n") : this.m("no_roles");
+    };
+    const lines = entries.map(line);
+    let body = lines.length > 0 ? lines.join("\n") : this.m("no_roles");
+    // 연결 역할(v3.0)이 있을 때만 절을 따로 붙인다 — 없으면 2.1.3과 같은 출력.
+    if (connEntries.length > 0) body += `\n${this.m("connection_roles_header")}\n${connEntries.map(line).join("\n")}`;
     const ignored = this.roles.ignoredEnv();
     const tail = ignored.length > 0 ? `\n${this.m("ignored_env", { items: ignored.join(", ") })}` : "";
     return `${this.m("roles_header", { folder: this.roles.folder })}\n${body}${tail}`;
   }
 
   /** 역할을 선택(필요하면 생성)하고 독점 로그인한다. 실패 시 기존 선택을 유지한다. */
-  async use(roleRaw: string, description?: string): Promise<{ ok: boolean; text: string }> {
+  async use(roleRaw: string, description?: string, area: RoleArea = "local"): Promise<{ ok: boolean; text: string }> {
     if (!this.roles) return { ok: false, text: this.m("pinned_cannot_switch") };
+    // 한 세션은 한 계정 영역만(v3.0, 사용자 결정) — 첫 선택 성공 때 고정된다.
+    if (this.area && this.area !== area) {
+      return { ok: false, text: this.m("area_locked", { area: this.m(this.area === "connection" ? "area_connection" : "area_local") }) };
+    }
     const v = validateRoleName(roleRaw);
     if (!v.ok) return { ok: false, text: this.m(v.code, v.params) };
-    const res = this.roles.resolve(v.role);
+    const res = this.roles.resolve(v.role, area);
     // 구버전 Hub는 exclusive를 무시해 독점이 조용히 꺼진다 → 로그인 전에 역할 기능 지원을 확인한다.
     const probe = await this.client.accountStatus([res.uuid]);
     if (!probe.ok) return { ok: false, text: isUnknownOp(probe) ? this.m("old_hub") : this.m("role_check_failed", { detail: hubText(probe.error) }) };
-    const r = await this.client.selectAccount(res.uuid, v.role);
+    const r = await this.client.selectAccount(res.uuid, v.role, area === "connection" ? "connection" : undefined);
     if (!r.ok) return { ok: false, text: `${hubText(r.error)}\n\n${await this.listText()}` };
     this.sel = { uuid: res.uuid, role: v.role };
+    this.area = area;
     this.lostNotice = null;
     const lines = [this.m("role_selected", { role: v.role }), this.m("label_uuid", { uuid: res.uuid })];
     // 여기부터는 선택이 이미 성공했다 — 이후 단계의 실패는 결과 문구로만 알린다.

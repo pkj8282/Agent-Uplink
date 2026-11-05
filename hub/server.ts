@@ -42,6 +42,11 @@ export interface HubLimits {
 // 로컬 대량 연결로 Hub를 점유하지 못하게(정상 사용은 세션 수 + 관리 앱 정도).
 export const DEFAULT_LIMITS: HubLimits = { maxConnections: 64, authTimeoutMs: 10_000, maxSse: 16 };
 
+/** 통신 연결이 살아 있는지(v3.0) — 통신 서버가 리스닝 중이거나 참여 공간 하나라도 연결됨. */
+export interface ConnStatusSource {
+  hasLiveConnection(): boolean;
+}
+
 export interface HubOptions {
   tcpPort: number;
   httpPort: number;
@@ -103,6 +108,12 @@ export class Hub {
   private stopped = false;
   private connStates = new Set<ConnState>();
   private stateBySock = new Map<net.Socket, ConnState>(); // 삽입 순 = 오래된 순
+  /** 통신 연결 상태(v3.0) — 새 연결 계정 로그인 조건. 통신 관리자가 붙기 전에는 항상 연결 없음. */
+  protected connStatus: ConnStatusSource = { hasLiveConnection: () => false };
+
+  setConnStatusSource(src: ConnStatusSource): void {
+    this.connStatus = src;
+  }
 
   constructor(opts: HubOptions) {
     this.ready = new Promise<void>((res, rej) => { this.markReady = res; this.markFailed = rej; });
@@ -476,6 +487,18 @@ export class Hub {
           }
           loginName = v.name;
         }
+        // 계정 영역(v3.0): 한 계정은 한 영역에만 속한다. 새 연결 계정 로그인은 통신 연결이 살아 있을 때만
+        // (설계 12-3) — 이미 쓰던 세션의 재로그인(resume)은 Hub 재시작 직후 연결이 아직 안 붙었어도 허용한다.
+        const area = req.area === "connection" ? "connection" : undefined;
+        const existingAcc = this.accounts.get(req.uuid);
+        if (existingAcc && existingAcc.area !== area) {
+          reply(this.err("area_mismatch", "area_mismatch"));
+          return;
+        }
+        if (area === "connection" && req.resume !== true && !this.connStatus.hasLiveConnection()) {
+          reply(this.err("connection_unavailable", "connection_unavailable"));
+          return;
+        }
         const token = typeof req.sessionToken === "string" && req.sessionToken.length > 0 ? req.sessionToken : null;
         if (req.exclusive === true) {
           // 같은 계정을 다른 세션(다른 sessionToken 또는 비독점 연결)이 쓰고 있으면 거부. 상태는 바꾸지 않는다.
@@ -486,7 +509,7 @@ export class Hub {
             }
           }
         }
-        const acc = this.accounts.getOrCreate(req.uuid, loginName);
+        const acc = this.accounts.getOrCreate(req.uuid, loginName, area);
         // 다른 계정으로 전환: 이전 계정으로 걸어 둔 wait를 빈 결과로 끝낸다.
         // (남겨 두면 이전 계정 앞 메시지가 이 연결로 새거나, 새 주인이 받지 못하고 유실된다.)
         if (state.uuid && state.uuid !== acc.uuid && state.waiter) {
@@ -887,7 +910,7 @@ export class Hub {
           ok: true,
           statuses: (uuids as string[]).map((u) => {
             const a = this.accounts.get(u);
-            return { uuid: u, exists: !!a, name: a?.name ?? "", description: a?.description ?? "", online: this.isOnline(u) };
+            return { uuid: u, exists: !!a, name: a?.name ?? "", description: a?.description ?? "", online: this.isOnline(u), ...(a?.area ? { area: a.area } : {}) };
           }),
         });
         return;

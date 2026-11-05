@@ -81,10 +81,14 @@ export function resolveRoleCwd(env: NodeJS.ProcessEnv, cwd: string): string {
   return v ? v : cwd;
 }
 
+export type RoleArea = "local" | "connection";
+
 export interface RoleEntry {
   role: string;
   uuid: string;
   source: "env" | "local";
+  /** 계정 영역(v3.0). 연결 역할은 역할 폴더의 connection/ 하위 폴더에 따로 저장한다(구버전 MCP의 목록에 섞이지 않게). */
+  area: RoleArea;
 }
 
 export interface Resolved {
@@ -118,36 +122,44 @@ export class RoleStore {
     return [...this.env.ignored];
   }
 
-  list(): RoleEntry[] {
-    const fromEnv: RoleEntry[] = [...this.env.roles].map(([role, uuid]) => ({ role, uuid, source: "env" }));
+  /** 연결 역할 폴더(v3.0). */
+  private dirOf(area: RoleArea): string {
+    return area === "connection" ? path.join(this.dir, "connection") : this.dir;
+  }
+
+  list(area: RoleArea = "local"): RoleEntry[] {
+    const dir = this.dirOf(area);
+    // UPLINK_ACCOUNTS 고정은 로컬 역할에만 적용된다.
+    const fromEnv: RoleEntry[] = area === "local" ? [...this.env.roles].map(([role, uuid]) => ({ role, uuid, source: "env" as const, area })) : [];
     const local: RoleEntry[] = [];
     let files: string[] = [];
     try {
-      files = fs.readdirSync(this.dir);
+      files = fs.readdirSync(dir);
     } catch {
       // 아직 역할 없음
     }
     for (const f of files) {
       if (!f.endsWith(".json")) continue;
-      const rec = this.read(path.join(this.dir, f));
-      if (!rec || this.env.roles.has(rec.role)) continue;
-      local.push({ role: rec.role, uuid: rec.uuid, source: "local" });
+      const rec = this.read(path.join(dir, f));
+      if (!rec || (area === "local" && this.env.roles.has(rec.role))) continue;
+      local.push({ role: rec.role, uuid: rec.uuid, source: "local", area });
     }
     local.sort((a, b) => a.role.localeCompare(b.role));
     return [...fromEnv, ...local];
   }
 
-  resolve(role: string): Resolved {
-    const envUuid = this.env.roles.get(role);
+  resolve(role: string, area: RoleArea = "local"): Resolved {
+    const envUuid = area === "local" ? this.env.roles.get(role) : undefined;
     if (envUuid) return { uuid: envUuid, source: "env", persisted: true };
-    const file = this.fileOf(role);
+    const dir = this.dirOf(area);
+    const file = this.fileOf(role, area);
     const existing = this.read(file);
     if (existing) return { uuid: existing.uuid, source: "local", persisted: true };
     const uuid = randomUUID();
     const body = JSON.stringify({ role, uuid });
     const tmp = `${file}.${uuid}.tmp`;
     try {
-      fs.mkdirSync(this.dir, { recursive: true });
+      fs.mkdirSync(dir, { recursive: true });
       try {
         fs.writeFileSync(path.join(this.dir, "folder.txt"), this.folder, { flag: "wx" });
       } catch {
@@ -179,8 +191,8 @@ export class RoleStore {
   }
 
   /** 파일명은 역할 이름 해시(길이·대소문자 무관 파일시스템에 안전), 내용에 실제 이름을 둔다. */
-  private fileOf(role: string): string {
-    return path.join(this.dir, `${createHash("sha256").update(role, "utf8").digest("hex").slice(0, 32)}.json`);
+  private fileOf(role: string, area: RoleArea = "local"): string {
+    return path.join(this.dirOf(area), `${createHash("sha256").update(role, "utf8").digest("hex").slice(0, 32)}.json`);
   }
 
   private read(file: string): { role: string; uuid: string } | null {
