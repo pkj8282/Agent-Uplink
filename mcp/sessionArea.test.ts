@@ -98,3 +98,21 @@ test("connection_roles_listed_in_own_section: 연결 역할이 있으면 '연결
     a.client.close();
   } finally { hub.stop(); }
 });
+
+test("remote_accounts_tagged_in_listing: 연결 계정의 계정 목록에서 원격 계정은 출처가 붙는다", async () => {
+  const { startHubPair } = await import("../hub/testing.js");
+  const p = await startHubPair();
+  try {
+    const a = session(p.A.port, p.A.dataDir, tempDir("uplink-roles-"));
+    assert.equal((await a.s.use("통신기획", undefined, "connection")).ok, true);
+    const b = session(p.B.port, p.B.dataDir, tempDir("uplink-roles-"));
+    assert.equal((await b.s.use("통신구현", undefined, "connection")).ok, true);
+    let text = "";
+    for (let i = 0; i < 150 && !text.includes("[원격 · 팀 · 에이]"); i++) {
+      text = (await b.s.accountsText()).text;
+      if (!text.includes("[원격")) await new Promise((r) => setTimeout(r, 20));
+    }
+    assert.match(text, /\[원격 · 팀 · 에이\] /);
+    a.client.close(); b.client.close();
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});

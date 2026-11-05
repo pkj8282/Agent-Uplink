@@ -8,7 +8,7 @@ import { HubClient } from "./hubClient.js";
 import { RoleStore, resolveRoleCwd } from "./roles.js";
 import { AccountSession } from "./session.js";
 import { oneLine } from "./text.js";
-import { fmtItems, fmtMessages } from "./format.js";
+import { fmtItems, fmtMessages, remoteTag } from "./format.js";
 import { resolveDataDir } from "../shared/clientKey.js";
 import { currentLang } from "../shared/langConfig.js";
 import { MAX_TEXT_LENGTH } from "../shared/protocol.js";
@@ -37,10 +37,13 @@ const m = (key: McpKey, params?: object) => mcpMsg(client.lang(), key, params);
 
 const server = new McpServer({ name: "agent-uplink", version: "2.1.3" }, { instructions: T.instructions });
 
-// 도구 성격 표시(클라이언트가 삭제 전 확인을 띄우는 등에 쓴다). 모두 로컬 전용이라 openWorld는 false.
+// 도구 성격 표시(클라이언트가 삭제 전 확인을 띄우는 등에 쓴다). 관리 도구는 이 PC 안이라 openWorld false,
+// 메시지 도구(send·read·check·wait)는 v3.0부터 다른 PC(통신 서버)의 채널에도 닿으므로 openWorld true.
 const READ: ToolAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const SET: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const WRITE: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+const MSG_READ: ToolAnnotations = { ...READ, openWorldHint: true };
+const MSG_WRITE: ToolAnnotations = { ...WRITE, openWorldHint: true };
 const DELETE: ToolAnnotations = { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false };
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError: boolean };
@@ -199,7 +202,7 @@ server.registerTool(
   gated(async () => {
     const r = await client.listServers();
     if (!r.ok) return text(session.explainError(r), true);
-    const list = (r.servers ?? []).map((s) => `${s.name} (${s.serverId}) · ${m("server_channel_count", { count: s.channelCount })}`);
+    const list = (r.servers ?? []).map((s) => `${s.remote ? `${remoteTag(client.lang(), s.remote.spaceName, s.remote.hubUser)} ` : s.area === "connection" ? `${m("comms_server_tag")} ` : ""}${s.name} (${s.serverId}) · ${m("server_channel_count", { count: s.channelCount })}`);
     return text(list.length ? list.join("\n") : m("no_servers"));
   }),
 );
@@ -269,7 +272,7 @@ server.registerTool(
       channelId: z.string().min(1).max(256).describe(T.tools.send.params.channelId),
       text: z.string().min(1).max(MAX_TEXT_LENGTH).describe(T.tools.send.params.text),
     },
-    annotations: WRITE,
+    annotations: MSG_WRITE,
   },
   gated(async ({ channelId, text: body }: { channelId: string; text: string }) => {
     const r = await client.send(channelId, body);
@@ -285,7 +288,7 @@ server.registerTool(
       channelId: z.string().min(1).max(256).describe(T.tools.read.params.channelId),
       limit: z.number().int().positive().max(500).optional().describe(T.tools.read.params.limit),
     },
-    annotations: READ,
+    annotations: MSG_READ,
   },
   gated(async ({ channelId, limit }: { channelId: string; limit?: number }) => {
     const r = await client.read(channelId, limit);
@@ -298,7 +301,7 @@ server.registerTool(
   {
     description: T.tools.check.description,
     inputSchema: {},
-    annotations: WRITE,
+    annotations: MSG_WRITE,
   },
   gated(async () => {
     const r = await client.check();
@@ -311,7 +314,7 @@ server.registerTool(
   {
     description: T.tools.wait.description,
     inputSchema: { timeoutMs: z.number().int().positive().max(120000).optional().describe(T.tools.wait.params.timeoutMs) },
-    annotations: WRITE,
+    annotations: MSG_WRITE,
   },
   gated(async ({ timeoutMs }: { timeoutMs?: number }) => {
     const r = await client.wait(timeoutMs ?? 30000);

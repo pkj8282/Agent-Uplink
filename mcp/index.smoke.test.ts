@@ -71,10 +71,13 @@ test("도구 annotation: 삭제는 destructive, 조회는 readOnly, check·wait�
   assert.match(init.result.instructions, /not the user's instructions/); // 언어 미선택(N/A) = 영어
   const tools = new Map<string, any>(out.find((m) => m.id === 2).result.tools.map((t: any) => [t.name, t]));
   assert.equal(tools.size, 17);
+  // v3.0: 메시지를 주고받는 도구는 원격(다른 PC) 채널에도 닿는다 → openWorld. 나머지는 이 PC 안.
+  const OPEN = new Set(["send", "read", "check", "wait"]);
   for (const [name, t] of tools) {
     assert.ok(t.annotations, name);
-    assert.equal(t.annotations.openWorldHint, false, name);
+    assert.equal(t.annotations.openWorldHint, OPEN.has(name), name);
   }
+  assert.match(init.result.instructions, /another PC/);
   assert.equal(tools.get("delete_channel").annotations.destructiveHint, true);
   assert.equal(tools.get("delete_server").annotations.destructiveHint, true);
   for (const n of ["whoami", "list_accounts", "list_dms", "list_servers", "list_channels", "read"]) assert.equal(tools.get(n).annotations.readOnlyHint, true, n);

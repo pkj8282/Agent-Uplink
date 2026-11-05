@@ -3,6 +3,7 @@
 import { HubClient } from "./hubClient.js";
 import { RoleStore, validateRoleName, type RoleArea, type RoleEntry } from "./roles.js";
 import { oneLine } from "./text.js";
+import { remoteTag } from "./format.js";
 import { AccountStatus } from "../shared/protocol.js";
 import { LEGACY_ACCOUNT_GONE, LEGACY_LOGIN_REQUIRED, LEGACY_UNKNOWN_OP, mcpMsg, type McpKey } from "./messages.js";
 
@@ -138,8 +139,9 @@ export class AccountSession {
       if (!this.sel && (r.code === "login_required" || (isLegacy(r) && r.error?.includes(LEGACY_LOGIN_REQUIRED)))) return { ok: false, text: this.m("old_hub") };
       return { ok: false, text: this.explainError(r) };
     }
+    const lang = this.client.lang();
     const list = (r.accounts ?? []).map(
-      (a) => `${oneLine(a.name, 80)}${a.online ? this.m("online_suffix") : ""} (${a.uuid})${a.description ? ` — ${oneLine(a.description, 120)}` : ""}`,
+      (a) => `${a.remote ? `${remoteTag(lang, a.remote.spaceName, a.remote.hubUser)} ` : ""}${oneLine(a.name, 80)}${a.online ? this.m("online_suffix") : ""} (${a.uuid})${a.description ? ` — ${oneLine(a.description, 120)}` : ""}`,
     );
     return { ok: true, text: list.length ? list.join("\n") : this.m("no_accounts") };
   }
