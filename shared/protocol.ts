@@ -13,6 +13,13 @@ export const MAX_STORED_TEXT_LENGTH = 2 * MAX_TEXT_LENGTH;
 
 export type ChannelKind = "dm" | "server";
 
+/** 원격(다른 PC의 Hub)에서 온 메시지의 출처(v3.0). 서버가 붙이며 본문으로 위조할 수 없다. */
+export interface MessageOrigin {
+  scope: "remote";
+  spaceName: string;
+  hubUser: string;
+}
+
 export interface Channel {
   id: string;
   kind: ChannelKind;
