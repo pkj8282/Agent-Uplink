@@ -207,3 +207,29 @@ test("RT-C16_member_send_rate_limit: 구성원 한 명이 메시지를 쏟아내
     assert.equal(codes[60], "rate_limited");
   } finally { p.A.hub.stop(); p.B.hub.stop(); }
 });
+
+test("connection_account_creates_comms_channel: A의 연결 계정 AI가 통신 서버에 채널을 만들고, 공유 중이면 B에게도 보인다", async () => {
+  const p = await startHubPair();
+  try {
+    const a = await login(p.A.port, "a-conn", "connection");
+    const r = await a.req("create_channel", { serverId: p.serverId, name: "설계" });
+    assert.equal(r.ok, true, r.code);
+    assert.equal((await a.req("create_channel", { serverId: p.serverId, name: "설계" })).code, "channel_name_taken");
+    await p.until(() => p.B.hub.hasChannelForTest(`r:${p.spaceId}:${r.channelId}`));
+    const l = await login(p.A.port, "a-local");
+    assert.equal((await l.req("create_channel", { serverId: p.serverId, name: "로컬침입" })).code, "server_not_found");
+    const b = await login(p.B.port, "b-conn", "connection");
+    const remoteServer = `r:${p.spaceId}:${p.serverId}`;
+    assert.equal((await b.req("create_channel", { serverId: remoteServer, name: "원격침입" })).code, "server_not_found");
+    a.close(); l.close(); b.close();
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});
+
+test("invite_member_name: 초대 코드에 A가 정한 참여자 이름이 들어가고, B 쪽 원격 표시도 그 이름", async () => {
+  const p = await startHubPair();
+  try {
+    const st = p.mA.status();
+    assert.equal(st.members[0].userName, "비");
+    assert.throws(() => p.mA.createInvite("", "127.0.0.1", 60_000), /name_invalid/);
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});

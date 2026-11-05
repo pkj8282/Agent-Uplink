@@ -56,7 +56,7 @@ test("full_flow_via_admin_ops: 관리 op만으로 A가 서버를 열고 B가 참
     const ch = await req(A, "admin_conn_create_channel", { serverId: srv.serverId, name: "main" });
     assert.equal(ch.ok, true);
     assert.equal((await req(A, "admin_conn_set_shared", { serverIds: [srv.serverId] })).ok, true);
-    const inv = await req(A, "admin_conn_create_invite", { label: "B", host: "127.0.0.1", expiresInMs: 60_000 });
+    const inv = await req(A, "admin_conn_create_invite", { label: "비", host: "127.0.0.1", expiresInMs: 60_000 });
     assert.equal(inv.ok, true);
     assert.match(inv.code, /^UPLINK1-/);
     assert.equal(inv.ipWarning, true);
@@ -107,7 +107,7 @@ test("revoke_disconnects_live_member: 해지하면 연결 중인 구성원이 �
     const req = (h: typeof A, op: string, p: object = {}) => (h.c.req(op, { token: h.token, ...p }) as Promise<any>);
     await req(A, "admin_conn_set_user", { name: "에이" });
     await req(A, "admin_conn_enable_server", { port: await freePort(), bindHost: "127.0.0.1", profile: "tls13-chacha20", spaceName: "팀", burnOnJoin: true });
-    const inv = await req(A, "admin_conn_create_invite", { label: "B", host: "127.0.0.1", expiresInMs: 60_000 });
+    const inv = await req(A, "admin_conn_create_invite", { label: "비", host: "127.0.0.1", expiresInMs: 60_000 });
     await req(B, "admin_conn_set_user", { name: "비" });
     assert.equal((await req(B, "admin_conn_join", { code: inv.code })).ok, true);
     let sa: any;

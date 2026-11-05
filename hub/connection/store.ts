@@ -142,6 +142,12 @@ export class ConnectionStore {
     return "ok";
   }
 
+  /** 초대 때 서버가 정한 참여자 이름(사용 여부와 무관). 없으면 null. */
+  inviteLabel(token: string): string | null {
+    const want = tokenHash(String(token));
+    return this.invites().find((r) => r.tokenHash === want)?.label ?? null;
+  }
+
   members(): MemberRecord[] {
     const v = this.read<MemberRecord[]>("members.json", []);
     return Array.isArray(v) ? v : [];

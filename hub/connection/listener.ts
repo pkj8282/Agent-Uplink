@@ -196,7 +196,8 @@ export class ConnListener {
         case "c_join": {
           if (!this.allowAttempt(ip)) { this.deps.log("rate_limited", { ip }); return fail("rate_limited", true); }
           const q = f as { token?: unknown; hubKey?: unknown; userName?: unknown; sig?: unknown };
-          const name = validateName(q.userName, "account", this.deps.cleanName);
+          // 참여자 이름은 서버 A가 초대 때 정한 이름(사용자 결정) — 참여자가 보낸 userName은 쓰지 않는다.
+          const name = validateName(typeof q.token === "string" ? this.deps.store.inviteLabel(q.token) : null, "account", this.deps.cleanName);
           if (typeof q.token !== "string" || typeof q.hubKey !== "string" || typeof q.sig !== "string" || !name.ok
             || !verifyB64(q.hubKey, joinSigData(challenge, ekm, q.token, q.hubKey), q.sig)) {
             this.deps.log("join_failed", { ip });

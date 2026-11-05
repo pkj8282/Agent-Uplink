@@ -19,6 +19,8 @@ export interface InvitePayload {
   token: string;
   expiresAt: number;
   hostUser: string;
+  /** 참여자 이름 — 서버 A가 초대 때 정한다(사용자 결정 2026-11-06). 참여자가 보낸 이름은 쓰지 않는다. */
+  memberName: string;
 }
 
 export type InviteError = "invite_malformed" | "invite_version" | "invite_profile_unknown" | "invite_bad_signature" | "invite_expired";
@@ -38,7 +40,7 @@ function canonical(p: InvitePayload): InvitePayload {
     : { type: "relay", relay: p.endpoint.relay, serverId: p.endpoint.serverId };
   return {
     v: p.v, kind: p.kind, spaceId: p.spaceId, spaceName: p.spaceName, profile: p.profile, endpoint,
-    serverKey: p.serverKey, token: p.token, expiresAt: p.expiresAt, hostUser: p.hostUser,
+    serverKey: p.serverKey, token: p.token, expiresAt: p.expiresAt, hostUser: p.hostUser, memberName: p.memberName,
   };
 }
 
@@ -82,7 +84,7 @@ export function decodeInvite(code: string, nowMs: number): { ok: true; invite: I
   if (q.v !== 1) return bad("invite_version");
   // spaceId는 참여자 PC의 폴더 이름(connection/remote/<spaceId>)이 된다 → 경로에 안전한 문자만(RT-C14).
   if (q.kind !== "join" || typeof q.spaceId !== "string" || !SPACE_ID_RE.test(q.spaceId) || !isStr(q.spaceName) || !validEndpoint(q.endpoint)
-    || !isStr(q.serverKey, 1024) || !isStr(q.token) || typeof q.expiresAt !== "number" || !isStr(q.hostUser)) {
+    || !isStr(q.serverKey, 1024) || !isStr(q.token) || typeof q.expiresAt !== "number" || !isStr(q.hostUser) || !isStr(q.memberName)) {
     return bad("invite_malformed");
   }
   if (!isProfileId(q.profile)) return bad("invite_profile_unknown");

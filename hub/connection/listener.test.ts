@@ -43,7 +43,7 @@ async function setup(opts: { burn?: boolean; limits?: Partial<ConnLimits> } = {}
   const store = new ConnectionStore({ dataDir });
   store.setServerConfig({ enabled: true, port: 0, profile: "tls13-chacha20", spaceId: "sp1", spaceName: "팀", burnOnJoin: opts.burn ?? true, shared: [] });
   const token = newJoinToken();
-  store.addInvite(token, "B", Date.now() + 60_000);
+  store.addInvite(token, "비", Date.now() + 60_000); // 참여자 이름은 서버가 정한다
   const handled: string[] = [];
   const logs: string[] = [];
   const peers: ConnPeer[] = [];
@@ -219,16 +219,18 @@ test("preauth_timeout: 아무것도 보내지 않으면 제한 시간 뒤 끊김
   } finally { await s.listener.close(); }
 });
 
-test("join_bad_user_name: 빈 이름·긴 이름은 참여 거부(토큰은 소비하지 않음)", async () => {
+test("join_bad_user_name: 서버가 정한 이름이 잘못된 초대는 거부(참여자 이름 값과 무관, 토큰은 소비하지 않음)", async () => {
   const s = await setup({ burn: true });
   try {
     const k = generateSigningKeys();
+    const bad = newJoinToken();
+    s.store.addInvite(bad, "", Date.now() + 60_000);
     const c = await rawConn(s.port);
-    assert.equal((await join(c, s.token, k, "")).res.code, "join_failed");
+    assert.equal((await join(c, bad, k, "멀쩡한이름")).res.code, "join_failed");
     const c2 = await rawConn(s.port);
-    assert.equal((await join(c2, s.token, k, "x".repeat(65))).res.code, "join_failed");
+    assert.equal((await join(c2, s.token, k, "")).res.ok, true); // 참여자가 보낸 빈 이름은 무시
     const c3 = await rawConn(s.port);
-    assert.equal((await join(c3, s.token, k, "비")).res.ok, true);
+    assert.equal((await join(c3, s.token, k, "비")).res.code, "join_failed"); // 파기 켜짐 — 같은 토큰 재사용 불가
     for (const x of [c, c2, c3]) x.sock.destroy();
   } finally { await s.listener.close(); }
 });
@@ -247,5 +249,18 @@ test("RT-C15_preauth_slots_per_ip: 한 IP가 인증 전 연결로 자리를 다 
     const again = await rawConn(s.port);
     assert.equal((await again.req("c_hello")).ok, true);
     for (const c of [...held, again]) c.sock.destroy();
+  } finally { await s.listener.close(); }
+});
+
+test("member_name_set_by_host: 참여자 이름은 서버 A가 초대 때 정한 이름(참여자가 보낸 이름은 무시)", async () => {
+  const s = await setup();
+  try {
+    const t2 = newJoinToken();
+    s.store.addInvite(t2, "비비", Date.now() + 60_000);
+    const c = await rawConn(s.port);
+    const { res } = await join(c, t2, generateSigningKeys(), "가짜이름");
+    assert.equal(res.ok, true);
+    assert.equal(s.store.member(res.memberId)?.userName, "비비");
+    c.sock.destroy();
   } finally { await s.listener.close(); }
 });

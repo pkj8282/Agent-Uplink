@@ -97,7 +97,7 @@ export async function startConnServer(opts: { dataDir?: string; profile?: Profil
     return encodeInvite({
       v: 1, kind: "join", spaceId: cfg.spaceId, spaceName: cfg.spaceName, profile: cfg.profile,
       endpoint: { type: "direct", host: "127.0.0.1", port }, serverKey: keys.publicKeyB64, token,
-      expiresAt: Date.now() + 60_000, hostUser: "에이", ...overrides,
+      expiresAt: Date.now() + 60_000, hostUser: "에이", memberName: label, ...overrides,
     }, keys.privateKeyPem);
   };
   return { dataDir, store, listener, port, keys, invite, peers, handled };
@@ -125,7 +125,7 @@ export async function startHubPair(opts: { burn?: boolean } = {}) {
   const serverId = mA.createCommsServer("팀작업");
   const channelId = mA.createCommsChannel(serverId, "main");
   mA.setShared([serverId]);
-  const { code } = mA.createInvite("B", "127.0.0.1", 60_000);
+  const { code } = mA.createInvite("비", "127.0.0.1", 60_000); // B의 이름은 A가 정한다
   const j = await mB.join(code);
   if (!j.ok) throw new Error(`join 실패: ${j.code}`);
   const until = async (cond: () => boolean, ms = 5000) => {

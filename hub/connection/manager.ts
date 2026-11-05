@@ -224,13 +224,15 @@ export class ConnectionManager implements ConnStatusSource {
   createInvite(label: string, host: string, expiresInMs: number): { code: string; ipWarning: boolean } {
     const cfg = this.store.serverConfig();
     if (!cfg?.enabled) throw new Error("server_not_enabled");
+    const memberName = this.nameOf(label, "conn_invite");
+    if (!memberName) throw new Error("name_invalid");
     const keys = this.store.identity();
     const token = newJoinToken();
     const expiresAt = Date.now() + expiresInMs;
-    this.store.addInvite(token, label, expiresAt);
+    this.store.addInvite(token, memberName, expiresAt);
     const code = encodeInvite({
       v: 1, kind: "join", spaceId: cfg.spaceId, spaceName: cfg.spaceName, profile: cfg.profile,
-      endpoint: { type: "direct", host, port: cfg.port }, serverKey: keys.publicKeyB64, token, expiresAt, hostUser: this.userName(),
+      endpoint: { type: "direct", host, port: cfg.port }, serverKey: keys.publicKeyB64, token, expiresAt, hostUser: this.userName(), memberName,
     }, keys.privateKeyPem);
     // 직접 연결은 참여자에게 이 PC의 주소(공인 IP면 대략적 지역·통신사)가 보인다(설계 5.6).
     return { code, ipWarning: true };

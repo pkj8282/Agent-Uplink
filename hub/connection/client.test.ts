@@ -26,7 +26,7 @@ const until = async (cond: () => boolean, ms = 5000) => {
 test("join_and_auth_against_real_listener: 초대로 참여 → 클라이언트가 인증하고 요청을 보낸다", async () => {
   const s = await startConnServer();
   const keys = generateSigningKeys();
-  const r = await joinSpace(inviteOf(s.invite()), keys, "비");
+  const r = await joinSpace(inviteOf(s.invite("비")), keys, "비");
   assert.equal(r.ok, true);
   if (!r.ok) return;
   assert.equal(r.space.spaceName, "시험공간");

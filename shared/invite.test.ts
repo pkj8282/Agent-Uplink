@@ -8,7 +8,7 @@ const k = generateSigningKeys();
 const base: InvitePayload = {
   v: 1, kind: "join", spaceId: "space-1", spaceName: "팀", profile: "tls13-aes256gcm",
   endpoint: { type: "direct", host: "203.0.113.5", port: 47930 },
-  serverKey: k.publicKeyB64, token: newJoinToken(), expiresAt: now + 3600_000, hostUser: "에이",
+  serverKey: k.publicKeyB64, token: newJoinToken(), expiresAt: now + 3600_000, hostUser: "에이", memberName: "비",
 };
 
 /** 서명은 그대로 두고 내용만 바꾼 위조 코드. */
@@ -66,4 +66,11 @@ test("RT-C14_space_id_path_traversal: 공간 ID는 참여자 PC의 폴더 이름
     assert.deepEqual(decodeInvite(code, now), { ok: false, code: "invite_malformed" }, bad);
   }
   assert.equal(decodeInvite(encodeInvite({ ...base, spaceId: "0c5f2a1e-9a7b-4c1d-8e2f-123456789abc" }, k.privateKeyPem), now).ok, true);
+});
+
+test("invite_member_name_roundtrip: 참여자 이름(A가 정함)이 서명 안에 들어간다", () => {
+  const code = encodeInvite({ ...base, memberName: "비" }, k.privateKeyPem);
+  const r = decodeInvite(code, now);
+  assert.equal(r.ok && r.invite.memberName, "비");
+  assert.deepEqual(decodeInvite(forge(code, (p) => { p.memberName = "에이"; }), now), { ok: false, code: "invite_bad_signature" });
 });

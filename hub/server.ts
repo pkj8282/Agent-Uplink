@@ -270,7 +270,7 @@ export class Hub {
           if (typeof host !== "string" || host.trim().length === 0 || host.length > 253) return fail("host_invalid", "host_invalid");
           const ms = q.expiresInMs;
           if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 1 || ms > 30 * 24 * 3600_000) return fail("expires_invalid", "expires_invalid");
-          const label = typeof q.label === "string" ? q.label.slice(0, 64) : "";
+          const label = typeof q.label === "string" ? q.label : "";
           return { ok: true, ...c.createInvite(label, host.trim(), ms) };
         }
         case "admin_conn_join": {
@@ -718,10 +718,32 @@ export class Hub {
         const uuid = needLogin();
         if (!uuid) return;
         const srv = this.servers.getServer(req.serverId);
-        if (!srv) {
+        // 통신 서버(Connection Communications)의 채널은 이 Hub의 연결 계정 AI도 만들 수 있다(사용자 결정 2026-11-06).
+        // 원격 서버(r:…)에는 만들 수 없다 — 그 서버의 주인만.
+        const comms = !srv && this.accounts.get(uuid)?.area === "connection" && typeof req.serverId === "string" ? this.conn.comms.getServer(req.serverId) : undefined;
+        if (!srv && !comms) {
           reply(this.err("server_not_found", "server_not_found", { id: req.serverId }));
           return;
         }
+        if (comms) {
+          const cv = validateName(req.name, "channel", this.nameGuard("create_channel", uuid));
+          if (!cv.ok) {
+            reply(this.err(cv.code, "name_invalid", cv.params));
+            return;
+          }
+          const same = comms.channels.find((c) => nameKey(c.name) === nameKey(cv.name));
+          if (same) {
+            reply(this.err("channel_name_taken", "channel_name_taken", { name: same.name, id: same.id }));
+            return;
+          }
+          if (comms.channels.length >= this.config.maxChannelsPerServer) {
+            reply(this.err("channel_limit", "channel_limit", { max: this.config.maxChannelsPerServer }));
+            return;
+          }
+          reply({ ok: true, channelId: this.conn.createCommsChannel(comms.id, cv.name) });
+          return;
+        }
+        if (!srv) return;
         const v = validateName(req.name, "channel", this.nameGuard("create_channel", uuid));
         if (!v.ok) {
           reply(this.err(v.code, "name_invalid", v.params));
