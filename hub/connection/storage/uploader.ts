@@ -12,13 +12,15 @@ import { writeFileAtomic, writeSecretFile } from "../../fsutil.js";
 import { StorageError, type StorageBackend } from "./backend.js";
 
 export interface StorageConfig {
-  kind: "github";
-  repo: string;
+  kind: "github" | "google";
+  /** GitHub 저장소(owner/name). Google은 없음. */
+  repo?: string;
   branch?: string;
   /** 업로드 주기(분, 1~60). */
   intervalMin: number;
 }
 
+/** token = 저장소 자격 증명(불투명): GitHub PAT 또는 Google {clientId,clientSecret?,refreshToken} JSON. */
 interface Secrets { token?: string; spaceKey?: string }
 interface State { lastSeq: Record<string, number>; nextIndex: number; lastHash: string; lastUploadAt: number | null; lastError: string | null }
 
@@ -110,7 +112,7 @@ export class Uploader {
     const sec = this.secrets();
     const spaceKey = sec.spaceKey ? Buffer.from(sec.spaceKey, "base64") : randomBytes(32);
     this.saveSecrets({ token, spaceKey: spaceKey.toString("base64") });
-    writeFileAtomic(this.file("config.json"), JSON.stringify({ kind: cfg.kind, repo: cfg.repo, ...(cfg.branch ? { branch: cfg.branch } : {}), intervalMin: cfg.intervalMin }, null, 2));
+    writeFileAtomic(this.file("config.json"), JSON.stringify({ kind: cfg.kind, ...(cfg.repo ? { repo: cfg.repo } : {}), ...(cfg.branch ? { branch: cfg.branch } : {}), intervalMin: cfg.intervalMin }, null, 2));
     if (this.timer) this.start(); // 주기 반영
     return { recoveryKey: recoveryKeyOf(spaceKey) };
   }
@@ -123,13 +125,19 @@ export class Uploader {
     if (sec.spaceKey) this.saveSecrets({ spaceKey: sec.spaceKey });
   }
 
-  status(): { configured: boolean; kind?: "github"; repo?: string; intervalMin?: number; lastUploadAt: number | null; lastError: string | null; nextIndex: number } {
+  /** 사슬 끝(정상 종료 보고에 쓴다). */
+  chainHead(): { nextIndex: number; lastHash: string } {
+    const st = this.state();
+    return { nextIndex: st.nextIndex, lastHash: st.lastHash };
+  }
+
+  status(): { configured: boolean; kind?: "github" | "google"; repo?: string; intervalMin?: number; lastUploadAt: number | null; lastError: string | null; nextIndex: number } {
     const cfg = this.config();
     const st = this.state();
     const configured = !!cfg && !!this.secrets().token;
     return {
       configured,
-      ...(configured && cfg ? { kind: cfg.kind, repo: cfg.repo, intervalMin: cfg.intervalMin } : {}),
+      ...(configured && cfg ? { kind: cfg.kind, ...(cfg.repo ? { repo: cfg.repo } : {}), intervalMin: cfg.intervalMin } : {}),
       lastUploadAt: st.lastUploadAt,
       lastError: st.lastError,
       nextIndex: st.nextIndex,

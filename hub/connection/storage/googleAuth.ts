@@ -4,6 +4,7 @@
 import http from "node:http";
 import net from "node:net";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { hubMsg } from "../../messages.js";
 
 export const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DEFAULT_ENDPOINTS = { auth: "https://accounts.google.com/o/oauth2/v2/auth", token: "https://oauth2.googleapis.com/token" };
@@ -19,10 +20,11 @@ export interface GoogleLogin {
   cancel(): void;
 }
 
-const PAGE = (ok: boolean) =>
-  `<!doctype html><meta charset="utf-8"><title>Agent-Uplink</title><p>${ok
-    ? "로그인을 마쳤습니다. 이 창을 닫으세요. / Sign-in finished. You can close this window."
-    : "로그인하지 못했습니다. 관리 앱을 확인하세요. / Sign-in failed. Check the admin app."}</p>`;
+/** 브라우저에 보이는 끝 화면(두 언어 함께 — 브라우저 쪽은 Hub 언어 설정을 모른다). 사용자 데이터는 넣지 않는다. */
+const PAGE = (ok: boolean) => {
+  const key = ok ? "oauth_page_ok" : "oauth_page_fail";
+  return `<!doctype html><meta charset="utf-8"><title>Agent-Uplink</title><p>${hubMsg("ko", key)} / ${hubMsg("en", key)}</p>`;
+};
 
 function sameText(a: string, b: string): boolean {
   const x = Buffer.from(a);

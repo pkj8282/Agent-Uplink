@@ -64,6 +64,9 @@ export interface HubOptions {
   connBackoffMs?: number[];
   /** 시험 전용: 저장소 API 주소(가짜 GitHub). */
   storageApiBase?: string;
+  /** 시험 전용: 가짜 Google 토큰·Drive 주소, OAuth 끝점. */
+  googleApiBase?: { token: string; drive: string; upload: string };
+  googleAuthEndpoints?: { auth: string; token: string };
 }
 
 interface Waiter {
@@ -203,6 +206,8 @@ export class Hub {
       deliver: (ch, msg, skip) => this.fanout(ch, msg.from, msg.fromName, msg.text, msg.ts, msg.origin, skip),
       ...(this.opts.connBackoffMs ? { backoffMs: this.opts.connBackoffMs } : {}),
       ...(this.opts.storageApiBase ? { storageApiBase: this.opts.storageApiBase } : {}),
+      ...(this.opts.googleApiBase ? { googleApiBase: this.opts.googleApiBase } : {}),
+      ...(this.opts.googleAuthEndpoints ? { googleAuthEndpoints: this.opts.googleAuthEndpoints } : {}),
     });
     this.trash = new TrashStore({ dir: this.opts.dataDir });
     this.trashOps = new TrashOps({
@@ -299,6 +304,21 @@ export class Hub {
           if (!ok) return fail("storage_config_invalid", "storage_config_invalid");
           const r = await c.storageSet({ kind: "github", repo: q.repo as string, ...(branch ? { branch: branch as string } : {}), intervalMin: interval as number }, tok as string);
           return { ok: true, recoveryKey: r.recoveryKey };
+        }
+        case "admin_conn_storage_google_begin": {
+          const cid = q.clientId;
+          const sec = q.clientSecret;
+          const interval = q.intervalMin ?? 5;
+          const ok = typeof cid === "string" && cid.length > 0 && cid.length <= 300 && !/\s/.test(cid)
+            && (sec === undefined || sec === "" || (typeof sec === "string" && sec.length <= 300 && !/\s/.test(sec)))
+            && typeof interval === "number" && Number.isInteger(interval) && interval >= 1 && interval <= 60;
+          if (!ok) return fail("storage_config_invalid", "storage_config_invalid");
+          const r = await c.googleLoginBegin(cid as string, typeof sec === "string" && sec ? sec : undefined, interval as number);
+          return { ok: true, authUrl: r.authUrl };
+        }
+        case "admin_conn_storage_google_result": {
+          const key = c.takeGoogleRecoveryKey();
+          return key ? { ok: true, recoveryKey: key } : fail("storage_login_pending", "storage_login_pending");
         }
         case "admin_conn_storage_status":
           return { ok: true, storage: c.uploader.status() };
