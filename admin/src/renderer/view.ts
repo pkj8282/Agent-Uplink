@@ -1,5 +1,5 @@
 // 렌더러의 순수 로직(DOM 없음 → Node에서 테스트).
-import type { ConfigPatch, NameConflict, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
+import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
 import { oneLine } from "../text.js";
 import type { AdminKey } from "../messages.js";
 import { tr } from "./lang.js";
@@ -112,6 +112,8 @@ export function trashSummary(items: TrashItem[] | undefined): string {
 }
 
 export function restoreConfirmMessage(t: TrashItem): string {
+  // 이미 복원된 계정 항목의 남은 DM만 다시 붙이는 경우는 계정 복원 문구와 다르다(v3 Minor ③).
+  if (t.dmLeftover !== undefined) return tr("restore_dm_leftover_confirm", { title: displayName(trashTitle(t)), count: t.dmLeftover });
   return tr("restore_confirm", { kind: trashKindLabel(t.kind), title: displayName(trashTitle(t)) });
 }
 
@@ -225,4 +227,92 @@ export function memberNames(dm: SnapshotDm, accounts: SnapshotAccount[]): string
 /** 계정 행의 보조 정보. online이 없으면(구버전 Hub) 접속 표시를 생략한다. */
 export function accountMeta(online: boolean | undefined, dmCount: number): string {
   return online ? tr("meta_online", { count: dmCount }) : tr("meta_dms", { count: dmCount });
+}
+
+// ───── 통신(v3.0 2단계) ─────
+
+const PROFILES: readonly ConnProfile[] = ["tls13-aes256gcm", "tls13-chacha20"];
+
+/** 통신 서버 켜기 폼. 포트 0(임의)은 받지 않는다 — 초대 코드가 가리킬 고정 포트가 필요하다. */
+export function parseServerForm(i: { port: string; profile: string; spaceName: string; burnOnJoin: boolean }):
+  { ok: true; value: ConnServerInput } | { ok: false; error: string } {
+  const port = posInt(i.port);
+  if (port === null || port > 65535) return { ok: false, error: tr("form_port_invalid") };
+  const profile = PROFILES.find((p) => p === i.profile);
+  if (!profile) return { ok: false, error: tr("form_profile_invalid") };
+  const spaceName = i.spaceName.trim();
+  if (!spaceName) return { ok: false, error: tr("form_space_invalid") };
+  return { ok: true, value: { port, profile, spaceName, burnOnJoin: i.burnOnJoin } };
+}
+
+/** 초대 만들기 폼. 유효 기간은 1~30일(Hub 상한과 같음). */
+export function parseInviteForm(i: { label: string; host: string; days: string }):
+  { ok: true; value: ConnInviteInput } | { ok: false; error: string } {
+  const label = i.label.trim();
+  if (!label) return { ok: false, error: tr("form_label_invalid") };
+  const host = i.host.trim();
+  if (!host) return { ok: false, error: tr("form_host_invalid") };
+  const days = posInt(i.days);
+  if (days === null || days > 30) return { ok: false, error: tr("form_days_invalid") };
+  return { ok: true, value: { label, host, expiresInMs: days * 86_400_000 } };
+}
+
+/** 붙여 넣은 초대 코드: 앞뒤 공백만 자른다(중간 공백·줄바꿈은 Hub가 지운다). */
+export function parseJoinCode(raw: string): string | null {
+  const s = raw.trim();
+  return s ? s : null;
+}
+
+export function serverEnableConfirmMessage(port: number): string {
+  return tr("conn_enable_confirm", { port });
+}
+
+export function inviteConfirmMessage(label: string, host: string): string {
+  return tr("conn_invite_confirm", { label: displayName(label), host: displayName(host, 253) });
+}
+
+export function revokeConfirmMessage(name: string): string {
+  return tr("conn_revoke_confirm", { name: displayName(name) });
+}
+
+const EVENT_KEY: Record<string, AdminKey> = {
+  join_failed: "ev_join_failed", auth_failed: "ev_auth_failed", rate_limited: "ev_rate_limited", listen_failed: "ev_listen_failed",
+  space_connect_failed: "ev_space_connect_failed", frame_too_large: "ev_frame_too_large",
+};
+
+/** 통신 사건 한 줄(시각은 화면이 붙인다). 모르는 코드는 코드 그대로. */
+export function connEventLine(e: ConnEvent): string {
+  const d = e.detail ?? {};
+  const s = (v: unknown) => (typeof v === "string" || typeof v === "number" ? displayName(String(v), 60) : "");
+  if (e.code === "member_joined") return tr("ev_member_joined", { name: s(d.userName) });
+  if (e.code === "member_revoked") return tr("ev_member_revoked", { name: s(d.userName) });
+  if (e.code === "remote_text_too_long") return tr("ev_remote_text_too_long");
+  if (Object.hasOwn(EVENT_KEY, e.code)) {
+    const who = [d.ip, d.memberId, d.code, d.message, d.reason].map(s).filter(Boolean).join(" · ");
+    return tr(EVENT_KEY[e.code], { who });
+  }
+  return displayName(e.code, 60);
+}
+
+const CONN_CODE_KEY: Record<string, AdminKey> = {
+  server_not_enabled: "ce_server_not_enabled", server_not_found: "ce_server_not_found", port_invalid: "ce_port_invalid",
+  profile_invalid: "ce_profile_invalid", host_invalid: "ce_host_invalid", expires_invalid: "ce_expires_invalid",
+  name_invalid: "ce_name_invalid", shared_invalid: "ce_shared_invalid", member_not_found: "ce_member_not_found",
+  invite_malformed: "ce_invite_malformed", invite_version: "ce_invite_version", invite_profile_unknown: "ce_invite_profile_unknown",
+  invite_bad_signature: "ce_invite_bad_signature", invite_expired: "ce_invite_expired", pin_mismatch: "ce_pin_mismatch",
+  cipher_mismatch: "ce_cipher_mismatch", tls_failed: "ce_tls_failed", unreachable: "ce_unreachable", timeout: "ce_timeout",
+  join_failed: "ce_join_failed", relay_unsupported: "ce_relay_unsupported",
+};
+
+/** 통신 op 오류 코드 → 문구. 모르는 코드는 Hub 원문. */
+export function connErrorMessage(code: string | undefined, fallback: string): string {
+  return code && Object.hasOwn(CONN_CODE_KEY, code) ? tr(CONN_CODE_KEY[code]) : fallback;
+}
+
+export function connUnsupportedMessage(): string {
+  return tr("conn_unsupported");
+}
+
+export function saveBlockedMessage(files: string[]): string {
+  return tr("save_blocked", { files: files.map((f) => displayName(f, 60)).join(", ") });
 }

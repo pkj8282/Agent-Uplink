@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount } from "./view.js";
+import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount, parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage, connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage } from "./view.js";
 import { setLang } from "./lang.js";
 import { hasHangul } from "../../../hub/testing.js";
 
@@ -261,4 +261,77 @@ test("⑩ emptyTrashTargets: 진행 중(pending) 항목은 비우기 개수·크
   assert.deepEqual(emptyTrashTargets(items), { count: 2, bytes: 2058 });
   assert.deepEqual(emptyTrashTargets([{ ...base, id: "4", bytes: 1, pending: true as const }]), { count: 0, bytes: 0 });
   assert.deepEqual(emptyTrashTargets([]), { count: 0, bytes: 0 });
+});
+
+// ── v3.0 2단계: 통신 화면 ──
+test("parseServerForm: 포트 1~65535 정수, 프로필 두 값만, 공간 이름 필수", () => {
+  const base = { port: "47900", profile: "tls13-chacha20", spaceName: "팀", burnOnJoin: false };
+  for (const port of ["0", "65536", "8a", "", "-1", "1.5"]) assert.equal(parseServerForm({ ...base, port }).ok, false, port);
+  assert.deepEqual(parseServerForm({ ...base, port: " 47900 ", spaceName: " 팀 " }), { ok: true, value: { port: 47900, profile: "tls13-chacha20", spaceName: "팀", burnOnJoin: false } });
+  assert.equal(parseServerForm({ ...base, profile: "x" }).ok, false);
+  assert.equal(parseServerForm({ ...base, spaceName: "  " }).ok, false);
+  const r = parseServerForm({ ...base, burnOnJoin: true, profile: "tls13-aes256gcm" });
+  assert.equal(r.ok && r.value.burnOnJoin && r.value.profile, "tls13-aes256gcm");
+});
+
+test("parseInviteForm: 일수 1~30 → ms, 이름·주소 필수", () => {
+  const base = { label: "비", host: "203.0.113.5", days: "7" };
+  assert.deepEqual(parseInviteForm(base), { ok: true, value: { label: "비", host: "203.0.113.5", expiresInMs: 604_800_000 } });
+  for (const days of ["0", "31", "x", ""]) assert.equal(parseInviteForm({ ...base, days }).ok, false, days);
+  assert.equal(parseInviteForm({ ...base, label: " " }).ok, false);
+  assert.equal(parseInviteForm({ ...base, host: " " }).ok, false);
+  assert.equal(parseInviteForm({ ...base, days: "30" }).ok, true);
+});
+
+test("parseJoinCode: 앞뒤 공백만 자르고 비면 null", () => {
+  assert.equal(parseJoinCode("  \n "), null);
+  assert.equal(parseJoinCode(" UPLINK1-AB CD \n"), "UPLINK1-AB CD");
+});
+
+test("통신 확인창: IP 경고·포트·방화벽, 퇴출 확인", () => {
+  const en = serverEnableConfirmMessage(47900);
+  assert.match(en, /47900/);
+  assert.match(en, /공인 IP/);
+  assert.match(en, /방화벽/);
+  const inv = inviteConfirmMessage("비", "203.0.113.5");
+  assert.match(inv, /203\.0\.113\.5/);
+  assert.match(inv, /공인 IP/);
+  assert.match(revokeConfirmMessage("비"), /'비'/);
+  const LF = String.fromCharCode(10);
+  assert.equal(revokeConfirmMessage(`악${LF}성`).split(LF)[0].includes("성"), true); // 이름 속 줄바꿈은 정리
+});
+
+test("connEventLine·connErrorMessage: 아는 코드는 문구, 모르는 코드는 그대로", () => {
+  assert.match(connEventLine({ ts: 1, code: "member_joined", detail: { memberId: "m", userName: "비" } }), /비/);
+  assert.match(connEventLine({ ts: 1, code: "member_revoked", detail: { memberId: "m", userName: "비" } }), /퇴출/);
+  assert.match(connEventLine({ ts: 1, code: "join_failed", detail: { ip: "198.51.100.7" } }), /198\.51\.100\.7/);
+  assert.equal(connEventLine({ ts: 1, code: "brand_new", detail: {} }), "brand_new");
+  assert.match(connErrorMessage("server_not_enabled", "fb"), /통신 서버/);
+  assert.match(connErrorMessage("pin_mismatch", "fb"), /서버/);
+  assert.match(connErrorMessage("invite_expired", "fb"), /만료/);
+  assert.equal(connErrorMessage("whatever", "fb"), "fb");
+  assert.equal(connErrorMessage(undefined, "fb"), "fb");
+  assert.match(connUnsupportedMessage(), /통신/);
+  assert.match(saveBlockedMessage(["servers/index.json"]), /servers\/index\.json/);
+});
+
+test("v3 Minor ③ 남은 DM 재복원 확인창은 계정 복원 문구와 다르다", () => {
+  const t = { id: "1", kind: "account" as const, name: "기획", deletedAt: 0, deletedBy: "admin" as const, bytes: 1, fileCount: 1, intact: true, restorable: true };
+  assert.match(restoreConfirmMessage(t), /계정 '기획'을\(를\) 복원합니다/);
+  const left = restoreConfirmMessage({ ...t, dmLeftover: 2 });
+  assert.doesNotMatch(left, /계정 '기획'을\(를\) 복원합니다/);
+  assert.match(left, /남은 DM 2개/);
+});
+
+test("v3 통신 문구 영어 화면에 한글 없음", () => {
+  setLang("en");
+  try {
+    const t = { id: "1", kind: "account" as const, name: "a", deletedAt: 0, deletedBy: "admin" as const, bytes: 1, fileCount: 1, intact: true, restorable: true, dmLeftover: 1 };
+    for (const s of [serverEnableConfirmMessage(1), inviteConfirmMessage("a", "h"), revokeConfirmMessage("a"), connUnsupportedMessage(), saveBlockedMessage(["dm/index.json"]), restoreConfirmMessage(t),
+      connEventLine({ ts: 1, code: "member_joined", detail: { userName: "a" } }), connErrorMessage("invite_expired", "")]) assert.equal(hasHangul(s), false, s);
+    const bad = parseServerForm({ port: "0", profile: "x", spaceName: "", burnOnJoin: false });
+    assert.equal(!bad.ok && hasHangul(bad.error), false);
+  } finally {
+    setLang("ko");
+  }
 });
