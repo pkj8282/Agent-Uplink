@@ -63,7 +63,7 @@ export class ConnectionManager implements ConnStatusSource {
     this.sendTimes.set(memberId, list);
     return ok;
   }
-  /** 최근 통신 기록(보안·연결 사건) — 관리 앱 표시는 2단계. */
+  /** 최근 통신 기록(보안·연결 사건) — 관리 앱 통신 탭에 최근 50개. */
   readonly events: { ts: number; code: string; detail: object }[] = [];
 
   constructor(private readonly deps: ManagerDeps) {
@@ -238,8 +238,12 @@ export class ConnectionManager implements ConnStatusSource {
     return { code, ipWarning: true };
   }
 
+  /** 구성원 퇴출(설계 5.3): 공개키 무효 → 인증·재참여 거부, 즉시 끊기, 계정 목록에서 제거. 이미 퇴출됐으면 아무것도 하지 않고 true. */
   revoke(memberId: string): boolean {
+    const before = this.store.member(memberId);
+    if (before?.revoked) return true;
     const ok = this.store.revoke(memberId);
+    if (ok) this.log("member_revoked", { memberId, userName: before!.userName });
     this.listener?.disconnect(memberId);
     this.memberAccounts.delete(memberId);
     if (ok) this.broadcastAccounts();
@@ -567,6 +571,8 @@ export class ConnectionManager implements ConnStatusSource {
     members: { memberId: string; userName: string; joinedAt: number; revoked: boolean; online: boolean }[];
     joined: { spaceId: string; spaceName: string; hostUser: string; connected: boolean }[];
     userName: string | null;
+    comms: { serverId: string; name: string; channels: { channelId: string; name: string }[] }[];
+    events: { ts: number; code: string; detail: object }[];
   } {
     const cfg = this.store.serverConfig();
     const online = new Set([...this.peers].map((p) => p.memberId));
@@ -575,6 +581,8 @@ export class ConnectionManager implements ConnStatusSource {
       members: this.store.members().map((m) => ({ memberId: m.memberId, userName: m.userName, joinedAt: m.joinedAt, revoked: m.revoked, online: online.has(m.memberId) })),
       joined: this.store.joined().map((j) => ({ spaceId: j.spaceId, spaceName: j.spaceName, hostUser: j.hostUser, connected: !!this.spaces.get(j.spaceId)?.client.connected })),
       userName: this.store.userName(),
+      comms: this.comms.servers().map((s) => ({ serverId: s.id, name: s.name, channels: s.channels.map((c) => ({ channelId: c.id, name: c.name })) })),
+      events: this.events.slice(-50),
     };
   }
 

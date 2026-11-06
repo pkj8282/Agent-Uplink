@@ -33,6 +33,8 @@ test("no_connection_no_port: 통신 설정이 없는 Hub는 통신 포트를 열
     assert.equal(st.server, null);
     assert.deepEqual(st.members, []);
     assert.deepEqual(st.joined, []);
+    assert.deepEqual(st.comms, []);
+    assert.deepEqual(st.events, []);
     assert.equal(t.hub.conn.hasLiveConnection(), false);
     assert.equal(fs.existsSync(path.join(t.dataDir, "connection")), false);
     t.c.close();
@@ -137,4 +139,44 @@ test("burn_flag_default_off: 파기 플래그는 사용자가 켰을 때만(설�
     assert.equal((await req("admin_conn_status")).server.burnOnJoin, true);
     t.c.close();
   } finally { t.hub.stop(); }
+});
+
+test("status_lists_comms_and_events: 상태에 통신 서버·채널 목록과 참여 사건", async () => {
+  const A = await hubWithToken();
+  const B = await hubWithToken();
+  try {
+    const req = (h: typeof A, op: string, p: object = {}) => (h.c.req(op, { token: h.token, ...p }) as Promise<any>);
+    await req(A, "admin_conn_set_user", { name: "에이" });
+    await req(A, "admin_conn_enable_server", { port: await freePort(), bindHost: "127.0.0.1", profile: "tls13-chacha20", spaceName: "팀" });
+    const srv = await req(A, "admin_conn_create_server", { name: "팀작업" });
+    const ch = await req(A, "admin_conn_create_channel", { serverId: srv.serverId, name: "main" });
+    let sa = await req(A, "admin_conn_status");
+    assert.deepEqual(sa.comms, [{ serverId: srv.serverId, name: "팀작업", channels: [{ channelId: ch.channelId, name: "main" }] }]);
+    const inv = await req(A, "admin_conn_create_invite", { label: "비씨", host: "127.0.0.1", expiresInMs: 60_000 });
+    assert.equal((await req(B, "admin_conn_join", { code: inv.code })).ok, true);
+    sa = await req(A, "admin_conn_status");
+    const joined = sa.events.filter((e: any) => e.code === "member_joined");
+    assert.equal(joined.length, 1);
+    assert.equal(joined[0].detail.userName, "비씨");
+    assert.equal(joined[0].detail.memberId, sa.members[0].memberId);
+    assert.equal(typeof joined[0].ts, "number");
+    A.c.close(); B.c.close();
+  } finally { A.hub.stop(); B.hub.stop(); }
+});
+
+test("revoke_logs_and_twice_is_harmless: 퇴출은 사건 한 번, 두 번째 퇴출도 ok", async () => {
+  const A = await hubWithToken();
+  const B = await hubWithToken();
+  try {
+    const req = (h: typeof A, op: string, p: object = {}) => (h.c.req(op, { token: h.token, ...p }) as Promise<any>);
+    await req(A, "admin_conn_enable_server", { port: await freePort(), bindHost: "127.0.0.1", profile: "tls13-chacha20", spaceName: "팀" });
+    const inv = await req(A, "admin_conn_create_invite", { label: "비", host: "127.0.0.1", expiresInMs: 60_000 });
+    assert.equal((await req(B, "admin_conn_join", { code: inv.code })).ok, true);
+    const memberId = (await req(A, "admin_conn_status")).members[0].memberId;
+    assert.equal((await req(A, "admin_conn_revoke", { memberId })).ok, true);
+    assert.equal((await req(A, "admin_conn_revoke", { memberId })).ok, true);
+    const ev = (await req(A, "admin_conn_status")).events.filter((e: any) => e.code === "member_revoked");
+    assert.deepEqual(ev.map((e: any) => e.detail), [{ memberId, userName: "비" }]);
+    A.c.close(); B.c.close();
+  } finally { A.hub.stop(); B.hub.stop(); }
 });

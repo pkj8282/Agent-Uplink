@@ -211,6 +211,7 @@ export class ConnListener {
           const memberId = existing?.memberId ?? randomUUID();
           store.addMember({ memberId, hubKey: q.hubKey, userName: name.name, joinedAt: existing?.joinedAt ?? Date.now(), revoked: false });
           becomePeer(memberId, name.name);
+          this.deps.log("member_joined", { memberId, userName: name.name });
           reply({ ok: true, memberId, spaceName: store.serverConfig()?.spaceName ?? "" });
           return;
         }
