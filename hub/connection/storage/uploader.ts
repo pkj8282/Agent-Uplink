@@ -223,7 +223,7 @@ export class Uploader {
         this.saveState(st);
       }
       st.lastError = null;
-      st.lastUploadAt = this.now();
+      if (fragments > 0) st.lastUploadAt = this.now(); // 실제로 올렸을 때만(빈 주기는 시각을 바꾸지 않음)
       this.saveState(st);
       if (fragments > 0) this.d.log("storage_uploaded", { fragments, messages });
       return { fragments, messages };

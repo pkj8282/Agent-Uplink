@@ -168,3 +168,20 @@ test("paths_have_no_names: 저장 경로는 ID·날짜·번호뿐", async () => 
   await t.up.uploadNow();
   for (const p of t.backend.files.keys()) assert.match(p, /^agent-uplink\/[0-9a-f-]{36}\/[0-9a-f]{16}\/\d{4}-\d{2}-\d{2}\/\d{8}\.frag$/);
 });
+
+test("upload_time_only_when_uploaded: 올린 게 없으면 마지막 업로드 시각을 바꾸지 않는다(사용자 GUI 지적)", async () => {
+  let now = 1_000_000;
+  const t = setup();
+  (t.up as any).d.now = () => now;
+  await t.up.configure(cfg, TOKEN);
+  assert.equal(t.up.status().lastUploadAt, null);
+  await t.up.uploadNow(); // 메시지 없음
+  assert.equal(t.up.status().lastUploadAt, null);
+  t.add("c1", "a");
+  now = 2_000_000;
+  await t.up.uploadNow();
+  assert.equal(t.up.status().lastUploadAt, 2_000_000);
+  now = 3_000_000;
+  assert.deepEqual(await t.up.uploadNow(), { fragments: 0, messages: 0 });
+  assert.equal(t.up.status().lastUploadAt, 2_000_000);
+});
