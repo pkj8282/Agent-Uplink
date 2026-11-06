@@ -4,7 +4,7 @@
 //
 // 파일: "UPLINKFRAG1" \n 머리 JSON \n 서명(b64) \n 암호문(b64, 태그 포함)
 // 서명 대상 = 머리 JSON 바이트 ‖ SHA-256(암호문 b64 문자열). AAD = 머리 JSON 바이트.
-import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes, type CipherGCM, type DecipherGCM } from "node:crypto";
 import { signB64, verifyB64 } from "./connCrypto.js";
 import { isProfileId, PROFILES, type ProfileId } from "./cryptoProfile.js";
 import type { Message } from "./protocol.js";
@@ -54,7 +54,7 @@ export function encodeFragment(o: {
   const nonce = randomBytes(12);
   const header: FragmentHeader = { v: 1, ...o.header, nonce: nonce.toString("base64") };
   const headerJson = JSON.stringify(header);
-  const cipher = createCipheriv(PROFILES[header.profile].aead, fragmentKey(o.spaceKey, header), nonce, { authTagLength: TAG_LEN } as never);
+  const cipher = createCipheriv(PROFILES[header.profile].aead, fragmentKey(o.spaceKey, header), nonce, { authTagLength: TAG_LEN } as never) as unknown as CipherGCM; // GCM·ChaCha20-Poly1305 모두 AEAD(setAAD·getAuthTag)
   cipher.setAAD(Buffer.from(headerJson, "utf8"));
   const ct = Buffer.concat([cipher.update(JSON.stringify(o.body), "utf8"), cipher.final(), cipher.getAuthTag()]);
   const ctB64 = ct.toString("base64");
@@ -98,7 +98,7 @@ export function decodeFragment(bytes: Buffer, o: { spaceKey: Buffer; expectHubKe
     const ct = Buffer.from(ctB64, "base64");
     const nonce = Buffer.from(header.nonce, "base64");
     if (ct.length < TAG_LEN || nonce.length !== 12) return bad("frag_malformed");
-    const d = createDecipheriv(PROFILES[header.profile].aead, fragmentKey(o.spaceKey, header), nonce, { authTagLength: TAG_LEN } as never);
+    const d = createDecipheriv(PROFILES[header.profile].aead, fragmentKey(o.spaceKey, header), nonce, { authTagLength: TAG_LEN } as never) as unknown as DecipherGCM;
     d.setAAD(Buffer.from(headerJson, "utf8"));
     d.setAuthTag(ct.subarray(ct.length - TAG_LEN));
     const plain = Buffer.concat([d.update(ct.subarray(0, ct.length - TAG_LEN)), d.final()]).toString("utf8");
