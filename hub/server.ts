@@ -29,6 +29,7 @@ import {
   PROTOCOL_VERSION,
   LOBBY_CHANNEL_ID,
   MAX_TEXT_LENGTH,
+  MAX_READ_LIMIT,
   MAX_STORED_TEXT_LENGTH,
   NAME_MAX,
   Channel,
@@ -878,7 +879,7 @@ export class Hub {
           reply(this.err("channel_forbidden", "channel_forbidden"));
           return;
         }
-        const limit = typeof req.limit === "number" && req.limit > 0 ? req.limit : 50;
+        const limit = typeof req.limit === "number" && req.limit > 0 ? Math.min(req.limit, MAX_READ_LIMIT) : 50;
         reply({ ok: true, messages: this.channels.recent(ch.id, limit) });
         return;
       }
@@ -940,6 +941,8 @@ export class Hub {
           snapshotDms: this.dm.all().map((r) => ({ channelId: r.channelId, members: [...r.members], label: r.label })),
           trash: this.trash.list(),
           securityFindings: this.security.recent(100),
+          // 손상 원본을 백업하지 못해 이번 실행 동안 저장을 멈춘 색인(데이터 폴더 기준, v3 Minor ①).
+          saveBlocked: ([[this.dm, "dm"], [this.servers, "servers"]] as const).filter(([s]) => s.saveBlocked).map(([, sub]) => `${sub}/index.json`),
         });
         return;
       }

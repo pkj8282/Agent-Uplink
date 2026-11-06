@@ -8,6 +8,8 @@ export const LOBBY_CHANNEL_ID = "lobby";
 export const NAME_MAX = 64;
 /** 메시지 본문 최대 길이(UTF-16 길이 기준 — JS 문자열 length). */
 export const MAX_TEXT_LENGTH = 65536;
+/** read·통신 c_read 한 번에 돌려주는 최대 메시지 수(Hub가 직접 자른다 — v3 Minor ②). */
+export const MAX_READ_LIMIT = 500;
 /** 숨은 문자를 이스케이프한 뒤의 본문 최대 길이(v2.1.3) — 폭 0 문자 하나가 8자(\u{200B})로 늘어나는 증폭을 막는다. */
 export const MAX_STORED_TEXT_LENGTH = 2 * MAX_TEXT_LENGTH;
 
@@ -169,6 +171,7 @@ export interface Response {
   snapshotDms?: { channelId: string; members: string[]; label: string }[]; // admin_snapshot
   trash?: TrashItemInfo[]; // admin_snapshot
   securityFindings?: SecurityFinding[]; // admin_snapshot(최근 100건, v2.1.2)
+  saveBlocked?: string[]; // admin_snapshot: 이번 실행 동안 저장을 멈춘 색인(데이터 폴더 기준, v3.0)
   restored?: RestoreReport; // admin_restore_trash
   removed?: number; // admin_empty_trash
   error?: string;

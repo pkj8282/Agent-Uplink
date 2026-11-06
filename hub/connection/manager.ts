@@ -4,7 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { MAX_STORED_TEXT_LENGTH, MAX_TEXT_LENGTH, type AccountInfo, type Channel, type Message, type MessageOrigin } from "../../shared/protocol.js";
+import { MAX_READ_LIMIT, MAX_STORED_TEXT_LENGTH, MAX_TEXT_LENGTH, type AccountInfo, type Channel, type Message, type MessageOrigin } from "../../shared/protocol.js";
 import { newJoinToken } from "../../shared/connCrypto.js";
 import { decodeInvite, encodeInvite } from "../../shared/invite.js";
 import type { ProfileId } from "../../shared/cryptoProfile.js";
@@ -290,7 +290,7 @@ export class ConnectionManager implements ConnStatusSource {
       case "c_read": {
         const ch = this.sharedChannel(req.channelId);
         if (!ch) return fail("channel_forbidden");
-        const limit = typeof req.limit === "number" && req.limit > 0 ? Math.min(req.limit, 500) : 100;
+        const limit = typeof req.limit === "number" && req.limit > 0 ? Math.min(req.limit, MAX_READ_LIMIT) : 100;
         return reply({ ok: true, messages: this.deps.channels.recent(ch.id, limit).map((m) => this.wire(m)) });
       }
       case "c_send": {
@@ -401,7 +401,7 @@ export class ConnectionManager implements ConnStatusSource {
     // 끊겨 있던 동안의 메시지를 채운다(이미 가진 seq는 거울이 버림 — 중복 없음).
     for (const s of st.shared) {
       for (const c of s.channels) {
-        const rr = await st.client.request({ op: "c_read", channelId: c.channelId, limit: 500 });
+        const rr = await st.client.request({ op: "c_read", channelId: c.channelId, limit: MAX_READ_LIMIT });
         if (rr.ok && Array.isArray(rr.messages)) for (const m of rr.messages) this.ingest(st, c.channelId, m);
       }
     }
