@@ -40,7 +40,15 @@ export interface ConnStatus {
   members: { memberId: string; userName: string; joinedAt: number; revoked: boolean; online: boolean }[];
   joined: { spaceId: string; spaceName: string; hostUser: string; connected: boolean }[];
   userName: string | null;
+  /** 이 Hub의 통신 서버·채널(Connection Communications). 1단계 Hub는 없음 → []. */
+  comms: ConnCommsServer[];
+  /** 최근 통신 사건(오래된 것 → 최근, 최대 50). 1단계 Hub는 없음 → []. */
+  events: ConnEvent[];
 }
+export interface ConnCommsServer { serverId: string; name: string; channels: { channelId: string; name: string }[]; }
+export interface ConnEvent { ts: number; code: string; detail: Record<string, unknown>; }
+export interface ConnServerInput { port: number; profile: ConnProfile; spaceName: string; burnOnJoin: boolean; }
+export interface ConnInviteInput { label: string; host: string; expiresInMs: number; }
 
 export interface RestoreReport {
   renamed: { kind: "server" | "channel"; from: string; to: string }[];
@@ -70,6 +78,8 @@ export interface Snapshot {
   trash?: TrashItem[];
   /** undefined = 보안 기록을 지원하지 않는 구버전 Hub. */
   findings?: SecurityFinding[];
+  /** 이번 실행 동안 저장을 멈춘 색인 파일(데이터 폴더 기준). undefined = 구버전 Hub. */
+  saveBlocked?: string[];
 }
 
 /** IPC 결과 봉투. hubDown은 Hub 미실행(접속 거부)일 때만 true. code는 Hub 오류 코드(관리 앱이 문구로 변환). */
@@ -92,4 +102,15 @@ export interface AdminApi {
   getLanguage(): Promise<IpcResult<LangSetting>>;
   /** 언어 저장: Hub가 켜져 있으면 Hub로, 꺼져 있으면 파일에 직접. */
   setLanguage(lang: Lang): Promise<IpcResult<{ via: "hub" | "file" }>>;
+  // 통신(v3.0)
+  connStatus(): Promise<IpcResult<ConnStatus>>;
+  connSetUser(name: string): Promise<IpcResult<string>>;
+  connEnableServer(o: ConnServerInput): Promise<IpcResult<number>>;
+  connDisableServer(): Promise<IpcResult<void>>;
+  connCreateServer(name: string): Promise<IpcResult<string>>;
+  connCreateChannel(serverId: string, name: string): Promise<IpcResult<string>>;
+  connSetShared(serverIds: string[]): Promise<IpcResult<void>>;
+  connCreateInvite(o: ConnInviteInput): Promise<IpcResult<{ code: string; ipWarning: boolean }>>;
+  connJoin(code: string): Promise<IpcResult<string>>;
+  connRevoke(memberId: string): Promise<IpcResult<void>>;
 }

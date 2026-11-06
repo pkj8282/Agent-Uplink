@@ -116,6 +116,7 @@ export class AdminClient {
       dms: r.snapshotDms ?? [],
       trash: r.trash, // 없으면 undefined(구버전 Hub) — 빈 목록과 구분한다
       findings: r.securityFindings, // 〃(v2.1.2 이전 Hub)
+      saveBlocked: r.saveBlocked, // 〃(v3.0 이전 Hub)
     };
   }
 
@@ -136,10 +137,10 @@ export class AdminClient {
   async deleteAccount(uuid: string): Promise<void> { await this.call("admin_delete_account", { uuid }); }
   async deleteDm(channelId: string): Promise<void> { await this.call("admin_delete_dm", { channelId }); }
 
-  // ───── 통신(v3.0) — 화면은 2단계 ─────
+  // ───── 통신(v3.0) ─────
   async connStatus(): Promise<ConnStatus> {
     const r = await this.call("admin_conn_status", {});
-    return { server: r.server ?? null, members: r.members ?? [], joined: r.joined ?? [], userName: r.userName ?? null };
+    return { server: r.server ?? null, members: r.members ?? [], joined: r.joined ?? [], userName: r.userName ?? null, comms: r.comms ?? [], events: r.events ?? [] };
   }
   async connSetUser(name: string): Promise<string> { return (await this.call("admin_conn_set_user", { name })).name; }
   async connEnableServer(o: { port: number; bindHost?: string; profile: ConnProfile; spaceName: string; burnOnJoin: boolean }): Promise<number> {

@@ -85,6 +85,44 @@ handle("admin:setLanguage", (arg) => toResult(async () => {
   }
 }));
 
+// ───── 통신(v3.0): main은 타입만 확인하고 값 검증은 Hub가 한다. bindHost는 보내지 않는다(기본 0.0.0.0). ─────
+function asStr(v: unknown, max = 70_000): string {
+  if (typeof v !== "string" || v.length > max) throw new Error(msg("invalid_target"));
+  return v;
+}
+function asObj(v: unknown): Record<string, unknown> {
+  if (!v || typeof v !== "object") throw new Error(msg("invalid_target"));
+  return v as Record<string, unknown>;
+}
+function asNum(v: unknown): number {
+  if (typeof v !== "number" || !Number.isFinite(v)) throw new Error(msg("invalid_target"));
+  return v;
+}
+handle("admin:connStatus", () => toResult(() => client.connStatus()));
+handle("admin:connSetUser", (name) => toResult(() => client.connSetUser(asStr(name, 200))));
+handle("admin:connEnableServer", (arg) => toResult(() => {
+  const o = asObj(arg);
+  const profile = o.profile;
+  if (profile !== "tls13-aes256gcm" && profile !== "tls13-chacha20") throw new Error(msg("invalid_target"));
+  return client.connEnableServer({ port: asNum(o.port), profile, spaceName: asStr(o.spaceName, 200), burnOnJoin: o.burnOnJoin === true });
+}));
+handle("admin:connDisableServer", () => toResult(() => client.connDisableServer()));
+handle("admin:connCreateServer", (name) => toResult(() => client.connCreateServer(asStr(name, 200))));
+handle("admin:connCreateChannel", (arg) => toResult(() => {
+  const o = asObj(arg);
+  return client.connCreateChannel(asId(o.serverId), asStr(o.name, 200));
+}));
+handle("admin:connSetShared", (ids) => toResult(() => {
+  if (!Array.isArray(ids) || ids.length > 100 || !ids.every((x) => typeof x === "string")) throw new Error(msg("invalid_target"));
+  return client.connSetShared(ids as string[]);
+}));
+handle("admin:connCreateInvite", (arg) => toResult(() => {
+  const o = asObj(arg);
+  return client.connCreateInvite(asStr(o.label, 200), asStr(o.host, 300), asNum(o.expiresInMs));
+}));
+handle("admin:connJoin", (code) => toResult(() => client.connJoin(asStr(code))));
+handle("admin:connRevoke", (id) => toResult(() => client.connRevoke(asId(id))));
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     icon: windowIcon,

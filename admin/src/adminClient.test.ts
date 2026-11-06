@@ -452,6 +452,9 @@ test("conn_ops_via_admin_client: 관리 앱 클라이언트로 통신 서버 켜
     assert.equal(st.server?.spaceName, "팀");
     assert.deepEqual(st.server?.shared, [serverId]);
     assert.equal(st.userName, "에이");
+    assert.deepEqual(st.comms, [{ serverId, name: "팀작업", channels: [{ channelId, name: "main" }] }]);
+    assert.ok(Array.isArray(st.events));
+    assert.deepEqual((await client.snapshot()).saveBlocked, []);
     const bad = await toResult(() => client.connRevoke("nope"));
     assert.equal(bad.ok, false);
     if (!bad.ok) assert.equal(bad.code, "member_not_found");
@@ -460,4 +463,18 @@ test("conn_ops_via_admin_client: 관리 앱 클라이언트로 통신 서버 켜
     await client.connDisableServer();
     assert.equal((await client.connStatus()).server?.enabled, false);
   } finally { hub.stop(); }
+});
+
+test("conn_status_old_fields_default: comms·events가 없는 응답(1단계 Hub)은 빈 목록, 스냅샷 saveBlocked 없으면 undefined", async () => {
+  const f = await fakeServer((req, s) => {
+    if (answerHandshake(req, s)) { /* hello·auth */ }
+    else if (req.op === "admin_conn_status") s.write(encodeFrame({ ok: true, id: req.id, server: null, members: [], joined: [], userName: null }));
+    else s.write(encodeFrame({ ok: true, id: req.id, config: { maxChannelsPerServer: 30, allowDevDelete: false, inboxMaxBatch: 200 }, snapshotServers: [], snapshotAccounts: [], snapshotDms: [], trash: [] }));
+  });
+  const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 1000 });
+  const st = await c.connStatus();
+  assert.deepEqual(st.comms, []);
+  assert.deepEqual(st.events, []);
+  assert.equal((await c.snapshot()).saveBlocked, undefined);
+  f.close();
 });
