@@ -589,6 +589,19 @@ export class ConnectionManager implements ConnStatusSource {
     return null;
   }
 
+  /** 휴지통이 통신 서버·채널을 지우고 되살릴 때 쓰는 부품(v3.0). changed = 삭제·복원 뒤 공유 목록 정리·참여자에게 알림. */
+  trashDeps(): { store(create: boolean): import("../servers.js").ServerStore | null; logPath(id: string): string; changed(): void } {
+    return {
+      store: (create) => this.comms.serverStore(create),
+      logPath: (id) => this.comms.logPath(id),
+      changed: () => {
+        const cfg = this.store.serverConfig();
+        if (cfg) this.setShared(cfg.shared); // 없어진 서버는 공유 목록에서 빠진다(복원해도 공유는 꺼짐)
+        else this.broadcastShared();
+      },
+    };
+  }
+
   // ───────── 관리 앱(관리 op) ─────────
 
   status(): {

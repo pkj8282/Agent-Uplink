@@ -86,6 +86,8 @@ export interface TrashItemInfo {
   dmLeftover?: number;
   /** 삭제·복원이 아직 끝나지 않은 항목(v2.1.3) — 휴지통 비우기는 이것을 지우지 않는다. */
   pending?: true;
+  /** 통신 서버·채널(Connection Communications)에서 지운 항목(v3.0). */
+  area?: "connection";
 }
 
 /** 유니코드 스테가노그래피 감독 기록(v2.1.2): Hub 입구에서 숨은 문자를 보이는 글자로 바꾼 한 건. preview는 이스케이프된 앞 80 코드포인트. */

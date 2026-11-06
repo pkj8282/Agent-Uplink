@@ -22,6 +22,11 @@ export class CommsStore {
     return this.store;
   }
 
+  /** 휴지통(삭제·복원)용: 통신 쪽 ServerStore. create=false면 아직 없을 때 null. */
+  serverStore(create: boolean): ServerStore | null {
+    return this.open(create);
+  }
+
   /** 채널 로그 파일 위치. */
   logPath(channelId: string): string {
     return path.join(this.dir, "servers", `${channelId}.jsonl`);

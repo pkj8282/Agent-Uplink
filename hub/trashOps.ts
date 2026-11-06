@@ -33,6 +33,14 @@ export interface TrashDeps {
   maxChannelsPerServer: () => number;
   /** 콘솔 안내 언어. */
   lang: () => Lang;
+  /** 통신 서버·채널(v3.0). 없으면 통신 항목은 다음 시작 때 마무리한다. */
+  comms?: () => CommsTrashDeps | null;
+}
+
+export interface CommsTrashDeps {
+  store(create: boolean): ServerStore | null;
+  logPath(id: string): string;
+  changed(): void;
 }
 
 type By = "admin" | "mcp";
@@ -49,8 +57,61 @@ export class TrashOps {
     return null;
   }
 
+  /** 통신 쪽 부품(없으면 던짐 — 크래시 재실행은 다음 시작 때 마무리). */
+  private commsDeps(): CommsTrashDeps {
+    const c = this.d.comms?.();
+    if (!c) throw new Error("comms_unavailable");
+    return c;
+  }
+
+  /** 항목이 쓰는 ServerStore: 통신 항목이면 Connection Communications 쪽. */
+  private storeOf(meta: { area?: "connection" }): ServerStore {
+    if (meta.area !== "connection") return this.d.servers;
+    const s = this.commsDeps().store(true);
+    if (!s) throw new Error("comms_unavailable");
+    return s;
+  }
+
+  private logPathOf(meta: { area?: "connection" }, id: string): string {
+    return meta.area === "connection" ? this.commsDeps().logPath(id) : this.d.channels.pathOf("server", id);
+  }
+
+  /** 통신 채널을 휴지통으로(관리 앱 전용, v3.0). */
+  deleteCommsChannel(channelId: string, by: By): boolean {
+    const pending = this.pendingDelete((m) => m.area === "connection" && (m.kind === "channel" || m.kind === "server") && !!m.channels?.some((c) => c.id === channelId));
+    if (pending) {
+      this.finishDelete(pending);
+      return true;
+    }
+    const found = this.d.comms?.()?.store(false)?.findChannel(channelId);
+    if (!found) return false;
+    const meta = this.d.trash.create("channel", {
+      deletedBy: by, name: found.channel.name, serverId: found.server.id, serverName: found.server.name,
+      channels: [{ id: found.channel.id, name: found.channel.name }], area: "connection",
+    });
+    this.finishDelete(meta);
+    return true;
+  }
+
+  /** 통신 서버를 휴지통으로(관리 앱 전용, v3.0). */
+  deleteCommsServer(serverId: string, by: By): boolean {
+    const pending = this.pendingDelete((m) => m.area === "connection" && m.kind === "server" && m.serverId === serverId);
+    if (pending) {
+      this.finishDelete(pending);
+      return true;
+    }
+    const srv = this.d.comms?.()?.store(false)?.getServer(serverId);
+    if (!srv) return false;
+    const meta = this.d.trash.create("server", {
+      deletedBy: by, name: srv.name, serverId: srv.id, serverName: srv.name,
+      channels: srv.channels.map((c) => ({ id: c.id, name: c.name })), area: "connection",
+    });
+    this.finishDelete(meta);
+    return true;
+  }
+
   deleteChannel(channelId: string, by: By): boolean {
-    const pending = this.pendingDelete((m) => (m.kind === "channel" || m.kind === "server") && !!m.channels?.some((c) => c.id === channelId));
+    const pending = this.pendingDelete((m) => m.area !== "connection" && (m.kind === "channel" || m.kind === "server") && !!m.channels?.some((c) => c.id === channelId));
     if (pending) {
       this.finishDelete(pending);
       return true;
@@ -67,7 +128,7 @@ export class TrashOps {
   }
 
   deleteServer(serverId: string, by: By): boolean {
-    const pending = this.pendingDelete((m) => m.kind === "server" && m.serverId === serverId);
+    const pending = this.pendingDelete((m) => m.area !== "connection" && m.kind === "server" && m.serverId === serverId);
     if (pending) {
       this.finishDelete(pending);
       return true;
@@ -168,16 +229,18 @@ export class TrashOps {
 
   private moveLogIn(meta: TrashMeta, kind: "server" | "dm", id: string): void {
     const name = `${id}.jsonl`;
-    if (this.d.trash.moveIn(meta.id, this.d.channels.pathOf(kind, id), name) && !meta.files.includes(name)) {
+    const from = kind === "server" ? this.logPathOf(meta, id) : this.d.channels.pathOf(kind, id);
+    if (this.d.trash.moveIn(meta.id, from, name) && !meta.files.includes(name)) {
       meta.files.push(name);
     }
   }
 
   private finishDelete(meta: TrashMeta): void {
-    const { trash, channels, servers, dm, accounts, inbox } = this.d;
+    const { trash, channels, dm, accounts, inbox } = this.d;
     switch (meta.kind) {
       case "channel":
       case "server": {
+        const servers = this.storeOf(meta);
         for (const ch of meta.channels ?? []) {
           channels.unregister(ch.id); // 먼저 라우팅을 끊어 이후 append가 로그를 다시 만들지 않게 한다
           this.moveLogIn(meta, "server", ch.id);
@@ -227,6 +290,7 @@ export class TrashOps {
     }
     meta.state = "done";
     trash.writeMeta(meta);
+    if (meta.area === "connection") this.commsDeps().changed();
   }
 
   /**
@@ -245,11 +309,17 @@ export class TrashOps {
 
     const renamed: RestoreReport["renamed"] = [];
     if (meta.kind === "channel" || meta.kind === "server") {
-      const existing = this.d.servers.getServer(meta.serverId!);
+      let store: ServerStore;
+      try {
+        store = this.storeOf(meta);
+      } catch {
+        return fail("trash_busy", "trash_finishing"); // 통신 부품이 아직 없음(시작 중)
+      }
+      const existing = store.getServer(meta.serverId!);
       const conflicts: NameConflict[] = [];
       let serverName = existing?.name ?? meta.serverName!;
       if (!existing) {
-        const others = this.d.servers.listServers().map((s) => s.name);
+        const others = store.listServers().map((s) => s.name);
         serverName = uniqueName(meta.serverName!, others);
         if (serverName !== meta.serverName) conflicts.push({ kind: "server", name: meta.serverName!, to: serverName });
       }
@@ -285,9 +355,11 @@ export class TrashOps {
 
   /** 복원 실행(멱등 — 시작 복구가 restoring 항목에 다시 호출한다). */
   private finishRestore(meta: TrashMeta): RestoreReport {
-    const { trash, channels, servers, dm, accounts } = this.d;
+    const { trash, channels, dm, accounts } = this.d;
     const report: RestoreReport = { renamed: [], dmsRestored: 0, dmsLeft: 0, itemRemoved: false };
     if (meta.kind === "channel" || meta.kind === "server") {
+      const servers = this.storeOf(meta);
+      const conn = meta.area === "connection";
       const plan = meta.plan ?? {};
       let srv = servers.getServer(meta.serverId!);
       if (!srv) {
@@ -297,12 +369,15 @@ export class TrashOps {
       for (const ch of meta.channels ?? []) {
         const name = plan.channelNames?.[ch.id] ?? ch.name;
         const file = `${ch.id}.jsonl`;
-        if (meta.files.includes(file)) trash.moveOut(meta.id, file, channels.pathOf("server", ch.id));
+        const logFile = this.logPathOf(meta, ch.id);
+        if (meta.files.includes(file)) trash.moveOut(meta.id, file, logFile);
         servers.addChannelWithId(srv.id, { id: ch.id, name });
-        channels.register({ id: ch.id, kind: "server", label: `${srv.name}/${name}`, members: null });
+        if (conn) channels.register({ id: ch.id, kind: "server", label: `${srv.name}/${name}`, members: null, area: "connection" }, logFile);
+        else channels.register({ id: ch.id, kind: "server", label: `${srv.name}/${name}`, members: null });
       }
       trash.remove(meta.id);
       report.itemRemoved = true;
+      if (conn) this.commsDeps().changed();
       return report;
     }
     if (meta.kind === "dm") {

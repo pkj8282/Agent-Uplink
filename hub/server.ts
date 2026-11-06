@@ -194,12 +194,23 @@ export class Hub {
         process.stderr.write(`${this.msg("log_index_save_blocked", { file: path.join(this.opts.dataDir, sub, "index.json") })}\n`);
       }
     }
+    // 통신 관리자는 휴지통보다 먼저 만든다 — 통신 항목의 크래시 재실행(recoverPending)이 통신 저장소를 쓴다. 생성자는 파일을 건드리지 않는다.
+    this.conn = new ConnectionManager({
+      dataDir: this.opts.dataDir,
+      accounts: this.accounts,
+      channels: this.channels,
+      guard: this.security.guard,
+      deliver: (ch, msg, skip) => this.fanout(ch, msg.from, msg.fromName, msg.text, msg.ts, msg.origin, skip),
+      ...(this.opts.connBackoffMs ? { backoffMs: this.opts.connBackoffMs } : {}),
+      ...(this.opts.storageApiBase ? { storageApiBase: this.opts.storageApiBase } : {}),
+    });
     this.trash = new TrashStore({ dir: this.opts.dataDir });
     this.trashOps = new TrashOps({
       dataDir: this.opts.dataDir, servers: this.servers, dm: this.dm, accounts: this.accounts,
       channels: this.channels, inbox: this.inbox, trash: this.trash,
       maxChannelsPerServer: () => this.config.maxChannelsPerServer,
       lang: () => this.lang(),
+      comms: () => this.conn.trashDeps(),
     });
     // 크래시로 중단된 삭제·복원을 먼저 마무리한다 — 이후 DM 재조정이 삭제 중이던 계정을 되살리지 않도록.
     this.trashOps.recoverPending();
@@ -221,15 +232,6 @@ export class Hub {
     // 이전 버전 삭제·크래시로 남은 로그를 휴지통으로(손상된 서버 인덱스면 서버 쪽은 건너뜀 — 손으로 되살릴 여지)
     this.trashOps.sweepOrphans({ servers: !this.servers.sweepBlocked, dm: true });
     this.security.finishStartupScan();
-    this.conn = new ConnectionManager({
-      dataDir: this.opts.dataDir,
-      accounts: this.accounts,
-      channels: this.channels,
-      guard: this.security.guard,
-      deliver: (ch, msg, skip) => this.fanout(ch, msg.from, msg.fromName, msg.text, msg.ts, msg.origin, skip),
-      ...(this.opts.connBackoffMs ? { backoffMs: this.opts.connBackoffMs } : {}),
-      ...(this.opts.storageApiBase ? { storageApiBase: this.opts.storageApiBase } : {}),
-    });
     this.setConnStatusSource(this.conn);
   }
 
@@ -308,6 +310,10 @@ export class Hub {
         case "admin_conn_storage_clear":
           c.uploader.clear();
           return { ok: true };
+        case "admin_conn_delete_channel":
+          return this.trashOps.deleteCommsChannel(String(q.channelId ?? ""), "admin") ? { ok: true } : fail("channel_not_found", "channel_not_found", { id: q.channelId });
+        case "admin_conn_delete_server":
+          return this.trashOps.deleteCommsServer(String(q.serverId ?? ""), "admin") ? { ok: true } : fail("server_not_found", "server_not_found", { id: q.serverId });
         case "admin_conn_revoke":
           return c.revoke(String(q.memberId ?? "")) ? { ok: true } : fail("member_not_found", "member_not_found");
         default:

@@ -29,6 +29,8 @@ export interface TrashMeta {
   dm?: { channelId: string; members: [string, string]; label: string };
   plan?: { serverName?: string; channelNames?: Record<string, string> };
   files: string[];
+  /** channel·server만: 통신 서버·채널(Connection Communications)에서 지운 항목(v3.0). */
+  area?: "connection";
 }
 
 export type TrashItem = TrashItemInfo;
@@ -59,6 +61,7 @@ const isStr = (v: unknown): v is string => typeof v === "string";
  * 여기서 걸러야 복원이 데이터 폴더 밖에 쓰거나 예외로 Hub를 죽이지 않는다.
  */
 function validShape(m: TrashMeta): boolean {
+  if (m.area !== undefined && !(m.area === "connection" && (m.kind === "channel" || m.kind === "server"))) return false;
   if (m.plan !== undefined) {
     if (typeof m.plan !== "object" || m.plan === null) return false;
     if (m.plan.serverName !== undefined && !isStr(m.plan.serverName)) return false;
@@ -273,6 +276,7 @@ export class TrashStore {
       };
       if (m.serverName !== undefined) item.serverName = m.serverName;
       if (m.kind === "account" && m.accountRestored) item.dmLeftover = m.dms?.length ?? 0;
+      if (m.area === "connection") item.area = "connection";
       if (m.state !== "done") item.pending = true;
       out.push(item);
     }
