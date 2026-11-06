@@ -71,3 +71,20 @@ test("시작 시간: 꽉 찬 채널 4개(1,000건 × 한글 1,400자) 적재가 
   assert.equal(s.recent(ids[3], 1)[0].seq, 1000);
   assert.ok(ms < 1500, `적재 ${ms.toFixed(0)}ms (MCP의 Hub 기동 대기는 약 3초)`);
 });
+
+test("prune: 고른 메시지만 파일·메모리에서 지우고, 다음 append는 seq를 이어 간다(v3.0 로컬 정리)", () => {
+  const dir = tmp();
+  const s = new ChannelStore({ dir });
+  s.register({ id: "c", kind: "server", label: "S/c", members: null });
+  for (const t of ["a", "b", "c", "d"]) s.append("c", "u", "n", t);
+  assert.equal(s.prune("c", (m) => m.seq > 2), 2);
+  assert.deepEqual(s.recent("c", 10).map((m) => m.text), ["c", "d"]);
+  const file = fs.readFileSync(path.join(dir, "servers", "c.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l).text);
+  assert.deepEqual(file, ["c", "d"]);
+  assert.equal(s.append("c", "u", "n", "e").seq, 5);
+  assert.equal(s.prune("nope", () => false), 0);
+  // 다시 열어도 seq가 이어진다
+  const s2 = new ChannelStore({ dir });
+  s2.register({ id: "c", kind: "server", label: "S/c", members: null });
+  assert.equal(s2.append("c", "u", "n", "f").seq, 6);
+});

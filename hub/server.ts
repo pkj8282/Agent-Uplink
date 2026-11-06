@@ -320,6 +320,12 @@ export class Hub {
           const key = c.takeGoogleRecoveryKey();
           return key ? { ok: true, recoveryKey: key } : fail("storage_login_pending", "storage_login_pending");
         }
+        case "admin_conn_storage_prune_set": {
+          const days = q.days ?? 30;
+          if (typeof q.enabled !== "boolean" || typeof days !== "number" || !Number.isInteger(days) || days < 7 || days > 365) return fail("storage_config_invalid", "storage_config_invalid");
+          c.uploader.setPrune({ enabled: q.enabled, days });
+          return { ok: true, storage: c.uploader.status() };
+        }
         case "admin_conn_storage_status":
           return { ok: true, storage: c.uploader.status() };
         // 응답의 messages는 개수(숫자) — 프로토콜 Response.messages(메시지 배열)와 이름만 같아 타입을 넓힌다.

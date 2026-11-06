@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Channel, Message, MessageOrigin } from "../shared/protocol.js";
 import { Guard, plainGuard } from "./securityLog.js";
+import { writeFileAtomic } from "./fsutil.js";
 
 interface Entry {
   channel: Channel;
@@ -102,6 +103,37 @@ export class ChannelStore {
       // 디스크 오류 시에도 인메모리 유지
     }
     return msg;
+  }
+
+  /**
+   * 로컬 정리(v3.0): keep이 false인 메시지를 로그 파일과 메모리 링에서 지운다. 지운 개수를 돌려준다.
+   * 동기 처리라 같은 스레드의 append와 섞이지 않는다. seq는 그대로 이어 간다(지운 뒤에도 다음 seq는 커진다).
+   */
+  prune(channelId: string, keep: (m: Message) => boolean): number {
+    const e = this.entries.get(channelId);
+    if (!e) return 0;
+    let lines: string[] = [];
+    try {
+      lines = fs.readFileSync(e.file, "utf8").split("\n").filter(Boolean);
+    } catch {
+      return 0;
+    }
+    const out: string[] = [];
+    let removed = 0;
+    for (const line of lines) {
+      let m: Message | null = null;
+      try {
+        m = JSON.parse(line) as Message;
+      } catch {
+        // 손상 줄은 그대로 둔다(판단할 수 없으므로 지우지 않음)
+      }
+      if (m && typeof m.seq === "number" && !keep(m)) removed++;
+      else out.push(line);
+    }
+    if (removed === 0) return 0;
+    writeFileAtomic(e.file, out.length ? `${out.join("\n")}\n` : "");
+    e.ring = e.ring.filter(keep);
+    return removed;
   }
 
   /** 등록된 채널 ID 목록. */

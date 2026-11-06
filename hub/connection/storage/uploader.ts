@@ -18,11 +18,13 @@ export interface StorageConfig {
   branch?: string;
   /** 업로드 주기(분, 1~60). */
   intervalMin: number;
+  /** 로컬 정리(기본 꺼짐): 검증된 백업 중 days일 지난 통신 메시지를 이 PC에서 지움. */
+  prune?: { enabled: boolean; days: number };
 }
 
 /** token = 저장소 자격 증명(불투명): GitHub PAT 또는 Google {clientId,clientSecret?,refreshToken} JSON. */
 interface Secrets { token?: string; spaceKey?: string }
-interface State { lastSeq: Record<string, number>; nextIndex: number; lastHash: string; lastUploadAt: number | null; lastError: string | null }
+interface State { lastSeq: Record<string, number>; nextIndex: number; lastHash: string; lastUploadAt: number | null; lastError: string | null; lastPruneAt?: number | null }
 
 export interface UploaderDeps {
   dir: string;
@@ -32,6 +34,8 @@ export interface UploaderDeps {
   channels: () => { id: string; logFile: string }[];
   makeBackend: (cfg: StorageConfig, token: string) => StorageBackend;
   log: (code: string, detail?: object) => void;
+  /** 로컬 정리: 채널 로그에서 keep이 false인 메시지를 지우고 개수를 돌려준다. */
+  prune?: (channelId: string, keep: (m: Message) => boolean) => number;
   now?: () => number;
 }
 
@@ -78,7 +82,7 @@ export class Uploader {
 
   private state(): State {
     const s = readJson<Partial<State>>(this.file("state.json"), {});
-    return { lastSeq: s.lastSeq ?? {}, nextIndex: s.nextIndex ?? 0, lastHash: s.lastHash ?? "", lastUploadAt: s.lastUploadAt ?? null, lastError: s.lastError ?? null };
+    return { lastSeq: s.lastSeq ?? {}, nextIndex: s.nextIndex ?? 0, lastHash: s.lastHash ?? "", lastUploadAt: s.lastUploadAt ?? null, lastError: s.lastError ?? null, lastPruneAt: s.lastPruneAt ?? null };
   }
 
   private saveState(s: State): void {
@@ -112,7 +116,8 @@ export class Uploader {
     const sec = this.secrets();
     const spaceKey = sec.spaceKey ? Buffer.from(sec.spaceKey, "base64") : randomBytes(32);
     this.saveSecrets({ token, spaceKey: spaceKey.toString("base64") });
-    writeFileAtomic(this.file("config.json"), JSON.stringify({ kind: cfg.kind, ...(cfg.repo ? { repo: cfg.repo } : {}), ...(cfg.branch ? { branch: cfg.branch } : {}), intervalMin: cfg.intervalMin }, null, 2));
+    const prev = this.config()?.prune;
+    writeFileAtomic(this.file("config.json"), JSON.stringify({ kind: cfg.kind, ...(cfg.repo ? { repo: cfg.repo } : {}), ...(cfg.branch ? { branch: cfg.branch } : {}), intervalMin: cfg.intervalMin, ...(prev ? { prune: prev } : {}) }, null, 2));
     if (this.timer) this.start(); // 주기 반영
     return { recoveryKey: recoveryKeyOf(spaceKey) };
   }
@@ -131,13 +136,49 @@ export class Uploader {
     return { nextIndex: st.nextIndex, lastHash: st.lastHash };
   }
 
-  status(): { configured: boolean; kind?: "github" | "google"; repo?: string; intervalMin?: number; lastUploadAt: number | null; lastError: string | null; nextIndex: number } {
+  /** 로컬 정리 설정(관리 op). days 7~365. 저장소가 연결돼 있어야 한다. */
+  setPrune(p: { enabled: boolean; days: number }): void {
+    const cfg = this.config();
+    if (!cfg) throw new Error("storage_not_configured");
+    if (!Number.isInteger(p.days) || p.days < 7 || p.days > 365) throw new Error("storage_config_invalid");
+    writeFileAtomic(this.file("config.json"), JSON.stringify({ ...cfg, prune: { enabled: p.enabled === true, days: p.days } }, null, 2));
+  }
+
+  /**
+   * 로컬 정리(하루 한 번): 켜져 있고 24시간이 지났으면 저장소를 검증하고, 깨끗할 때만
+   * "올렸고(seq ≤ 마지막 올린 seq) days일 지난" 통신 메시지를 지운다. 휴지통을 거치지 않는다.
+   */
+  async pruneIfDue(): Promise<{ removed: number }> {
+    const p = this.config()?.prune;
+    const st0 = this.state();
+    const now = this.now();
+    if (!p?.enabled || !this.d.prune || !this.status().configured) return { removed: 0 };
+    if (st0.lastPruneAt && now - st0.lastPruneAt < 86_400_000) return { removed: 0 };
+    const v = await this.verify();
+    if (v.breaks.length || v.missing.length || v.bad.length) {
+      this.d.log("prune_skipped", { breaks: v.breaks.length, missing: v.missing.length, bad: v.bad.length });
+      return { removed: 0 };
+    }
+    const st = this.state();
+    const cutoff = now - p.days * 86_400_000;
+    let removed = 0;
+    for (const c of this.d.channels()) {
+      const upTo = st.lastSeq[c.id] ?? 0;
+      removed += this.d.prune(c.id, (m) => !(m.ts < cutoff && m.seq <= upTo));
+    }
+    st.lastPruneAt = now;
+    this.saveState(st);
+    this.d.log("prune_done", { removed });
+    return { removed };
+  }
+
+  status(): { configured: boolean; kind?: "github" | "google"; repo?: string; intervalMin?: number; lastUploadAt: number | null; lastError: string | null; nextIndex: number; prune?: { enabled: boolean; days: number; lastPruneAt: number | null } } {
     const cfg = this.config();
     const st = this.state();
     const configured = !!cfg && !!this.secrets().token;
     return {
       configured,
-      ...(configured && cfg ? { kind: cfg.kind, ...(cfg.repo ? { repo: cfg.repo } : {}), intervalMin: cfg.intervalMin } : {}),
+      ...(configured && cfg ? { kind: cfg.kind, ...(cfg.repo ? { repo: cfg.repo } : {}), intervalMin: cfg.intervalMin, prune: { enabled: cfg.prune?.enabled === true, days: cfg.prune?.days ?? 30, lastPruneAt: st.lastPruneAt ?? null } } : {}),
       lastUploadAt: st.lastUploadAt,
       lastError: st.lastError,
       nextIndex: st.nextIndex,
@@ -288,7 +329,7 @@ export class Uploader {
     const cfg = this.config();
     if (!cfg) return;
     const ms = Math.min(60, Math.max(1, cfg.intervalMin)) * 60_000;
-    this.timer = setInterval(() => { void this.uploadNow().catch(() => undefined); }, ms);
+    this.timer = setInterval(() => { void this.uploadNow().then(() => this.pruneIfDue()).catch(() => undefined); }, ms);
     this.timer.unref();
   }
 

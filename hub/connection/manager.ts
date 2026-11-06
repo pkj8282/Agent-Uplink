@@ -98,6 +98,7 @@ export class ConnectionManager implements ConnStatusSource {
         return new GitHubBackend({ token, repo: cfg.repo ?? "", ...(cfg.branch ? { branch: cfg.branch } : {}), ...(deps.storageApiBase ? { apiBase: deps.storageApiBase } : {}) });
       },
       log: (code, detail) => this.log(code, detail),
+      prune: (id, keep) => deps.channels.prune(id, keep),
     });
   }
 

@@ -25,7 +25,16 @@ function setup(dir = tempDir("uplink-up-"), keys = generateSigningKeys(), backen
     fs.appendFileSync(path.join(logs, `${ch}.jsonl`), JSON.stringify({ seq, ts: seq, channelId: ch, from: "u", fromName: "n", text }) + "\n");
   };
   const events: string[] = [];
+  const pruneFn = (id: string, keep: (m: any) => boolean) => {
+    const f = path.join(logs, `${id}.jsonl`);
+    if (!fs.existsSync(f)) return 0;
+    const all = fs.readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    const kept = all.filter(keep);
+    fs.writeFileSync(f, kept.map((m) => JSON.stringify(m) + "\n").join(""));
+    return all.length - kept.length;
+  };
   const up = new Uploader({
+    prune: pruneFn,
     dir: path.join(dir, "connection", "storage"),
     spaceId: () => SPACE,
     profile: () => "tls13-chacha20",
@@ -34,7 +43,8 @@ function setup(dir = tempDir("uplink-up-"), keys = generateSigningKeys(), backen
     makeBackend: () => backend,
     log: (code) => events.push(code),
   });
-  return { dir, keys, backend, up, add, events };
+  const texts = (ch: string) => fs.existsSync(path.join(logs, `${ch}.jsonl`)) ? fs.readFileSync(path.join(logs, `${ch}.jsonl`), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l).text) : [];
+  return { dir, keys, backend, up, add, events, texts };
 }
 
 test("uploads_only_new: 새 메시지만 올리고, 둘째 조각은 첫 조각 해시를 잇는다", async () => {
@@ -142,7 +152,7 @@ test("recovery_key_once: 복구 키는 연결 응답에서만, 상태에는 키�
   const st = JSON.stringify(t.up.status());
   assert.equal(st.includes(TOKEN), false);
   assert.equal(st.includes(recoveryKey), false);
-  assert.deepEqual(JSON.parse(st), { configured: true, kind: "github", repo: "o/r", intervalMin: 5, lastUploadAt: null, lastError: null, nextIndex: 0 });
+  assert.deepEqual(JSON.parse(st), { configured: true, kind: "github", repo: "o/r", intervalMin: 5, prune: { enabled: false, days: 30, lastPruneAt: null }, lastUploadAt: null, lastError: null, nextIndex: 0 });
   const secrets = JSON.parse(fs.readFileSync(path.join(t.dir, "connection", "storage", "secrets.json"), "utf8"));
   assert.equal(fromBase32(recoveryKey.replace(/-/g, ""))!.toString("base64"), secrets.spaceKey);
   // 다시 연결해도 공간 열쇠는 같다(사슬·이전 백업 유지)
@@ -184,4 +194,54 @@ test("upload_time_only_when_uploaded: 올린 게 없으면 마지막 업로드 �
   now = 3_000_000;
   assert.deepEqual(await t.up.uploadNow(), { fragments: 0, messages: 0 });
   assert.equal(t.up.status().lastUploadAt, 2_000_000);
+});
+
+const DAY = 86_400_000;
+
+test("prune_only_uploaded_and_old: 올렸고 N일 지난 메시지만 지운다", async () => {
+  const t = setup();
+  (t.up as any).d.now = () => 100 * DAY;
+  await t.up.configure(cfg, TOKEN);
+  t.add("c1", "옛1"); t.add("c1", "옛2"); // ts = 1, 2(아주 오래됨)
+  await t.up.uploadNow();
+  t.add("c1", "안 올린 옛것"); // 오래됐지만 아직 안 올림
+  t.up.setPrune({ enabled: true, days: 30 });
+  const r = await t.up.pruneIfDue();
+  assert.deepEqual(r, { removed: 2 });
+  assert.deepEqual(t.texts("c1"), ["안 올린 옛것"]);
+  assert.ok(t.events.includes("prune_done"));
+  assert.equal(t.up.status().prune?.lastPruneAt, 100 * DAY);
+});
+
+test("prune_skips_when_verify_fails: 검증이 깨끗하지 않으면 아무것도 안 지운다", async () => {
+  const t = setup();
+  (t.up as any).d.now = () => 100 * DAY;
+  await t.up.configure(cfg, TOKEN);
+  t.add("c1", "a"); await t.up.uploadNow();
+  t.add("c1", "b"); await t.up.uploadNow();
+  t.backend.files.delete([...t.backend.files.keys()].sort()[0]);
+  t.up.setPrune({ enabled: true, days: 30 });
+  assert.deepEqual(await t.up.pruneIfDue(), { removed: 0 });
+  assert.deepEqual(t.texts("c1"), ["a", "b"]);
+  assert.ok(t.events.includes("prune_skipped"));
+});
+
+test("prune_off_by_default_and_once_per_day: 기본 꺼짐, 켜도 하루 한 번", async () => {
+  let now = 100 * DAY;
+  const t = setup();
+  (t.up as any).d.now = () => now;
+  await t.up.configure(cfg, TOKEN);
+  t.add("c1", "a"); await t.up.uploadNow();
+  assert.deepEqual(t.up.status().prune, { enabled: false, days: 30, lastPruneAt: null });
+  assert.deepEqual(await t.up.pruneIfDue(), { removed: 0 });
+  assert.deepEqual(t.texts("c1"), ["a"]);
+  t.up.setPrune({ enabled: true, days: 30 });
+  assert.deepEqual(await t.up.pruneIfDue(), { removed: 1 });
+  t.add("c1", "b"); await t.up.uploadNow();
+  now += DAY / 2;
+  assert.deepEqual(await t.up.pruneIfDue(), { removed: 0 }); // 24시간 안 지남
+  now += DAY;
+  assert.deepEqual(await t.up.pruneIfDue(), { removed: 1 });
+  assert.throws(() => t.up.setPrune({ enabled: true, days: 6 }));
+  assert.throws(() => t.up.setPrune({ enabled: true, days: 366 }));
 });
