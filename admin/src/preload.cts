@@ -27,4 +27,6 @@ contextBridge.exposeInMainWorld("admin", {
   connStorageUploadNow: () => ipcRenderer.invoke("admin:connStorageUploadNow"),
   connStorageVerify: () => ipcRenderer.invoke("admin:connStorageVerify"),
   connStorageClear: () => ipcRenderer.invoke("admin:connStorageClear"),
+  connDeleteServer: (serverId: string) => ipcRenderer.invoke("admin:connDeleteServer", serverId),
+  connDeleteChannel: (channelId: string) => ipcRenderer.invoke("admin:connDeleteChannel", channelId),
 });

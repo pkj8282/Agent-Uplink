@@ -29,6 +29,8 @@ export interface TrashItem {
   dmLeftover?: number;
   /** 삭제·복원이 아직 끝나지 않은 항목(Hub v2.1.3+). 비우기는 이것을 지우지 않는다. */
   pending?: true;
+  /** 통신 서버·채널에서 지운 항목(v3.0). */
+  area?: "connection";
 }
 
 export interface NameConflict { kind: "server" | "channel"; name: string; to: string; }
@@ -123,4 +125,7 @@ export interface AdminApi {
   connStorageUploadNow(): Promise<IpcResult<{ fragments: number; messages: number }>>;
   connStorageVerify(): Promise<IpcResult<VerifyResult>>;
   connStorageClear(): Promise<IpcResult<void>>;
+  // 통신 서버·채널 삭제(휴지통으로)
+  connDeleteServer(serverId: string): Promise<IpcResult<void>>;
+  connDeleteChannel(channelId: string): Promise<IpcResult<void>>;
 }

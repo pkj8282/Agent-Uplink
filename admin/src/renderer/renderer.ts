@@ -359,12 +359,16 @@ function renderConn(c: IpcResult<ConnStatus>): void {
         if (!name) { showOpMsg({ text: tr("form_name_empty"), kind: "err" }); return; }
         void connRun(add, () => window.admin.connCreateChannel(srv.serverId, name));
       });
-      row.append(el("span", srv.name, "name"), el("span", srv.serverId, "id"), share, chName, add);
+      row.append(el("span", srv.name, "name"), el("span", srv.serverId, "id"), share, chName, add,
+      deleteButton(tr("btn_delete_server"), deleteConfirmMessage({ kind: "server", name: srv.name, channelCount: srv.channels.length }),
+        () => window.admin.connDeleteServer(srv.serverId)));
       const sub = el("ul");
       for (const ch of srv.channels) {
         const cli = el("li", undefined, "row");
         cli.dataset.kind = "conn-channel";
-        cli.append(el("span", `# ${ch.name}`, "name"), el("span", ch.channelId, "id"));
+        cli.append(el("span", `# ${ch.name}`, "name"), el("span", ch.channelId, "id"),
+        deleteButton(tr("btn_delete"), deleteConfirmMessage({ kind: "channel", name: ch.name, serverName: srv.name }),
+          () => window.admin.connDeleteChannel(ch.channelId)));
         sub.append(cli);
       }
       li.append(row, sub);

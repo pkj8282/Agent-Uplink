@@ -388,3 +388,15 @@ test("복구 키 경고: 잃으면 못 읽음 + 가진 사람은 누구나 읽�
     setLang("ko");
   }
 });
+
+test("통신 서버·채널 삭제 항목은 휴지통에 '통신' 표시", () => {
+  const t = { id: "1", kind: "channel" as const, name: "main", serverName: "팀작업", deletedAt: 0, deletedBy: "admin" as const, bytes: 1, fileCount: 1, intact: true, restorable: true };
+  assert.deepEqual(trashFlags(t), []);
+  assert.deepEqual(trashFlags({ ...t, area: "connection" as const }), ["통신"]);
+  setLang("en");
+  try {
+    assert.deepEqual(trashFlags({ ...t, area: "connection" as const }), ["Connections"]);
+  } finally {
+    setLang("ko");
+  }
+});

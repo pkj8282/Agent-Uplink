@@ -104,6 +104,7 @@ export function trashFlags(t: TrashItem): string[] {
   const f: string[] = [];
   if (!t.intact) f.push(tr("flag_damaged"));
   if (t.dmLeftover) f.push(tr("flag_dm_left", { count: t.dmLeftover }));
+  if (t.area === "connection") f.push(tr("flag_conn"));
   return f;
 }
 

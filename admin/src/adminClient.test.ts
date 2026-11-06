@@ -466,6 +466,14 @@ test("conn_ops_via_admin_client: 관리 앱 클라이언트로 통신 서버 켜
     if (!bad.ok) assert.equal(bad.code, "member_not_found");
     const j = await toResult(() => client.connJoin("UPLINK1-AAAA"));
     assert.equal(j.ok, false);
+    await client.connDeleteChannel(channelId);
+    assert.deepEqual((await client.connStatus()).comms[0].channels, []);
+    await client.connDeleteServer(serverId);
+    assert.deepEqual((await client.connStatus()).comms, []);
+    const trash = (await client.snapshot()).trash ?? [];
+    assert.deepEqual(trash.map((t) => [t.kind, t.area]).sort(), [["channel", "connection"], ["server", "connection"]]);
+    const gone = await toResult(() => client.connDeleteServer(serverId));
+    assert.equal(!gone.ok && gone.code, "server_not_found");
     await client.connDisableServer();
     assert.equal((await client.connStatus()).server?.enabled, false);
   } finally { hub.stop(); }

@@ -170,6 +170,8 @@ export class AdminClient {
     return { fragments: r.fragments, messages: r.messages, breaks: r.breaks ?? [], missing: r.missing ?? [], bad: r.bad ?? [] };
   }
   async connStorageClear(): Promise<void> { await this.call("admin_conn_storage_clear", {}); }
+  async connDeleteServer(serverId: string): Promise<void> { await this.call("admin_conn_delete_server", { serverId }); }
+  async connDeleteChannel(channelId: string): Promise<void> { await this.call("admin_conn_delete_channel", { channelId }); }
 
   /** 뷰어를 열 1회용 티켓 URL. */
   async viewerTicket(): Promise<string> {

@@ -129,6 +129,8 @@ handle("admin:connStorageSet", (arg) => toResult(() => {
 handle("admin:connStorageUploadNow", () => toResult(() => client.connStorageUploadNow()));
 handle("admin:connStorageVerify", () => toResult(() => client.connStorageVerify()));
 handle("admin:connStorageClear", () => toResult(() => client.connStorageClear()));
+handle("admin:connDeleteServer", (id) => toResult(() => client.connDeleteServer(asId(id))));
+handle("admin:connDeleteChannel", (id) => toResult(() => client.connDeleteChannel(asId(id))));
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({

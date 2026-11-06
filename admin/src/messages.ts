@@ -144,6 +144,7 @@ export const ADMIN_MESSAGES = defineCatalog({
     meta_dms: (p: { count: number }) => `DM ${p.count}`,
     // ── 통신(v3.0) ──
     tab_conn: "통신",
+    flag_conn: "통신",
     conn_unsupported: "이 Hub에는 통신 기능이 없습니다(v3.0 이전). Hub를 재배포하면 쓸 수 있습니다.",
     save_blocked: (p: { files: string }) => `손상된 파일을 옮기지 못해 이번 실행 동안 저장을 멈춘 파일이 있습니다: ${p.files}. 이번 실행에서 만든 DM·서버는 다시 시작하면 남지 않습니다. 파일을 잡고 있는 프로그램을 닫고 Hub를 다시 시작하세요.`,
     restore_dm_leftover_confirm: (p: { title: string; count: number }) => `계정 '${p.title}'의 남은 DM ${p.count}개를 다시 붙입니다.\n이름이 겹치면 다음 단계에서 확인합니다.`,
@@ -410,6 +411,7 @@ export const ADMIN_MESSAGES = defineCatalog({
     meta_dms: (p: { count: number }) => `${p.count} DM(s)`,
     // ── Connections (v3.0) ──
     tab_conn: "Connections",
+    flag_conn: "Connections",
     conn_unsupported: "This hub has no connection features (older than v3.0). Redeploy the hub to use them.",
     save_blocked: (p: { files: string }) => `Some damaged files could not be moved, so the hub stopped saving them for this run: ${p.files}. DMs and servers created now will not survive a restart. Close the program holding the file and restart the hub.`,
     restore_dm_leftover_confirm: (p: { title: string; count: number }) => `Reattach the ${p.count} remaining DM(s) of account '${p.title}'.\nIf a name is already taken, you will be asked in the next step.`,
