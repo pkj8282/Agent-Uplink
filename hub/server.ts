@@ -22,6 +22,8 @@ import { hubMsg, type HubKey } from "./messages.js";
 import { effectiveLang, type Lang } from "../shared/i18n.js";
 import { currentLang } from "../shared/langConfig.js";
 import { SecurityLog } from "./securityLog.js";
+import { StorageError } from "./connection/storage/backend.js";
+import { parseRepo } from "./connection/storage/github.js";
 import { ConnectionManager } from "./connection/manager.js";
 import { isProfileId } from "../shared/cryptoProfile.js";
 import {
@@ -60,6 +62,8 @@ export interface HubOptions {
   limits?: Partial<HubLimits>;
   /** 통신 참여 재접속 간격(시험용, v3.0). */
   connBackoffMs?: number[];
+  /** 시험 전용: 저장소 API 주소(가짜 GitHub). */
+  storageApiBase?: string;
 }
 
 interface Waiter {
@@ -224,6 +228,7 @@ export class Hub {
       guard: this.security.guard,
       deliver: (ch, msg, skip) => this.fanout(ch, msg.from, msg.fromName, msg.text, msg.ts, msg.origin, skip),
       ...(this.opts.connBackoffMs ? { backoffMs: this.opts.connBackoffMs } : {}),
+      ...(this.opts.storageApiBase ? { storageApiBase: this.opts.storageApiBase } : {}),
     });
     this.setConnStatusSource(this.conn);
   }
@@ -237,6 +242,8 @@ export class Hub {
       if (code === "name_invalid") return fail("name_invalid", "name_invalid", { kind: "account", max: NAME_MAX });
       if (code === "server_not_enabled" || code === "server_not_found") return fail(code, code === "server_not_enabled" ? "server_not_enabled" : "server_not_found", { id: q.serverId });
       if (code === "server_not_configured") return fail("server_not_enabled", "server_not_enabled");
+      if (e instanceof StorageError) return fail(e.code, "storage_failed", { code: e.code });
+      if (code === "storage_not_configured") return fail(code, "storage_not_configured");
       return fail("conn_op_failed", "conn_op_failed", { code: (e as NodeJS.ErrnoException).code ?? code });
     };
     try {
@@ -278,6 +285,29 @@ export class Hub {
           const r = await c.join(String(q.code ?? ""));
           return r.ok ? { ok: true, spaceId: r.spaceId } : fail(r.code, "conn_op_failed", { code: r.code });
         }
+        case "admin_conn_storage_set": {
+          // 관리 토큰 칸(token)과 겹치지 않게 저장소 토큰은 ghToken. 토큰은 응답·기록에 되돌려 쓰지 않는다.
+          const tok = q.ghToken;
+          const interval = q.intervalMin ?? 5;
+          const branch = q.branch;
+          const ok = q.kind === "github" && typeof q.repo === "string" && parseRepo(q.repo) !== null
+            && typeof tok === "string" && tok.length > 0 && tok.length <= 500 && !/\s/.test(tok)
+            && typeof interval === "number" && Number.isInteger(interval) && interval >= 1 && interval <= 60
+            && (branch === undefined || (typeof branch === "string" && /^[\w./-]{1,255}$/.test(branch)));
+          if (!ok) return fail("storage_config_invalid", "storage_config_invalid");
+          const r = await c.storageSet({ kind: "github", repo: q.repo as string, ...(branch ? { branch: branch as string } : {}), intervalMin: interval as number }, tok as string);
+          return { ok: true, recoveryKey: r.recoveryKey };
+        }
+        case "admin_conn_storage_status":
+          return { ok: true, storage: c.uploader.status() };
+        // 응답의 messages는 개수(숫자) — 프로토콜 Response.messages(메시지 배열)와 이름만 같아 타입을 넓힌다.
+        case "admin_conn_storage_upload_now":
+          return { ok: true, ...(await c.uploader.uploadNow()) } as unknown as Omit<Response, "id">;
+        case "admin_conn_storage_verify":
+          return { ok: true, ...(await c.uploader.verify()) } as unknown as Omit<Response, "id">;
+        case "admin_conn_storage_clear":
+          c.uploader.clear();
+          return { ok: true };
         case "admin_conn_revoke":
           return c.revoke(String(q.memberId ?? "")) ? { ok: true } : fail("member_not_found", "member_not_found");
         default:

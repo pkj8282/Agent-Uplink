@@ -56,13 +56,14 @@ export function seedLanguage(dataDir: string, language: LangSetting): void {
 }
 
 /** language 기본값 "ko": 기존 테스트의 한국어 문구 단정을 유지한다. 영어·N/A 경로는 명시해서 시험한다. */
-export async function startTestHub(opts: { dataDir?: string; http?: boolean; limits?: Partial<HubLimits>; language?: LangSetting; connBackoffMs?: number[] } = {}): Promise<{ hub: Hub; port: number; dataDir: string }> {
+export async function startTestHub(opts: { dataDir?: string; http?: boolean; limits?: Partial<HubLimits>; language?: LangSetting; connBackoffMs?: number[]; storageApiBase?: string } = {}): Promise<{ hub: Hub; port: number; dataDir: string }> {
   const dataDir = opts.dataDir ?? tempDir("uplink-t-");
   seedLanguage(dataDir, opts.language ?? "ko");
   const hub = new Hub({
     tcpPort: 0, httpPort: 0, dataDir, idleShutdownMs: 0,
     ...(opts.limits ? { limits: opts.limits } : {}),
     ...(opts.connBackoffMs ? { connBackoffMs: opts.connBackoffMs } : {}),
+    ...(opts.storageApiBase ? { storageApiBase: opts.storageApiBase } : {}),
   });
   await hub.startTcp();
   if (opts.http) await hub.startHttp();

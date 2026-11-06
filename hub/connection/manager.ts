@@ -20,6 +20,9 @@ import { ConnectionStore, type JoinedSpace, type ServerConfig } from "./store.js
 import { ConnListener, type ConnPeer } from "./listener.js";
 import { ConnClient, joinSpace } from "./client.js";
 import { CommsStore } from "./comms.js";
+import { Uploader, type StorageConfig } from "./storage/uploader.js";
+import { GitHubBackend } from "./storage/github.js";
+import { DEFAULT_PROFILE } from "../../shared/cryptoProfile.js";
 
 export interface ManagerDeps {
   dataDir: string;
@@ -29,6 +32,8 @@ export interface ManagerDeps {
   /** 로컬 인박스로 전달(Hub.fanout). skipUuid = 보낸 로컬 계정(자기 메아리 제외). */
   deliver(ch: Channel, msg: Message, skipUuid?: string): void;
   backoffMs?: number[];
+  /** 시험 전용: 저장소 API 주소. */
+  storageApiBase?: string;
 }
 
 interface SpaceState {
@@ -69,6 +74,24 @@ export class ConnectionManager implements ConnStatusSource {
   constructor(private readonly deps: ManagerDeps) {
     this.store = new ConnectionStore({ dataDir: deps.dataDir });
     this.comms = new CommsStore({ dataDir: deps.dataDir, guard: deps.guard });
+    // 백업 업로더(3단계): 이 Hub의 Connection Communications 채널만 올린다(원격 거울 r: 채널은 그 공간의 서버가 올림).
+    this.uploader = new Uploader({
+      dir: path.join(this.store.dir, "storage"),
+      spaceId: () => this.store.serverConfig()?.spaceId ?? null,
+      profile: () => this.store.serverConfig()?.profile ?? DEFAULT_PROFILE,
+      keys: () => this.store.identity(),
+      channels: () => this.comms.servers().flatMap((s) => s.channels.map((c) => ({ id: c.id, logFile: this.comms.logPath(c.id) }))),
+      makeBackend: (cfg, token) => new GitHubBackend({ token, repo: cfg.repo, ...(cfg.branch ? { branch: cfg.branch } : {}), ...(deps.storageApiBase ? { apiBase: deps.storageApiBase } : {}) }),
+      log: (code, detail) => this.log(code, detail),
+    });
+  }
+
+  readonly uploader: Uploader;
+
+  /** 저장소 연결(관리 op). 통신 서버 공간이 있어야 한다. */
+  storageSet(cfg: StorageConfig, token: string): Promise<{ recoveryKey: string }> {
+    if (!this.store.serverConfig()) throw new Error("server_not_enabled");
+    return this.uploader.configure(cfg, token).then((r) => { this.uploader.start(); return r; });
   }
 
   private log(code: string, detail: object = {}): void {
@@ -100,9 +123,11 @@ export class ConnectionManager implements ConnStatusSource {
       }
     }
     for (const j of this.store.joined()) this.startSpace(j);
+    if (this.uploader.status().configured) this.uploader.start();
   }
 
   async stop(): Promise<void> {
+    await this.uploader.stop(); // 정상 종료 직전 마지막 업로드(설계 4.2)
     for (const st of this.spaces.values()) st.client.stop();
     this.spaces.clear();
     const l = this.listener;
@@ -571,6 +596,7 @@ export class ConnectionManager implements ConnStatusSource {
     members: { memberId: string; userName: string; joinedAt: number; revoked: boolean; online: boolean }[];
     joined: { spaceId: string; spaceName: string; hostUser: string; connected: boolean }[];
     userName: string | null;
+    storage: ReturnType<Uploader["status"]>;
     comms: { serverId: string; name: string; channels: { channelId: string; name: string }[] }[];
     events: { ts: number; code: string; detail: object }[];
   } {
@@ -581,6 +607,7 @@ export class ConnectionManager implements ConnStatusSource {
       members: this.store.members().map((m) => ({ memberId: m.memberId, userName: m.userName, joinedAt: m.joinedAt, revoked: m.revoked, online: online.has(m.memberId) })),
       joined: this.store.joined().map((j) => ({ spaceId: j.spaceId, spaceName: j.spaceName, hostUser: j.hostUser, connected: !!this.spaces.get(j.spaceId)?.client.connected })),
       userName: this.store.userName(),
+      storage: this.uploader.status(),
       comms: this.comms.servers().map((s) => ({ serverId: s.id, name: s.name, channels: s.channels.map((c) => ({ channelId: c.id, name: c.name })) })),
       events: this.events.slice(-50),
     };
