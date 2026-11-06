@@ -1,8 +1,10 @@
-import type { AdminApi, AdminConfig, IpcResult, SecurityFinding, Snapshot, TrashItem } from "../types.js";
+import type { AdminApi, AdminConfig, ConnStatus, IpcResult, SecurityFinding, Snapshot, TrashItem } from "../types.js";
 import {
   ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf,
   emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage,
   restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount,
+  parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage,
+  connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage,
 } from "./view.js";
 import type { FormMessage } from "./view.js";
 import { getLang, setLang, tr } from "./lang.js";
@@ -72,7 +74,7 @@ function restoreFocus(): void {
 async function refresh(): Promise<void> {
   const t = snapshotSeq.begin();
   setState("loading");
-  const r = await window.admin.snapshot();
+  const [r, c] = await Promise.all([window.admin.snapshot(), window.admin.connStatus()]);
   if (!snapshotSeq.isLatest(t)) return; // 더 나중에 시작한 새로고침이 있으면 이 결과는 버린다
   if (!r.ok) {
     setState(r.hubDown ? "hubdown" : "error");
@@ -86,6 +88,8 @@ async function refresh(): Promise<void> {
   renderAccounts(r.data);
   renderTrash(r.data);
   renderSecurity(r.data);
+  renderSaveBlocked(r.data);
+  renderConn(c);
   restoreFocus();
 }
 
@@ -234,6 +238,263 @@ function renderAccounts(s: Snapshot): void {
   }
 }
 
+// --- 저장 멈춤 경고(v3 Minor ①) ---
+
+function renderSaveBlocked(s: Snapshot): void {
+  const box = byId("save-blocked");
+  const files = s.saveBlocked ?? [];
+  box.textContent = files.length > 0 ? saveBlockedMessage(files) : "";
+  box.hidden = files.length === 0;
+}
+
+// --- 통신(v3.0) ---
+// 원격·사용자 데이터(이름·주소·사건 내용)는 textContent로만. 초대 코드는 화면에만 두고 저장하지 않는다.
+
+/** 사용자가 고쳤지만 아직 제출하지 않은 통신 입력 — 새로고침이 덮어쓰지 않는다. */
+const connDirty = new Set<Element>();
+/** 공유 체크를 바꿨지만 저장하지 않은 상태(null = Hub 값대로). */
+let pendingShared: Set<string> | null = null;
+
+for (const id of ["conn-user-form", "conn-server-form", "conn-invite-form"]) {
+  byId(id).addEventListener("input", (e) => { if (e.target instanceof Element) connDirty.add(e.target); });
+  byId(id).addEventListener("change", (e) => { if (e.target instanceof Element) connDirty.add(e.target); });
+}
+
+function setIfClean(e: HTMLInputElement | HTMLSelectElement, value: string): void {
+  if (!connDirty.has(e)) e.value = value;
+}
+
+function clearDirty(form: HTMLElement): void {
+  for (const e of [...connDirty]) if (form.contains(e)) connDirty.delete(e);
+}
+
+/** 통신 작업 공통: 오류는 code로 문구를 고르고, 끝나면 새로고침. */
+async function connRun<T>(b: HTMLButtonElement | null, action: () => Promise<IpcResult<T>>, onOk?: (data: T) => string | void): Promise<boolean> {
+  showOpMsg(null);
+  if (b) b.disabled = true;
+  const r = await action();
+  // 성공 처리(입력 비우기·공유 대기 해제 등)는 새로고침 전에 — 새로 그린 화면이 그 상태를 따른다.
+  const okText = r.ok ? onOk?.(r.data) : undefined;
+  await refresh();
+  if (b && b.isConnected) b.disabled = false;
+  if (!r.ok) {
+    showOpMsg({ text: tr("conn_failed", { detail: connErrorMessage(r.code, r.error) }), kind: "err" });
+    return false;
+  }
+  showOpMsg({ text: okText || tr("conn_done"), kind: "ok" });
+  return true;
+}
+
+function renderConn(c: IpcResult<ConnStatus>): void {
+  const unsupported = byId("conn-unsupported");
+  const body = byId("conn-body");
+  if (!c.ok) {
+    unsupported.textContent = c.code === "old_hub_no_op" ? connUnsupportedMessage() : tr("conn_failed", { detail: c.error });
+    unsupported.hidden = false;
+    body.hidden = true;
+    return;
+  }
+  unsupported.hidden = true;
+  body.hidden = false;
+  const s = c.data;
+  const enabled = s.server?.enabled === true;
+
+  setIfClean(byId<HTMLInputElement>("conn-user"), s.userName ?? "");
+
+  const st = byId("conn-server-state");
+  st.textContent = enabled && s.server
+    ? tr("conn_state_on", { port: s.server.port, profile: s.server.profile }) + (s.server.listening ? "" : tr("conn_state_not_listening"))
+    : tr("conn_state_off");
+  if (s.server) {
+    setIfClean(byId<HTMLInputElement>("conn-port"), String(s.server.port));
+    setIfClean(byId<HTMLSelectElement>("conn-profile"), s.server.profile);
+    setIfClean(byId<HTMLInputElement>("conn-space"), s.server.spaceName);
+    const burn = byId<HTMLInputElement>("conn-burn");
+    if (!connDirty.has(burn)) burn.checked = s.server.burnOnJoin;
+  }
+  byId<HTMLButtonElement>("conn-disable").disabled = !enabled;
+  byId<HTMLButtonElement>("conn-inv-submit").disabled = !enabled;
+  byId("conn-inv-needs").hidden = enabled;
+
+  // 통신 서버·채널 + 공유 체크
+  const shared = pendingShared ?? new Set(s.server?.shared ?? []);
+  const comms = byId("conn-comms");
+  comms.replaceChildren();
+  if (s.comms.length === 0) comms.append(el("li", tr("conn_no_comms"), "empty"));
+  for (const srv of s.comms) {
+    const li = el("li");
+    li.dataset.kind = "conn-server";
+    const row = el("div", undefined, "row");
+    const share = el("label", undefined, "check");
+    const box = el("input");
+    box.type = "checkbox";
+    box.checked = shared.has(srv.serverId);
+    box.addEventListener("change", () => {
+      pendingShared ??= new Set(shared);
+      if (box.checked) pendingShared.add(srv.serverId);
+      else pendingShared.delete(srv.serverId);
+    });
+    share.append(box, el("span", tr("conn_share")));
+    const chName = el("input");
+    chName.type = "text";
+    chName.maxLength = 64;
+    chName.placeholder = tr("conn_new_channel_ph");
+    const add = el("button", tr("btn_conn_add_channel"));
+    add.type = "button";
+    add.addEventListener("click", () => {
+      const name = chName.value.trim();
+      if (!name) { showOpMsg({ text: tr("form_name_empty"), kind: "err" }); return; }
+      void connRun(add, () => window.admin.connCreateChannel(srv.serverId, name));
+    });
+    row.append(el("span", srv.name, "name"), el("span", srv.serverId, "id"), share, chName, add);
+    const sub = el("ul");
+    for (const ch of srv.channels) {
+      const cli = el("li", undefined, "row");
+      cli.dataset.kind = "conn-channel";
+      cli.append(el("span", `# ${ch.name}`, "name"), el("span", ch.channelId, "id"));
+      sub.append(cli);
+    }
+    li.append(row, sub);
+    comms.append(li);
+  }
+
+  // 구성원
+  const members = byId("conn-members");
+  members.replaceChildren();
+  if (s.members.length === 0) members.append(el("li", tr("conn_no_members"), "empty"));
+  for (const m of s.members) {
+    const li = el("li", undefined, "row");
+    li.dataset.kind = "conn-member";
+    const state = m.revoked ? tr("conn_member_revoked") : m.online ? tr("conn_member_online") : tr("conn_member_offline");
+    li.append(
+      el("span", m.userName, "name"),
+      el("span", `${new Date(m.joinedAt).toLocaleString(localeOf(getLang()))} · ${state}`, m.online && !m.revoked ? "meta online" : "meta"),
+    );
+    if (!m.revoked) {
+      const b = el("button", tr("btn_conn_revoke"), "danger");
+      b.type = "button";
+      b.addEventListener("click", () => {
+        if (!window.confirm(revokeConfirmMessage(m.userName))) return;
+        void connRun(b, () => window.admin.connRevoke(m.memberId));
+      });
+      li.append(b);
+    }
+    members.append(li);
+  }
+
+  // 참여한 공간
+  const joined = byId("conn-joined");
+  joined.replaceChildren();
+  if (s.joined.length === 0) joined.append(el("li", tr("conn_no_joined"), "empty"));
+  for (const j of s.joined) {
+    const li = el("li", undefined, "row");
+    li.dataset.kind = "conn-joined";
+    li.append(
+      el("span", j.spaceName, "name"),
+      el("span", tr("conn_joined_meta", { host: j.hostUser, state: tr(j.connected ? "conn_connected" : "conn_disconnected") }), j.connected ? "meta online" : "meta"),
+    );
+    joined.append(li);
+  }
+
+  // 최근 통신 사건(최근이 위)
+  const events = byId("conn-events");
+  events.replaceChildren();
+  if (s.events.length === 0) events.append(el("li", tr("conn_no_events"), "empty"));
+  for (const e of [...s.events].reverse()) {
+    const li = el("li", undefined, "row");
+    li.dataset.kind = "conn-event";
+    li.append(el("span", new Date(e.ts).toLocaleString(localeOf(getLang())), "meta"), el("span", connEventLine(e), "name"));
+    events.append(li);
+  }
+}
+
+function submitter(e: SubmitEvent): HTMLButtonElement | null {
+  return e.submitter instanceof HTMLButtonElement ? e.submitter : null;
+}
+
+byId<HTMLFormElement>("conn-user-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const name = byId<HTMLInputElement>("conn-user").value.trim();
+  if (!name) { showOpMsg({ text: tr("form_name_empty"), kind: "err" }); return; }
+  clearDirty(byId("conn-user-form"));
+  void connRun(submitter(e), () => window.admin.connSetUser(name));
+});
+
+byId<HTMLFormElement>("conn-server-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const parsed = parseServerForm({
+    port: byId<HTMLInputElement>("conn-port").value,
+    profile: byId<HTMLSelectElement>("conn-profile").value,
+    spaceName: byId<HTMLInputElement>("conn-space").value,
+    burnOnJoin: byId<HTMLInputElement>("conn-burn").checked,
+  });
+  if (!parsed.ok) { showOpMsg({ text: parsed.error, kind: "err" }); return; }
+  // IP 경고(설계 5.6-1): 켜기 전에 확인받는다.
+  if (!window.confirm(serverEnableConfirmMessage(parsed.value.port))) return;
+  clearDirty(byId("conn-server-form"));
+  void connRun(submitter(e), () => window.admin.connEnableServer(parsed.value));
+});
+
+byId("conn-disable").addEventListener("click", () => {
+  if (!window.confirm(tr("conn_disable_confirm"))) return;
+  void connRun(byId<HTMLButtonElement>("conn-disable"), () => window.admin.connDisableServer());
+});
+
+byId<HTMLFormElement>("conn-add-server-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const input = byId<HTMLInputElement>("conn-new-server");
+  const name = input.value.trim();
+  if (!name) { showOpMsg({ text: tr("form_name_empty"), kind: "err" }); return; }
+  void connRun(submitter(e), () => window.admin.connCreateServer(name), () => { input.value = ""; });
+});
+
+byId("conn-save-shared").addEventListener("click", () => {
+  const ids = pendingShared ? [...pendingShared] : null;
+  if (!ids) { showOpMsg({ text: tr("conn_done"), kind: "ok" }); return; }
+  void connRun(byId<HTMLButtonElement>("conn-save-shared"), () => window.admin.connSetShared(ids), () => { pendingShared = null; });
+});
+
+byId<HTMLFormElement>("conn-invite-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const parsed = parseInviteForm({
+    label: byId<HTMLInputElement>("conn-inv-label").value,
+    host: byId<HTMLInputElement>("conn-inv-host").value,
+    days: byId<HTMLInputElement>("conn-inv-days").value,
+  });
+  if (!parsed.ok) { showOpMsg({ text: parsed.error, kind: "err" }); return; }
+  // IP 경고(설계 5.6-1): 초대를 만들 때마다 확인받는다.
+  if (!window.confirm(inviteConfirmMessage(parsed.value.label, parsed.value.host))) return;
+  void connRun(submitter(e), () => window.admin.connCreateInvite(parsed.value), (d) => {
+    byId<HTMLTextAreaElement>("conn-inv-code").value = d.code;
+    byId("conn-inv-copy-msg").textContent = "";
+    byId("conn-inv-out").hidden = false;
+    byId<HTMLInputElement>("conn-inv-label").value = "";
+  });
+});
+
+byId("conn-inv-copy").addEventListener("click", async () => {
+  const area = byId<HTMLTextAreaElement>("conn-inv-code");
+  const m = byId("conn-inv-copy-msg");
+  let ok = false;
+  try {
+    await navigator.clipboard.writeText(area.value);
+    ok = true;
+  } catch {
+    area.select();
+    try { ok = document.execCommand("copy"); } catch { ok = false; }
+  }
+  m.textContent = tr(ok ? "copied" : "copy_failed");
+  m.className = `msg ${ok ? "ok" : "err"}`;
+});
+
+byId<HTMLFormElement>("conn-join-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const area = byId<HTMLTextAreaElement>("conn-join-code");
+  const code = parseJoinCode(area.value);
+  if (!code) { showOpMsg({ text: tr("form_code_empty"), kind: "err" }); return; }
+  void connRun(submitter(e), () => window.admin.connJoin(code), () => { area.value = ""; return tr("conn_joined_ok"); });
+});
+
 // --- 보안 기록(v2.1.2) ---
 
 let securityFindings: SecurityFinding[] | undefined;
@@ -330,6 +591,7 @@ byId<HTMLFormElement>("config-form").addEventListener("submit", async (e) => {
 function applyStatic(): void {
   for (const e of document.querySelectorAll<HTMLElement>("[data-i18n]")) e.textContent = tr(e.dataset.i18n as AdminKey);
   for (const e of document.querySelectorAll<HTMLElement>("[data-i18n-aria]")) e.setAttribute("aria-label", tr(e.dataset.i18nAria as AdminKey));
+  for (const e of document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-i18n-ph]")) e.placeholder = tr(e.dataset.i18nPh as AdminKey);
   document.title = tr("window_title");
   document.documentElement.lang = getLang();
   const sel = byId<HTMLSelectElement>("cfg-lang");

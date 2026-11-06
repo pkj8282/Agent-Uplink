@@ -189,6 +189,13 @@ async function collectReport(win: BrowserWindow): Promise<Record<string, unknown
     lang: document.documentElement.lang,
     langPicker: !document.getElementById("lang-picker").hidden,
     title: document.title,
+    connTab: !!document.querySelector("[data-tab=conn]"),
+    connUnsupported: !document.getElementById("conn-unsupported").hidden,
+    connState: document.getElementById("conn-server-state").textContent,
+    connMembers: document.querySelectorAll("[data-kind=conn-member]").length,
+    connComms: document.querySelectorAll("[data-kind=conn-server]").length,
+    connEvents: document.querySelectorAll("[data-kind=conn-event]").length,
+    saveBlocked: !document.getElementById("save-blocked").hidden,
     langSelectUsable: !document.getElementById("cfg-lang").closest("[inert]") && !document.getElementById("cfg-lang").closest("[hidden]"),
     bodyHasHangul: (() => {
       const b = document.body.cloneNode(true);

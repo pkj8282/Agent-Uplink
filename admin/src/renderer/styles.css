@@ -67,3 +67,12 @@ body[data-state="lang"] .top, body[data-state="lang"] nav, body[data-state="lang
 body[data-state="lang"] .banner, body[data-state="lang"] .opmsg, body[data-state="lang"] .langbar { display: none; }
 /* 문구를 채우기 전(언어 확인 중)에는 빈 라벨이 깜빡이지 않게 가린다. */
 body[data-i18n-pending] .top, body[data-i18n-pending] nav, body[data-i18n-pending] main, body[data-i18n-pending] .langbar { visibility: hidden; }
+
+/* 통신 탭(v3.0) */
+.form.inline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: none; }
+.form.inline .hint { flex-basis: 100%; }
+.form input.wide { width: 280px; }
+.form textarea { font: 12px/1.4 Consolas, monospace; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); width: 100%; max-width: 460px; resize: vertical; }
+.row input[type="text"] { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); width: 140px; }
+.row label.check { display: flex; align-items: center; gap: 6px; }
+#tab-conn .meta { color: var(--muted); font-size: 13px; margin: 0 0 8px; }

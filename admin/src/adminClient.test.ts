@@ -315,6 +315,9 @@ test("구버전 Hub(admin op 없음)는 재배포 안내", async () => {
   });
   const c = new AdminClient({ port: f.port, keyPath: keyFile(), timeoutMs: 2000 });
   await assert.rejects(c.snapshot(), /구버전/);
+  const r = await toResult(() => c.connStatus()); // 통신 탭: 구버전 Hub를 code로 알아본다
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.equal(r.code, "old_hub_no_op");
   f.close();
 });
 

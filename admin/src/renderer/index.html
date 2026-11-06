@@ -22,12 +22,14 @@
     <button id="open-viewer" type="button" data-i18n="btn_open_viewer"></button>
   </header>
   <div id="banner" class="banner" role="alert" hidden></div>
+  <div id="save-blocked" class="banner" role="alert" hidden></div>
   <div id="op-msg" class="opmsg" role="status" hidden><span id="op-msg-text"></span><button id="op-msg-close" type="button" data-i18n="btn_close" data-i18n-aria="aria_close_message"></button></div>
   <nav class="tabs" role="tablist">
     <button type="button" role="tab" data-tab="settings" aria-selected="true" data-i18n="tab_settings"></button>
     <button type="button" role="tab" data-tab="servers" aria-selected="false" data-i18n="tab_servers"></button>
     <button type="button" role="tab" data-tab="accounts" aria-selected="false" data-i18n="tab_accounts"></button>
     <button type="button" role="tab" data-tab="trash" aria-selected="false" data-i18n="tab_trash"></button>
+    <button type="button" role="tab" data-tab="conn" aria-selected="false" data-i18n="tab_conn"></button>
     <button type="button" role="tab" data-tab="security" aria-selected="false"><span data-i18n="tab_security"></span><span id="security-badge" class="badge" hidden></span></button>
   </nav>
   <!-- Language stays usable with the hub down, so it lives outside the inert main (shown on the Settings tab only). -->
@@ -57,6 +59,64 @@
     <section id="tab-trash" class="panel" hidden>
       <div class="trash-head"><span id="trash-summary" class="meta"></span><button id="empty-trash" type="button" class="danger" data-i18n="btn_empty_trash"></button></div>
       <ul id="trash-list" class="list"></ul>
+    </section>
+    <section id="tab-conn" class="panel" hidden>
+      <p id="conn-unsupported" class="hint" hidden></p>
+      <div id="conn-body">
+        <h2 data-i18n="conn_user_heading"></h2>
+        <form id="conn-user-form" class="form inline">
+          <input id="conn-user" type="text" autocomplete="off" maxlength="64">
+          <button type="submit" data-i18n="btn_save"></button>
+          <p class="hint" data-i18n="conn_user_hint"></p>
+        </form>
+
+        <h2 data-i18n="conn_server_heading"></h2>
+        <p id="conn-server-state" class="meta"></p>
+        <form id="conn-server-form" class="form">
+          <label><span data-i18n="conn_port"></span> <input id="conn-port" type="text" inputmode="numeric" autocomplete="off" value="47900"></label>
+          <label><span data-i18n="conn_profile"></span> <select id="conn-profile"><option value="tls13-chacha20">TLS 1.3 · ChaCha20-Poly1305</option><option value="tls13-aes256gcm">TLS 1.3 · AES-256-GCM</option></select></label>
+          <label><span data-i18n="conn_space"></span> <input id="conn-space" type="text" autocomplete="off" maxlength="64"></label>
+          <label class="check"><input id="conn-burn" type="checkbox"> <span data-i18n="conn_burn_label"></span></label>
+          <div class="actions"><button type="submit" data-i18n="btn_conn_enable"></button><button id="conn-disable" type="button" class="danger" data-i18n="btn_conn_disable"></button></div>
+        </form>
+
+        <h2 data-i18n="conn_comms_heading"></h2>
+        <p class="hint" data-i18n="conn_comms_hint"></p>
+        <ul id="conn-comms" class="list"></ul>
+        <form id="conn-add-server-form" class="form inline">
+          <input id="conn-new-server" type="text" autocomplete="off" maxlength="64" data-i18n-ph="conn_new_server_ph">
+          <button type="submit" data-i18n="btn_conn_add_server"></button>
+          <button id="conn-save-shared" type="button" data-i18n="btn_conn_save_shared"></button>
+        </form>
+
+        <h2 data-i18n="conn_invite_heading"></h2>
+        <form id="conn-invite-form" class="form">
+          <label><span data-i18n="conn_invite_label"></span> <input id="conn-inv-label" type="text" autocomplete="off" maxlength="64"></label>
+          <label><span data-i18n="conn_invite_host"></span> <input id="conn-inv-host" type="text" autocomplete="off" maxlength="253" class="wide"></label>
+          <p class="hint" data-i18n="conn_host_hint"></p>
+          <label><span data-i18n="conn_invite_days"></span> <input id="conn-inv-days" type="text" inputmode="numeric" autocomplete="off" value="7"></label>
+          <div class="actions"><button id="conn-inv-submit" type="submit" data-i18n="btn_conn_invite"></button><span id="conn-inv-needs" class="hint" data-i18n="conn_invite_needs_server" hidden></span></div>
+        </form>
+        <div id="conn-inv-out" class="form" hidden>
+          <textarea id="conn-inv-code" readonly rows="4" spellcheck="false"></textarea>
+          <p class="hint" data-i18n="conn_invite_code_hint"></p>
+          <div class="actions"><button id="conn-inv-copy" type="button" data-i18n="btn_copy"></button><span id="conn-inv-copy-msg" class="msg"></span></div>
+        </div>
+
+        <h2 data-i18n="conn_members_heading"></h2>
+        <ul id="conn-members" class="list"></ul>
+
+        <h2 data-i18n="conn_join_heading"></h2>
+        <form id="conn-join-form" class="form">
+          <textarea id="conn-join-code" rows="3" spellcheck="false" data-i18n-ph="conn_join_ph"></textarea>
+          <div class="actions"><button type="submit" data-i18n="btn_conn_join"></button></div>
+        </form>
+        <h2 data-i18n="conn_joined_heading"></h2>
+        <ul id="conn-joined" class="list"></ul>
+
+        <h2 data-i18n="conn_events_heading"></h2>
+        <ul id="conn-events" class="list"></ul>
+      </div>
     </section>
     <section id="tab-security" class="panel" hidden>
       <p class="hint" data-i18n="security_intro"></p>
