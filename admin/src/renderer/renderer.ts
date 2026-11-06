@@ -275,8 +275,8 @@ async function connRun<T>(b: HTMLButtonElement | null, action: () => Promise<Ipc
   const r = await action();
   // 성공 처리(입력 비우기·공유 대기 해제 등)는 새로고침 전에 — 새로 그린 화면이 그 상태를 따른다.
   const okText = r.ok ? onOk?.(r.data) : undefined;
+  if (b) b.disabled = false; // 새로고침 전에 — 상태에 따른 비활성(끄기·초대 버튼)은 새로 그릴 때 정한다
   await refresh();
-  if (b && b.isConnected) b.disabled = false;
   if (!r.ok) {
     showOpMsg({ text: tr("conn_failed", { detail: connErrorMessage(r.code, r.error) }), kind: "err" });
     return false;
