@@ -70,3 +70,14 @@ export function readClientKeyFile(file: string, lang: Lang): string {
   if (!isKeyText(key)) throw new Error(adminMsg(lang, "client_key_malformed", { file }));
   return key;
 }
+
+/** Google OAuth 인증 주소인가(관리 앱 main이 기본 브라우저로 열기 전에 확인). Hub가 보낸 값이라도 이 모양만 연다. */
+export function isGoogleAuthUrl(u: unknown): u is string {
+  if (typeof u !== "string" || !u.startsWith("https://accounts.google.com/o/oauth2/v2/auth?")) return false;
+  try {
+    const url = new URL(u);
+    return url.protocol === "https:" && url.hostname === "accounts.google.com" && url.port === "" && url.username === "" && url.password === "" && url.pathname === "/o/oauth2/v2/auth";
+  } catch {
+    return false;
+  }
+}

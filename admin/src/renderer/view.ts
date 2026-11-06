@@ -1,5 +1,5 @@
 // 렌더러의 순수 로직(DOM 없음 → Node에서 테스트).
-import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, StorageInput, StorageStatus, VerifyResult, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
+import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, StorageInput, StorageStatus, VerifyResult, GoogleInput, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
 import { oneLine } from "../text.js";
 import type { AdminKey } from "../messages.js";
 import { getLang, tr } from "./lang.js";
@@ -289,6 +289,10 @@ export function connEventLine(e: ConnEvent): string {
   if (e.code === "member_joined") return tr("ev_member_joined", { name: s(d.userName) });
   if (e.code === "member_revoked") return tr("ev_member_revoked", { name: s(d.userName) });
   if (e.code === "remote_text_too_long") return tr("ev_remote_text_too_long");
+  if (e.code === "unclean_shutdown_detected") return tr("ev_unclean");
+  if (e.code === "prune_done") return tr("ev_prune_done", { removed: Number(d.removed) || 0 });
+  if (e.code === "prune_skipped") return tr("ev_prune_skipped");
+  if (e.code === "storage_login_failed") return tr("ev_login_failed", { detail: connErrorMessage(typeof d.code === "string" ? d.code : undefined, s(d.code)) });
   if (e.code === "storage_uploaded") return tr("ev_storage_uploaded", { fragments: Number(d.fragments) || 0, messages: Number(d.messages) || 0 });
   if (e.code === "storage_upload_failed") return tr("ev_storage_upload_failed", { detail: connErrorMessage(typeof d.code === "string" ? d.code : undefined, s(d.code)) });
   if (Object.hasOwn(EVENT_KEY, e.code)) {
@@ -309,6 +313,9 @@ const CONN_CODE_KEY: Record<string, AdminKey> = {
   storage_auth_failed: "ce_storage_auth_failed", storage_forbidden: "ce_storage_forbidden", storage_repo_not_found: "ce_storage_repo_not_found",
   storage_rate_limited: "ce_storage_rate_limited", storage_unreachable: "ce_storage_unreachable", storage_bad_response: "ce_storage_bad_response",
   storage_not_configured: "ce_storage_not_configured", storage_config_invalid: "ce_storage_config_invalid",
+  storage_login_pending: "ce_storage_login_pending", oauth_denied: "ce_oauth_denied", oauth_timeout: "ce_oauth_timeout",
+  oauth_no_refresh_token: "ce_oauth_no_refresh_token", oauth_exchange_failed: "ce_oauth_exchange_failed", oauth_unreachable: "ce_oauth_unreachable",
+  oauth_cancelled: "ce_oauth_cancelled",
 };
 
 /** 통신 op 오류 코드 → 문구. 모르는 코드는 Hub 원문. */
@@ -354,9 +361,10 @@ export function parseStorageForm(i: { repo: string; token: string; intervalMin: 
 
 export function storageStatusLine(st: StorageStatus): string {
   if (!st.configured) return tr("storage_off");
-  const parts = [tr("storage_on", { repo: displayName(st.repo ?? ""), min: st.intervalMin ?? 5 })];
+  const parts = [st.kind === "google" ? tr("storage_on_google", { min: st.intervalMin ?? 5 }) : tr("storage_on", { repo: displayName(st.repo ?? ""), min: st.intervalMin ?? 5 })];
   parts.push(st.lastUploadAt ? tr("storage_last", { at: new Date(st.lastUploadAt).toLocaleString(localeOf(getLang())) }) : tr("storage_never"));
   if (st.lastError) parts.push(tr("storage_last_error", { detail: connErrorMessage(st.lastError, st.lastError) }));
+  if (st.prune?.enabled) parts.push(tr("prune_on", { days: st.prune.days }));
   return parts.join(" · ");
 }
 
@@ -368,4 +376,32 @@ export function verifyResultMessage(r: VerifyResult): string {
   if (r.breaks.length) parts.push(tr("verify_breaks", { count: r.breaks.length }));
   if (r.bad.length) parts.push(tr("verify_bad", { count: r.bad.length }));
   return parts.join(" · ");
+}
+
+// ───── 3b: Google Drive · 로컬 정리 ─────
+
+export function parseGoogleForm(i: { clientId: string; clientSecret: string; intervalMin: string }): { ok: true; value: GoogleInput } | { ok: false; error: string } {
+  const clientId = i.clientId.trim();
+  if (!clientId || /\s/.test(clientId)) return { ok: false, error: tr("form_client_id_invalid") };
+  const secret = i.clientSecret.trim();
+  if (/\s/.test(secret)) return { ok: false, error: tr("form_client_secret_invalid") };
+  const n = posInt(i.intervalMin);
+  if (n === null || n > 60) return { ok: false, error: tr("form_interval_invalid") };
+  return { ok: true, value: { clientId, ...(secret ? { clientSecret: secret } : {}), intervalMin: n } };
+}
+
+export function parsePruneForm(i: { enabled: boolean; days: string }): { ok: true; value: { enabled: boolean; days: number } } | { ok: false; error: string } {
+  const n = posInt(i.days);
+  if (n === null || n < 7 || n > 365) return { ok: false, error: tr("form_prune_days_invalid") };
+  return { ok: true, value: { enabled: i.enabled, days: n } };
+}
+
+/** Google 로그인 진행 줄. 진행 중·실패만 보이고, 없거나 끝났으면 빈 문자열. */
+export function loginStateLine(state: string | null): string {
+  if (state === "pending") return tr("login_pending");
+  if (state && state.startsWith("failed:")) {
+    const code = state.slice("failed:".length);
+    return tr("login_failed", { detail: connErrorMessage(code, code) });
+  }
+  return "";
 }

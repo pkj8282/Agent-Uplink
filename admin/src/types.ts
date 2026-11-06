@@ -48,8 +48,11 @@ export interface ConnStatus {
   events: ConnEvent[];
   /** 저장소(백업) 상태. 3a 이전 Hub는 없음 → null. */
   storage: StorageStatus | null;
+  /** Google 로그인 진행: "pending" | "done" | "failed:<code>" | null. */
+  storageLogin: string | null;
 }
-export interface StorageStatus { configured: boolean; kind?: "github"; repo?: string; intervalMin?: number; lastUploadAt: number | null; lastError: string | null; nextIndex: number; }
+export interface StorageStatus { configured: boolean; kind?: "github" | "google"; repo?: string; intervalMin?: number; lastUploadAt: number | null; lastError: string | null; nextIndex: number; prune?: { enabled: boolean; days: number; lastPruneAt: number | null }; }
+export interface GoogleInput { clientId: string; clientSecret?: string; intervalMin: number; }
 export interface StorageInput { repo: string; token: string; intervalMin: number; }
 export interface VerifyResult { fragments: number; messages: number; breaks: number[]; missing: number[]; bad: { path: string; code: string }[]; }
 export interface ConnCommsServer { serverId: string; name: string; channels: { channelId: string; name: string }[]; }
@@ -125,6 +128,10 @@ export interface AdminApi {
   connStorageUploadNow(): Promise<IpcResult<{ fragments: number; messages: number }>>;
   connStorageVerify(): Promise<IpcResult<VerifyResult>>;
   connStorageClear(): Promise<IpcResult<void>>;
+  /** Google 로그인 시작: main이 로그인 주소를 확인해 기본 브라우저로 연다. */
+  connStorageGoogleBegin(o: GoogleInput): Promise<IpcResult<void>>;
+  connStorageGoogleResult(): Promise<IpcResult<{ recoveryKey: string }>>;
+  connStoragePruneSet(o: { enabled: boolean; days: number }): Promise<IpcResult<void>>;
   // 통신 서버·채널 삭제(휴지통으로)
   connDeleteServer(serverId: string): Promise<IpcResult<void>>;
   connDeleteChannel(channelId: string): Promise<IpcResult<void>>;

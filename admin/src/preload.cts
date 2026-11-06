@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld("admin", {
   connStorageUploadNow: () => ipcRenderer.invoke("admin:connStorageUploadNow"),
   connStorageVerify: () => ipcRenderer.invoke("admin:connStorageVerify"),
   connStorageClear: () => ipcRenderer.invoke("admin:connStorageClear"),
+  connStorageGoogleBegin: (o: unknown) => ipcRenderer.invoke("admin:connStorageGoogleBegin", o),
+  connStorageGoogleResult: () => ipcRenderer.invoke("admin:connStorageGoogleResult"),
+  connStoragePruneSet: (o: unknown) => ipcRenderer.invoke("admin:connStoragePruneSet", o),
   connDeleteServer: (serverId: string) => ipcRenderer.invoke("admin:connDeleteServer", serverId),
   connDeleteChannel: (channelId: string) => ipcRenderer.invoke("admin:connDeleteChannel", channelId),
 });
