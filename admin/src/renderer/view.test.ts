@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount, parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage, connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage } from "./view.js";
+import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount, parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage, connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate } from "./view.js";
 import { setLang } from "./lang.js";
 import { hasHangul } from "../../../hub/testing.js";
 
@@ -334,4 +334,14 @@ test("v3 통신 문구 영어 화면에 한글 없음", () => {
   } finally {
     setLang("ko");
   }
+});
+
+test("ChangeGate: 값이 바뀐 목록만 다시 그린다(통신 탭 자동 갱신이 입력·포커스를 지우지 않게)", () => {
+  const g = new ChangeGate();
+  assert.equal(g.changed("members", [{ id: "m", online: true }]), true); // 처음
+  assert.equal(g.changed("members", [{ id: "m", online: true }]), false); // 같음
+  assert.equal(g.changed("members", [{ id: "m", online: false }]), true); // 끊김
+  assert.equal(g.changed("events", []), true); // 다른 목록은 따로
+  g.reset();
+  assert.equal(g.changed("members", [{ id: "m", online: false }]), true); // 언어 변경 등 강제 다시 그리기
 });

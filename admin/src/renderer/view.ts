@@ -316,3 +316,18 @@ export function connUnsupportedMessage(): string {
 export function saveBlockedMessage(files: string[]): string {
   return tr("save_blocked", { files: files.map((f) => displayName(f, 60)).join(", ") });
 }
+
+/** 목록별로 마지막에 그린 값을 기억해, 바뀐 목록만 다시 그리게 한다(통신 탭 자동 갱신). */
+export class ChangeGate {
+  private last = new Map<string, string>();
+  changed(key: string, value: unknown): boolean {
+    const v = JSON.stringify(value);
+    if (this.last.get(key) === v) return false;
+    this.last.set(key, v);
+    return true;
+  }
+  /** 다음 비교는 모두 '바뀜'(언어 변경·전체 새로고침 뒤 다시 그리기). */
+  reset(): void {
+    this.last.clear();
+  }
+}

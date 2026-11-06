@@ -4,7 +4,7 @@ import {
   emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage,
   restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount,
   parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage,
-  connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage,
+  connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate,
 } from "./view.js";
 import type { FormMessage } from "./view.js";
 import { getLang, setLang, tr } from "./lang.js";
@@ -73,6 +73,7 @@ function restoreFocus(): void {
 
 async function refresh(): Promise<void> {
   const t = snapshotSeq.begin();
+  connGate.reset();
   setState("loading");
   const [r, c] = await Promise.all([window.admin.snapshot(), window.admin.connStatus()]);
   if (!snapshotSeq.isLatest(t)) return; // 더 나중에 시작한 새로고침이 있으면 이 결과는 버린다
@@ -252,6 +253,8 @@ function renderSaveBlocked(s: Snapshot): void {
 
 /** 사용자가 고쳤지만 아직 제출하지 않은 통신 입력 — 새로고침이 덮어쓰지 않는다. */
 const connDirty = new Set<Element>();
+/** 바뀐 목록만 다시 그린다 — 자동 갱신이 입력 중인 채널 이름·포커스를 지우지 않게. 전체 새로고침은 다시 그린다. */
+const connGate = new ChangeGate();
 /** 공유 체크를 바꿨지만 저장하지 않은 상태(null = Hub 값대로). */
 let pendingShared: Set<string> | null = null;
 
@@ -318,95 +321,120 @@ function renderConn(c: IpcResult<ConnStatus>): void {
 
   // 통신 서버·채널 + 공유 체크
   const shared = pendingShared ?? new Set(s.server?.shared ?? []);
-  const comms = byId("conn-comms");
-  comms.replaceChildren();
-  if (s.comms.length === 0) comms.append(el("li", tr("conn_no_comms"), "empty"));
-  for (const srv of s.comms) {
-    const li = el("li");
-    li.dataset.kind = "conn-server";
-    const row = el("div", undefined, "row");
-    const share = el("label", undefined, "check");
-    const box = el("input");
-    box.type = "checkbox";
-    box.checked = shared.has(srv.serverId);
-    box.addEventListener("change", () => {
-      pendingShared ??= new Set(shared);
-      if (box.checked) pendingShared.add(srv.serverId);
-      else pendingShared.delete(srv.serverId);
-    });
-    share.append(box, el("span", tr("conn_share")));
-    const chName = el("input");
-    chName.type = "text";
-    chName.maxLength = 64;
-    chName.placeholder = tr("conn_new_channel_ph");
-    const add = el("button", tr("btn_conn_add_channel"));
-    add.type = "button";
-    add.addEventListener("click", () => {
-      const name = chName.value.trim();
-      if (!name) { showOpMsg({ text: tr("form_name_empty"), kind: "err" }); return; }
-      void connRun(add, () => window.admin.connCreateChannel(srv.serverId, name));
-    });
-    row.append(el("span", srv.name, "name"), el("span", srv.serverId, "id"), share, chName, add);
-    const sub = el("ul");
-    for (const ch of srv.channels) {
-      const cli = el("li", undefined, "row");
-      cli.dataset.kind = "conn-channel";
-      cli.append(el("span", `# ${ch.name}`, "name"), el("span", ch.channelId, "id"));
-      sub.append(cli);
+  if (connGate.changed("comms", [s.comms, [...shared].sort()])) {
+    const comms = byId("conn-comms");
+    comms.replaceChildren();
+    if (s.comms.length === 0) comms.append(el("li", tr("conn_no_comms"), "empty"));
+    for (const srv of s.comms) {
+      const li = el("li");
+      li.dataset.kind = "conn-server";
+      const row = el("div", undefined, "row");
+      const share = el("label", undefined, "check");
+      const box = el("input");
+      box.type = "checkbox";
+      box.checked = shared.has(srv.serverId);
+      box.addEventListener("change", () => {
+        pendingShared ??= new Set(shared);
+        if (box.checked) pendingShared.add(srv.serverId);
+        else pendingShared.delete(srv.serverId);
+      });
+      share.append(box, el("span", tr("conn_share")));
+      const chName = el("input");
+      chName.type = "text";
+      chName.maxLength = 64;
+      chName.placeholder = tr("conn_new_channel_ph");
+      const add = el("button", tr("btn_conn_add_channel"));
+      add.type = "button";
+      add.addEventListener("click", () => {
+        const name = chName.value.trim();
+        if (!name) { showOpMsg({ text: tr("form_name_empty"), kind: "err" }); return; }
+        void connRun(add, () => window.admin.connCreateChannel(srv.serverId, name));
+      });
+      row.append(el("span", srv.name, "name"), el("span", srv.serverId, "id"), share, chName, add);
+      const sub = el("ul");
+      for (const ch of srv.channels) {
+        const cli = el("li", undefined, "row");
+        cli.dataset.kind = "conn-channel";
+        cli.append(el("span", `# ${ch.name}`, "name"), el("span", ch.channelId, "id"));
+        sub.append(cli);
+      }
+      li.append(row, sub);
+      comms.append(li);
     }
-    li.append(row, sub);
-    comms.append(li);
   }
 
   // 구성원
-  const members = byId("conn-members");
-  members.replaceChildren();
-  if (s.members.length === 0) members.append(el("li", tr("conn_no_members"), "empty"));
-  for (const m of s.members) {
-    const li = el("li", undefined, "row");
-    li.dataset.kind = "conn-member";
-    const state = m.revoked ? tr("conn_member_revoked") : m.online ? tr("conn_member_online") : tr("conn_member_offline");
-    li.append(
-      el("span", m.userName, "name"),
-      el("span", `${new Date(m.joinedAt).toLocaleString(localeOf(getLang()))} · ${state}`, m.online && !m.revoked ? "meta online" : "meta"),
-    );
-    if (!m.revoked) {
-      const b = el("button", tr("btn_conn_revoke"), "danger");
-      b.type = "button";
-      b.addEventListener("click", () => {
-        if (!window.confirm(revokeConfirmMessage(m.userName))) return;
-        void connRun(b, () => window.admin.connRevoke(m.memberId));
-      });
-      li.append(b);
+  if (connGate.changed("members", s.members)) {
+    const members = byId("conn-members");
+    members.replaceChildren();
+    if (s.members.length === 0) members.append(el("li", tr("conn_no_members"), "empty"));
+    for (const m of s.members) {
+      const li = el("li", undefined, "row");
+      li.dataset.kind = "conn-member";
+      const state = m.revoked ? tr("conn_member_revoked") : m.online ? tr("conn_member_online") : tr("conn_member_offline");
+      li.append(
+        el("span", m.userName, "name"),
+        el("span", `${new Date(m.joinedAt).toLocaleString(localeOf(getLang()))} · ${state}`, m.online && !m.revoked ? "meta online" : "meta"),
+      );
+      if (!m.revoked) {
+        const b = el("button", tr("btn_conn_revoke"), "danger");
+        b.type = "button";
+        b.addEventListener("click", () => {
+          if (!window.confirm(revokeConfirmMessage(m.userName))) return;
+          void connRun(b, () => window.admin.connRevoke(m.memberId));
+        });
+        li.append(b);
+      }
+      members.append(li);
     }
-    members.append(li);
   }
 
   // 참여한 공간
-  const joined = byId("conn-joined");
-  joined.replaceChildren();
-  if (s.joined.length === 0) joined.append(el("li", tr("conn_no_joined"), "empty"));
-  for (const j of s.joined) {
-    const li = el("li", undefined, "row");
-    li.dataset.kind = "conn-joined";
-    li.append(
-      el("span", j.spaceName, "name"),
-      el("span", tr("conn_joined_meta", { host: j.hostUser, state: tr(j.connected ? "conn_connected" : "conn_disconnected") }), j.connected ? "meta online" : "meta"),
-    );
-    joined.append(li);
+  if (connGate.changed("joined", s.joined)) {
+    const joined = byId("conn-joined");
+    joined.replaceChildren();
+    if (s.joined.length === 0) joined.append(el("li", tr("conn_no_joined"), "empty"));
+    for (const j of s.joined) {
+      const li = el("li", undefined, "row");
+      li.dataset.kind = "conn-joined";
+      li.append(
+        el("span", j.spaceName, "name"),
+        el("span", tr("conn_joined_meta", { host: j.hostUser, state: tr(j.connected ? "conn_connected" : "conn_disconnected") }), j.connected ? "meta online" : "meta"),
+      );
+      joined.append(li);
+    }
   }
 
   // 최근 통신 사건(최근이 위)
-  const events = byId("conn-events");
-  events.replaceChildren();
-  if (s.events.length === 0) events.append(el("li", tr("conn_no_events"), "empty"));
-  for (const e of [...s.events].reverse()) {
-    const li = el("li", undefined, "row");
-    li.dataset.kind = "conn-event";
-    li.append(el("span", new Date(e.ts).toLocaleString(localeOf(getLang())), "meta"), el("span", connEventLine(e), "name"));
-    events.append(li);
+  if (connGate.changed("events", s.events)) {
+    const events = byId("conn-events");
+    events.replaceChildren();
+    if (s.events.length === 0) events.append(el("li", tr("conn_no_events"), "empty"));
+    for (const e of [...s.events].reverse()) {
+      const li = el("li", undefined, "row");
+      li.dataset.kind = "conn-event";
+      li.append(el("span", new Date(e.ts).toLocaleString(localeOf(getLang())), "meta"), el("span", connEventLine(e), "name"));
+      events.append(li);
+    }
   }
 }
+
+// 통신 탭 자동 갱신: 탭이 보이고 화면이 준비됐을 때 2초마다 통신 상태만 다시 받는다(다른 PC 쪽 변화 — 참여·끊김·퇴출).
+// 전체 새로고침(로딩·inert)은 하지 않는다. Hub가 꺼졌으면 전체 새로고침으로 넘겨 hubdown 화면을 띄운다.
+let connPolling = false;
+setInterval(async () => {
+  if (connPolling || document.hidden || byId("tab-conn").hidden || document.body.dataset.state !== "ready") return;
+  connPolling = true;
+  try {
+    const t = snapshotSeq.begin();
+    const r = await window.admin.connStatus();
+    if (!snapshotSeq.isLatest(t) || document.body.dataset.state !== "ready") return; // 그사이 전체 새로고침이 시작됨
+    if (!r.ok && r.hubDown) { void refresh(); return; }
+    renderConn(r);
+  } finally {
+    connPolling = false;
+  }
+}, 2000);
 
 function submitter(e: SubmitEvent): HTMLButtonElement | null {
   return e.submitter instanceof HTMLButtonElement ? e.submitter : null;
