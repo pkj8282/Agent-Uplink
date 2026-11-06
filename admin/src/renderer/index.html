@@ -103,6 +103,28 @@
           <div class="actions"><button id="conn-inv-copy" type="button" data-i18n="btn_copy"></button><span id="conn-inv-copy-msg" class="msg"></span></div>
         </div>
 
+        <h2 data-i18n="storage_heading"></h2>
+        <p class="hint" data-i18n="storage_hint"></p>
+        <p id="storage-state" class="meta"></p>
+        <form id="storage-form" class="form">
+          <label><span data-i18n="storage_repo"></span> <input id="storage-repo" type="text" autocomplete="off" maxlength="141" class="wide"></label>
+          <label><span data-i18n="storage_token"></span> <input id="storage-token" type="password" autocomplete="off" maxlength="500" class="wide"></label>
+          <label><span data-i18n="storage_interval"></span> <input id="storage-interval" type="text" inputmode="numeric" autocomplete="off" value="5"></label>
+          <div class="actions">
+            <button type="submit" data-i18n="btn_storage_set"></button>
+            <button id="storage-upload" type="button" data-i18n="btn_storage_upload"></button>
+            <button id="storage-verify" type="button" data-i18n="btn_storage_verify"></button>
+            <button id="storage-clear" type="button" class="danger" data-i18n="btn_storage_clear"></button>
+          </div>
+        </form>
+        <div id="storage-recovery" class="form" hidden>
+          <p class="name" data-i18n="storage_recovery_title"></p>
+          <textarea id="storage-recovery-key" readonly rows="2" spellcheck="false"></textarea>
+          <p class="hint" data-i18n="storage_recovery_hint"></p>
+          <div class="actions"><button id="storage-recovery-copy" type="button" data-i18n="btn_copy"></button><span id="storage-recovery-msg" class="msg"></span></div>
+        </div>
+        <p id="storage-verify-result" class="meta"></p>
+
         <h2 data-i18n="conn_members_heading"></h2>
         <ul id="conn-members" class="list"></ul>
 

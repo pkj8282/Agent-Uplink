@@ -1,8 +1,9 @@
 // 렌더러의 순수 로직(DOM 없음 → Node에서 테스트).
-import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
+import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, StorageInput, StorageStatus, VerifyResult, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
 import { oneLine } from "../text.js";
 import type { AdminKey } from "../messages.js";
-import { tr } from "./lang.js";
+import { getLang, tr } from "./lang.js";
+import { localeOf } from "../i18n.js";
 
 export interface ConfigFormInput {
   maxChannelsPerServer: string;
@@ -287,6 +288,8 @@ export function connEventLine(e: ConnEvent): string {
   if (e.code === "member_joined") return tr("ev_member_joined", { name: s(d.userName) });
   if (e.code === "member_revoked") return tr("ev_member_revoked", { name: s(d.userName) });
   if (e.code === "remote_text_too_long") return tr("ev_remote_text_too_long");
+  if (e.code === "storage_uploaded") return tr("ev_storage_uploaded", { fragments: Number(d.fragments) || 0, messages: Number(d.messages) || 0 });
+  if (e.code === "storage_upload_failed") return tr("ev_storage_upload_failed", { detail: connErrorMessage(typeof d.code === "string" ? d.code : undefined, s(d.code)) });
   if (Object.hasOwn(EVENT_KEY, e.code)) {
     const who = [d.ip, d.memberId, d.code, d.message, d.reason].map(s).filter(Boolean).join(" · ");
     return tr(EVENT_KEY[e.code], { who });
@@ -302,6 +305,9 @@ const CONN_CODE_KEY: Record<string, AdminKey> = {
   invite_bad_signature: "ce_invite_bad_signature", invite_expired: "ce_invite_expired", pin_mismatch: "ce_pin_mismatch",
   cipher_mismatch: "ce_cipher_mismatch", tls_failed: "ce_tls_failed", unreachable: "ce_unreachable", timeout: "ce_timeout",
   join_failed: "ce_join_failed", relay_unsupported: "ce_relay_unsupported",
+  storage_auth_failed: "ce_storage_auth_failed", storage_forbidden: "ce_storage_forbidden", storage_repo_not_found: "ce_storage_repo_not_found",
+  storage_rate_limited: "ce_storage_rate_limited", storage_unreachable: "ce_storage_unreachable", storage_bad_response: "ce_storage_bad_response",
+  storage_not_configured: "ce_storage_not_configured", storage_config_invalid: "ce_storage_config_invalid",
 };
 
 /** 통신 op 오류 코드 → 문구. 모르는 코드는 Hub 원문. */
@@ -330,4 +336,35 @@ export class ChangeGate {
   reset(): void {
     this.last.clear();
   }
+}
+
+// ───── 저장소(백업, v3.0 3a) ─────
+
+/** 저장소 연결 폼. 저장소 이름 형식은 Hub와 같은 규칙(owner/name), 주기 1~60분. */
+export function parseStorageForm(i: { repo: string; token: string; intervalMin: string }): { ok: true; value: StorageInput } | { ok: false; error: string } {
+  const repo = i.repo.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/.test(repo) || repo.endsWith("/.") || repo.endsWith("/..")) return { ok: false, error: tr("form_repo_invalid") };
+  const token = i.token.trim();
+  if (!token || /\s/.test(token)) return { ok: false, error: tr("form_token_invalid") };
+  const n = posInt(i.intervalMin);
+  if (n === null || n > 60) return { ok: false, error: tr("form_interval_invalid") };
+  return { ok: true, value: { repo, token, intervalMin: n } };
+}
+
+export function storageStatusLine(st: StorageStatus): string {
+  if (!st.configured) return tr("storage_off");
+  const parts = [tr("storage_on", { repo: displayName(st.repo ?? ""), min: st.intervalMin ?? 5 })];
+  parts.push(st.lastUploadAt ? tr("storage_last", { at: new Date(st.lastUploadAt).toLocaleString(localeOf(getLang())) }) : tr("storage_never"));
+  if (st.lastError) parts.push(tr("storage_last_error", { detail: connErrorMessage(st.lastError, st.lastError) }));
+  return parts.join(" · ");
+}
+
+export function verifyResultMessage(r: VerifyResult): string {
+  const head = tr("verify_counts", { fragments: r.fragments, messages: r.messages });
+  if (r.breaks.length === 0 && r.missing.length === 0 && r.bad.length === 0) return `${head} ${tr("verify_ok")}`;
+  const parts = [head];
+  if (r.missing.length) parts.push(tr("verify_missing", { count: r.missing.length, list: r.missing.slice(0, 10).join(", ") }));
+  if (r.breaks.length) parts.push(tr("verify_breaks", { count: r.breaks.length }));
+  if (r.bad.length) parts.push(tr("verify_bad", { count: r.bad.length }));
+  return parts.join(" · ");
 }

@@ -44,7 +44,12 @@ export interface ConnStatus {
   comms: ConnCommsServer[];
   /** 최근 통신 사건(오래된 것 → 최근, 최대 50). 1단계 Hub는 없음 → []. */
   events: ConnEvent[];
+  /** 저장소(백업) 상태. 3a 이전 Hub는 없음 → null. */
+  storage: StorageStatus | null;
 }
+export interface StorageStatus { configured: boolean; kind?: "github"; repo?: string; intervalMin?: number; lastUploadAt: number | null; lastError: string | null; nextIndex: number; }
+export interface StorageInput { repo: string; token: string; intervalMin: number; }
+export interface VerifyResult { fragments: number; messages: number; breaks: number[]; missing: number[]; bad: { path: string; code: string }[]; }
 export interface ConnCommsServer { serverId: string; name: string; channels: { channelId: string; name: string }[]; }
 export interface ConnEvent { ts: number; code: string; detail: Record<string, unknown>; }
 export interface ConnServerInput { port: number; profile: ConnProfile; spaceName: string; burnOnJoin: boolean; }
@@ -113,4 +118,9 @@ export interface AdminApi {
   connCreateInvite(o: ConnInviteInput): Promise<IpcResult<{ code: string; ipWarning: boolean }>>;
   connJoin(code: string): Promise<IpcResult<string>>;
   connRevoke(memberId: string): Promise<IpcResult<void>>;
+  // 저장소(백업, v3.0 3a)
+  connStorageSet(o: StorageInput): Promise<IpcResult<{ recoveryKey: string }>>;
+  connStorageUploadNow(): Promise<IpcResult<{ fragments: number; messages: number }>>;
+  connStorageVerify(): Promise<IpcResult<VerifyResult>>;
+  connStorageClear(): Promise<IpcResult<void>>;
 }

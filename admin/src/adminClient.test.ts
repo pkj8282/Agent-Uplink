@@ -457,6 +457,9 @@ test("conn_ops_via_admin_client: 관리 앱 클라이언트로 통신 서버 켜
     assert.equal(st.userName, "에이");
     assert.deepEqual(st.comms, [{ serverId, name: "팀작업", channels: [{ channelId, name: "main" }] }]);
     assert.ok(Array.isArray(st.events));
+    assert.equal(st.storage?.configured, false);
+    const nc = await toResult(() => client.connStorageUploadNow());
+    assert.equal(!nc.ok && nc.code, "storage_not_configured");
     assert.deepEqual((await client.snapshot()).saveBlocked, []);
     const bad = await toResult(() => client.connRevoke("nope"));
     assert.equal(bad.ok, false);
@@ -478,6 +481,7 @@ test("conn_status_old_fields_default: comms·events가 없는 응답(1단계 Hub
   const st = await c.connStatus();
   assert.deepEqual(st.comms, []);
   assert.deepEqual(st.events, []);
+  assert.equal(st.storage, null);
   assert.equal((await c.snapshot()).saveBlocked, undefined);
   f.close();
 });

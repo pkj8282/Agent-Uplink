@@ -4,7 +4,7 @@ import {
   emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage,
   restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount,
   parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage,
-  connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate,
+  connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, storageStatusLine, verifyResultMessage,
 } from "./view.js";
 import type { FormMessage } from "./view.js";
 import { getLang, setLang, tr } from "./lang.js";
@@ -258,7 +258,7 @@ const connGate = new ChangeGate();
 /** 공유 체크를 바꿨지만 저장하지 않은 상태(null = Hub 값대로). */
 let pendingShared: Set<string> | null = null;
 
-for (const id of ["conn-user-form", "conn-server-form", "conn-invite-form"]) {
+for (const id of ["conn-user-form", "conn-server-form", "conn-invite-form", "storage-form"]) {
   byId(id).addEventListener("input", (e) => { if (e.target instanceof Element) connDirty.add(e.target); });
   byId(id).addEventListener("change", (e) => { if (e.target instanceof Element) connDirty.add(e.target); });
 }
@@ -318,6 +318,15 @@ function renderConn(c: IpcResult<ConnStatus>): void {
   byId<HTMLButtonElement>("conn-disable").disabled = !enabled;
   byId<HTMLButtonElement>("conn-inv-submit").disabled = !enabled;
   byId("conn-inv-needs").hidden = enabled;
+
+  // 저장소(백업)
+  const sto = s.storage;
+  byId("storage-state").textContent = sto ? storageStatusLine(sto) : tr("storage_off");
+  for (const id of ["storage-upload", "storage-verify", "storage-clear"]) byId<HTMLButtonElement>(id).disabled = !sto?.configured;
+  if (sto?.configured) {
+    setIfClean(byId<HTMLInputElement>("storage-repo"), sto.repo ?? "");
+    setIfClean(byId<HTMLInputElement>("storage-interval"), String(sto.intervalMin ?? 5));
+  }
 
   // 통신 서버·채널 + 공유 체크
   const shared = pendingShared ?? new Set(s.server?.shared ?? []);
@@ -498,6 +507,56 @@ byId<HTMLFormElement>("conn-invite-form").addEventListener("submit", (e) => {
     byId("conn-inv-out").hidden = false;
     byId<HTMLInputElement>("conn-inv-label").value = "";
   });
+});
+
+/** 읽기 전용 상자의 내용을 복사한다(실패하면 선택해 두고 직접 복사하라고 알림). */
+async function copyBox(areaId: string, msgId: string): Promise<void> {
+  const area = byId<HTMLTextAreaElement>(areaId);
+  const m = byId(msgId);
+  let ok = false;
+  try {
+    await navigator.clipboard.writeText(area.value);
+    ok = true;
+  } catch {
+    area.select();
+    try { ok = document.execCommand("copy"); } catch { ok = false; }
+  }
+  m.textContent = tr(ok ? "copied" : "copy_failed");
+  m.className = `msg ${ok ? "ok" : "err"}`;
+}
+
+byId("storage-recovery-copy").addEventListener("click", () => void copyBox("storage-recovery-key", "storage-recovery-msg"));
+
+byId<HTMLFormElement>("storage-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const tokenBox = byId<HTMLInputElement>("storage-token");
+  const parsed = parseStorageForm({ repo: byId<HTMLInputElement>("storage-repo").value, token: tokenBox.value, intervalMin: byId<HTMLInputElement>("storage-interval").value });
+  if (!parsed.ok) { showOpMsg({ text: parsed.error, kind: "err" }); return; }
+  clearDirty(byId("storage-form"));
+  void connRun(submitter(e), () => window.admin.connStorageSet(parsed.value), (d) => {
+    tokenBox.value = ""; // 토큰은 화면에 남기지 않는다
+    byId<HTMLTextAreaElement>("storage-recovery-key").value = d.recoveryKey;
+    byId("storage-recovery-msg").textContent = "";
+    byId("storage-recovery").hidden = false;
+  });
+});
+
+byId("storage-upload").addEventListener("click", () => {
+  void connRun(byId<HTMLButtonElement>("storage-upload"), () => window.admin.connStorageUploadNow(), (d) => tr("storage_uploaded_ok", d));
+});
+
+byId("storage-verify").addEventListener("click", () => {
+  const out = byId("storage-verify-result");
+  out.textContent = "";
+  void connRun(byId<HTMLButtonElement>("storage-verify"), () => window.admin.connStorageVerify(), (d) => {
+    out.textContent = verifyResultMessage(d);
+    return verifyResultMessage(d);
+  });
+});
+
+byId("storage-clear").addEventListener("click", () => {
+  if (!window.confirm(tr("storage_clear_confirm"))) return;
+  void connRun(byId<HTMLButtonElement>("storage-clear"), () => window.admin.connStorageClear(), () => { byId("storage-recovery").hidden = true; });
 });
 
 byId("conn-inv-copy").addEventListener("click", async () => {

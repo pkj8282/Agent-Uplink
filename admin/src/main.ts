@@ -122,6 +122,13 @@ handle("admin:connCreateInvite", (arg) => toResult(() => {
 }));
 handle("admin:connJoin", (code) => toResult(() => client.connJoin(asStr(code))));
 handle("admin:connRevoke", (id) => toResult(() => client.connRevoke(asId(id))));
+handle("admin:connStorageSet", (arg) => toResult(() => {
+  const o = asObj(arg);
+  return client.connStorageSet({ repo: asStr(o.repo, 200), token: asStr(o.token, 500), intervalMin: asNum(o.intervalMin) });
+}));
+handle("admin:connStorageUploadNow", () => toResult(() => client.connStorageUploadNow()));
+handle("admin:connStorageVerify", () => toResult(() => client.connStorageVerify()));
+handle("admin:connStorageClear", () => toResult(() => client.connStorageClear()));
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({

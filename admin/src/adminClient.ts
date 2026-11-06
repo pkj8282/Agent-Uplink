@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { encodeFrame, FrameDecoder } from "./framing.js";
 import { newNonce, isNonce, clientProof, hubProof, proofEquals, readClientKeyFile } from "./auth.js";
-import type { AdminConfig, ConfigPatch, ConnProfile, ConnStatus, IpcResult, NameConflict, RestoreReport, Snapshot } from "./types.js";
+import type { AdminConfig, ConfigPatch, ConnProfile, ConnStatus, IpcResult, StorageInput, VerifyResult, NameConflict, RestoreReport, Snapshot } from "./types.js";
 import { effectiveLang, type Lang } from "./i18n.js";
 import { readLanguageFile } from "./langFile.js";
 import { adminMsg, LEGACY_UNKNOWN_OP, type AdminKey } from "./messages.js";
@@ -140,7 +140,7 @@ export class AdminClient {
   // ───── 통신(v3.0) ─────
   async connStatus(): Promise<ConnStatus> {
     const r = await this.call("admin_conn_status", {});
-    return { server: r.server ?? null, members: r.members ?? [], joined: r.joined ?? [], userName: r.userName ?? null, comms: r.comms ?? [], events: r.events ?? [] };
+    return { server: r.server ?? null, members: r.members ?? [], joined: r.joined ?? [], userName: r.userName ?? null, comms: r.comms ?? [], events: r.events ?? [], storage: r.storage ?? null };
   }
   async connSetUser(name: string): Promise<string> { return (await this.call("admin_conn_set_user", { name })).name; }
   async connEnableServer(o: { port: number; bindHost?: string; profile: ConnProfile; spaceName: string; burnOnJoin: boolean }): Promise<number> {
@@ -157,6 +157,19 @@ export class AdminClient {
   }
   async connJoin(code: string): Promise<string> { return (await this.call("admin_conn_join", { code })).spaceId; }
   async connRevoke(memberId: string): Promise<void> { await this.call("admin_conn_revoke", { memberId }); }
+  /** 저장소 연결. 토큰은 Hub로만 보내고 여기서 기억하지 않는다. 복구 키는 이 응답에서만 온다. */
+  async connStorageSet(o: StorageInput): Promise<{ recoveryKey: string }> {
+    return { recoveryKey: (await this.call("admin_conn_storage_set", { kind: "github", repo: o.repo, ghToken: o.token, intervalMin: o.intervalMin })).recoveryKey };
+  }
+  async connStorageUploadNow(): Promise<{ fragments: number; messages: number }> {
+    const r = await this.call("admin_conn_storage_upload_now", {});
+    return { fragments: r.fragments, messages: r.messages };
+  }
+  async connStorageVerify(): Promise<VerifyResult> {
+    const r = await this.call("admin_conn_storage_verify", {});
+    return { fragments: r.fragments, messages: r.messages, breaks: r.breaks ?? [], missing: r.missing ?? [], bad: r.bad ?? [] };
+  }
+  async connStorageClear(): Promise<void> { await this.call("admin_conn_storage_clear", {}); }
 
   /** 뷰어를 열 1회용 티켓 URL. */
   async viewerTicket(): Promise<string> {

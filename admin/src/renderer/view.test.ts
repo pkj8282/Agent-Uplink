@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount, parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage, connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate } from "./view.js";
+import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount, parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage, connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, storageStatusLine, verifyResultMessage } from "./view.js";
 import { setLang } from "./lang.js";
 import { hasHangul } from "../../../hub/testing.js";
 
@@ -344,4 +344,36 @@ test("ChangeGate: 값이 바뀐 목록만 다시 그린다(통신 탭 자동 갱
   assert.equal(g.changed("events", []), true); // 다른 목록은 따로
   g.reset();
   assert.equal(g.changed("members", [{ id: "m", online: false }]), true); // 언어 변경 등 강제 다시 그리기
+});
+
+// ── v3.0 3a: 저장소(백업) ──
+test("parseStorageForm: 저장소 owner/name, 토큰, 주기 1~60분", () => {
+  const base = { repo: "me/backup", token: "github_pat_x", intervalMin: "5" };
+  assert.deepEqual(parseStorageForm(base), { ok: true, value: { repo: "me/backup", token: "github_pat_x", intervalMin: 5 } });
+  assert.deepEqual(parseStorageForm({ ...base, repo: " me/backup ", token: " github_pat_x " }), { ok: true, value: { repo: "me/backup", token: "github_pat_x", intervalMin: 5 } });
+  for (const repo of ["me", "me/a/b", "", "a/b c"]) assert.equal(parseStorageForm({ ...base, repo }).ok, false, repo);
+  for (const token of ["", "  ", "a b"]) assert.equal(parseStorageForm({ ...base, token }).ok, false, token);
+  for (const intervalMin of ["0", "61", "x"]) assert.equal(parseStorageForm({ ...base, intervalMin }).ok, false, intervalMin);
+  assert.equal(parseStorageForm({ ...base, intervalMin: "60" }).ok, true);
+});
+
+test("storageStatusLine·verifyResultMessage: 상태와 검증 결과 문구", () => {
+  assert.match(storageStatusLine({ configured: false, lastUploadAt: null, lastError: null, nextIndex: 0 }), /연결 안 됨/);
+  const on = storageStatusLine({ configured: true, kind: "github", repo: "me/backup", intervalMin: 5, lastUploadAt: null, lastError: null, nextIndex: 0 });
+  assert.match(on, /me\/backup/);
+  assert.match(on, /5분/);
+  assert.match(storageStatusLine({ configured: true, kind: "github", repo: "me/b", intervalMin: 5, lastUploadAt: 1, lastError: "storage_auth_failed", nextIndex: 3 }), /토큰/);
+  assert.match(verifyResultMessage({ fragments: 3, messages: 10, breaks: [], missing: [], bad: [] }), /이상 없음/);
+  const warn = verifyResultMessage({ fragments: 2, messages: 7, breaks: [2], missing: [1], bad: [{ path: "p", code: "frag_bad_signature" }] });
+  assert.match(warn, /빠진 조각 1/);
+  assert.match(warn, /변조/);
+  setLang("en");
+  try {
+    for (const s of [storageStatusLine({ configured: false, lastUploadAt: null, lastError: null, nextIndex: 0 }), verifyResultMessage({ fragments: 1, messages: 1, breaks: [1], missing: [0], bad: [] }),
+      connErrorMessage("storage_rate_limited", ""), connEventLine({ ts: 1, code: "storage_uploaded", detail: { fragments: 1, messages: 2 } })]) assert.equal(hasHangul(s), false, s);
+    const bad = parseStorageForm({ repo: "", token: "", intervalMin: "" });
+    assert.equal(!bad.ok && hasHangul(bad.error), false);
+  } finally {
+    setLang("ko");
+  }
 });
