@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount, parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage, connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, storageStatusLine, verifyResultMessage } from "./view.js";
-import { setLang } from "./lang.js";
+import { setLang, tr } from "./lang.js";
 import { hasHangul } from "../../../hub/testing.js";
 
 // 아래 기존 단정은 한국어 화면 기준이다. 영어는 맨 아래 테스트에서 따로 본다.
@@ -373,6 +373,17 @@ test("storageStatusLine·verifyResultMessage: 상태와 검증 결과 문구", (
       connErrorMessage("storage_rate_limited", ""), connEventLine({ ts: 1, code: "storage_uploaded", detail: { fragments: 1, messages: 2 } })]) assert.equal(hasHangul(s), false, s);
     const bad = parseStorageForm({ repo: "", token: "", intervalMin: "" });
     assert.equal(!bad.ok && hasHangul(bad.error), false);
+  } finally {
+    setLang("ko");
+  }
+});
+
+test("복구 키 경고: 잃으면 못 읽음 + 가진 사람은 누구나 읽음(보내지 말 것) — 지휘 관문 ③", () => {
+  assert.match(tr("storage_recovery_hint"), /누구나 백업을 읽을 수/);
+  assert.match(tr("storage_recovery_hint"), /붙여 넣지 마세요/);
+  setLang("en");
+  try {
+    assert.match(tr("storage_recovery_hint"), /Anyone who has this key can read the backup/);
   } finally {
     setLang("ko");
   }
