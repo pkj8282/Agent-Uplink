@@ -430,3 +430,14 @@ test("Google 상태·로그인 줄·새 사건 문구, 영어 화면에 한글 �
     setLang("ko");
   }
 });
+
+test("로컬 정리 확인창: 정리 뒤 저장소 백업이 유일한 사본임을 알림 — 지휘 관문", () => {
+  assert.match(tr("prune_confirm", { days: 30 }), /유일한 사본/);
+  assert.match(tr("prune_confirm", { days: 30 }), /되찾을 수 없습니다/);
+  setLang("en");
+  try {
+    assert.match(tr("prune_confirm", { days: 30 }), /the only copy/);
+  } finally {
+    setLang("ko");
+  }
+});

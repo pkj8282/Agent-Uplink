@@ -273,7 +273,7 @@ export const ADMIN_MESSAGES = defineCatalog({
     prune_enabled: "검증된 백업 중 오래된 통신 대화를 이 PC에서 지움(기본 꺼짐)",
     prune_days: "기준(일)",
     btn_prune_save: "정리 설정 저장",
-    prune_confirm: (p: { days: number }) => `로컬 정리를 켭니다. 저장소에 올라가 검증된 백업 중 ${p.days}일 지난 통신 대화를 이 PC에서 지웁니다.\n- 휴지통을 거치지 않습니다.\n- 지운 대화를 다른 PC에서 읽으려면 복구 키가 필요합니다.\n켤까요?`,
+    prune_confirm: (p: { days: number }) => `로컬 정리를 켭니다. 저장소에 올라가 검증된 백업 중 ${p.days}일 지난 통신 대화를 이 PC에서 지웁니다.\n- 휴지통을 거치지 않습니다.\n- 지운 대화를 다른 PC에서 읽으려면 복구 키가 필요합니다.\n- 이후에는 저장소의 백업이 유일한 사본입니다. 저장소에서 지우거나 복구 키를 잃으면 되찾을 수 없습니다.\n켤까요?`,
     prune_on: (p: { days: number }) => `로컬 정리 ${p.days}일`,
     // 저장소(백업, 3a)
     form_repo_invalid: "저장소는 owner/name 형식이어야 합니다.",
@@ -572,7 +572,7 @@ export const ADMIN_MESSAGES = defineCatalog({
     prune_enabled: "Delete old connection conversations from this PC once they are backed up and verified (off by default)",
     prune_days: "Age (days)",
     btn_prune_save: "Save cleanup settings",
-    prune_confirm: (p: { days: number }) => `Turn on local cleanup. Connection conversations older than ${p.days} days that are uploaded and verified will be deleted from this PC.\n- They do not go to the trash.\n- Reading them on another PC requires the recovery key.\nTurn it on?`,
+    prune_confirm: (p: { days: number }) => `Turn on local cleanup. Connection conversations older than ${p.days} days that are uploaded and verified will be deleted from this PC.\n- They do not go to the trash.\n- Reading them on another PC requires the recovery key.\n- From then on, the backup in storage is the only copy. If it is deleted from storage or the recovery key is lost, it cannot be recovered.\nTurn it on?`,
     prune_on: (p: { days: number }) => `local cleanup ${p.days} days`,
     // Storage (backup, 3a)
     form_repo_invalid: "The repository must look like owner/name.",
