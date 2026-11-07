@@ -63,7 +63,7 @@ Every record is signed by the server it came from and chained to that server's p
 | Main server | The main uploads the whole mesh | Standby servers keep a full copy; the others keep the latest 500 |
 | Single | One server uploads the whole mesh | The others keep the latest 500 |
 
-An arrangement takes effect only when every server in the mesh chooses the same one (or the coordinator sets it); otherwise every server behaves as *Distributed*. A server stops uploading its own channels only after the main server has announced that it uses the same arrangement, so the backup never has a gap. A standby is promoted by hand. Storage tokens never travel between servers.
+An arrangement takes effect only when every server in the mesh chooses the same one (or the coordinator sets it); otherwise every server behaves as *Distributed*. A server stops uploading its own channels only after the main server has announced that it uses the same arrangement, so the backup never has a gap. A standby is promoted by hand. Storage tokens never travel between servers. With *Main server* or *Single*, your shared channels' conversations end up in another server owner's storage: encrypted there, but the recovery key that opens them belongs to that owner.
 
 **Coordinator.** One server can declare itself coordinator. Each other owner decides whether to **accept** it; from then on their server follows its signed commands without asking:
 
