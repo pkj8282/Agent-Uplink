@@ -2,7 +2,7 @@
 // 형식 {body, signer, sig}. 서명 대상 = "agent-uplink/v3/envelope\n" + 정규화 JSON(키 정렬) — 키 순서가 달라도 같은 본문.
 import { signB64, verifyB64 } from "./connCrypto.js";
 
-function canonical(v: unknown): string {
+export function canonical(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
   if (v && typeof v === "object") {
     const o = v as Record<string, unknown>;
