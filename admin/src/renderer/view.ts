@@ -1,5 +1,5 @@
 // 렌더러의 순수 로직(DOM 없음 → Node에서 테스트).
-import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, StorageInput, StorageStatus, SupabaseInput, VerifyResult, Space1CreateInput, Space1JoinInput, Space1Status, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
+import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, StorageInput, StorageStatus, SupabaseInput, VerifyResult, Space1CreateInput, Space1JoinInput, Space1Status, MeshCaseChoice, MeshCommand, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
 import { oneLine } from "../text.js";
 import type { AdminKey } from "../messages.js";
 import { getLang, tr } from "./lang.js";
@@ -294,6 +294,14 @@ export function connEventLine(e: ConnEvent): string {
   if (e.code === "space1_member_revoked") return tr("ev_s1_revoked", { name: s(d.userName) });
   if (e.code === "space1_sync_failed") return tr("ev_s1_sync_failed", { detail: connErrorMessage(typeof d.code === "string" ? d.code : undefined, s(d.code)) });
   if (e.code === "space1_fragment_rejected" || e.code === "space1_roster_rejected" || e.code === "space1_request_rejected") return tr("ev_s1_rejected");
+  if (e.code === "link_added") return tr("ev_link_added", { name: s(d.spaceName) });
+  if (e.code === "link_joined") return tr("ev_link_joined", { name: s(d.spaceName) });
+  if (e.code === "link_removed") return tr("ev_link_removed");
+  if (e.code === "link_connect_failed") return tr("ev_link_failed", { detail: connErrorMessage(typeof d.code === "string" ? d.code : undefined, s(d.code)) });
+  if (e.code === "mesh_link_dropped") return tr("ev_mesh_link_dropped");
+  if (e.code.startsWith("mesh_reject_")) return tr("ev_mesh_reject");
+  if (e.code === "gov_command_applied") return tr("ev_gov_applied", { type: s(d.type) });
+  if (e.code === "mesh_channel_unshared_by_coordinator") return tr("ev_mesh_unshared_by_coord");
   if (e.code === "prune_done") return tr("ev_prune_done", { removed: Number(d.removed) || 0 });
   if (e.code === "prune_skipped") return tr("ev_prune_skipped");
   if (e.code === "storage_uploaded") return tr("ev_storage_uploaded", { fragments: Number(d.fragments) || 0, messages: Number(d.messages) || 0 });
@@ -306,6 +314,8 @@ export function connEventLine(e: ConnEvent): string {
 }
 
 const CONN_CODE_KEY: Record<string, AdminKey> = {
+  not_link_invite: "ce_not_link_invite", link_self: "ce_link_self", link_join_failed: "ce_link_join_failed", link_not_found: "ce_link_not_found",
+  not_coordinator: "ce_not_coordinator", relay_timeout: "ce_relay_timeout", relay_write_blocked: "ce_relay_write_blocked",
   server_not_enabled: "ce_server_not_enabled", server_not_found: "ce_server_not_found", port_invalid: "ce_port_invalid",
   profile_invalid: "ce_profile_invalid", host_invalid: "ce_host_invalid", expires_invalid: "ce_expires_invalid",
   name_invalid: "ce_name_invalid", shared_invalid: "ce_shared_invalid", member_not_found: "ce_member_not_found",
@@ -441,4 +451,54 @@ export function space1RevokeConfirm(name: string): string {
 
 export function space1LeaveConfirm(name: string): string {
   return tr("s1_leave_confirm", { name: displayName(name) });
+}
+
+// ───── 서버 연결(방식 3, v3.0 5단계) ─────
+
+export function parseMeshCaseForm(i: { kase: string; main: string; standby: string[] }): { ok: true; value: MeshCaseChoice } | { ok: false; error: string } {
+  if (i.kase === "distributed") return { ok: true, value: { case: "distributed", standby: [] } };
+  if (i.kase !== "main" && i.kase !== "single") return { ok: false, error: tr("form_mesh_case_invalid") };
+  const main = i.main.trim();
+  if (!main) return { ok: false, error: tr("form_mesh_main_invalid") };
+  const standby = i.kase === "main" ? [...new Set(i.standby)].filter((s) => s && s !== main) : [];
+  return { ok: true, value: { case: i.kase, main, standby } };
+}
+
+export function meshCaseLabel(c: MeshCaseChoice, nameOf: (id: string) => string): string {
+  if (c.case === "distributed" || !c.main) return tr("mesh_label_distributed");
+  const main = displayName(nameOf(c.main));
+  return c.case === "main" ? tr("mesh_label_main", { main }) : tr("mesh_label_single", { main });
+}
+
+export function meshUploadLine(u: { own: boolean; mirrors: number }): string {
+  if (!u.own) return tr("mesh_upload_none");
+  return u.mirrors > 0 ? tr("mesh_upload_own_mirrors", { n: u.mirrors }) : tr("mesh_upload_own");
+}
+
+export function meshInviteConfirm(label: string, host: string): string {
+  return tr("mesh_invite_confirm", { label: displayName(label), host: displayName(host, 253) });
+}
+
+export function meshRemoveConfirm(name: string): string {
+  return tr("mesh_remove_confirm", { name: displayName(name) });
+}
+
+export function meshAcceptConfirm(name: string): string {
+  return tr("mesh_accept_confirm", { name: displayName(name) });
+}
+
+export function meshUnacceptConfirm(name: string): string {
+  return tr("mesh_unaccept_confirm", { name: displayName(name) });
+}
+
+export function meshCommandWhat(cmd: MeshCommand, nameOf: (id: string) => string, channelName: (origin: string, ch: string) => string): string {
+  if (cmd.type === "case") return tr("mesh_what_case", { label: meshCaseLabel(cmd.choice, nameOf) });
+  if (cmd.type === "cut") return tr("mesh_what_cut", { name: displayName(nameOf(cmd.target)) });
+  if (cmd.type === "unshare") return tr("mesh_what_unshare", { name: displayName(nameOf(cmd.target)), ch: displayName(channelName(cmd.target, cmd.ch) || cmd.ch) });
+  const name = displayName(nameOf(cmd.entry));
+  return cmd.hubUser ? tr("mesh_what_nowrite_user", { name, user: displayName(cmd.hubUser) }) : tr("mesh_what_nowrite", { name });
+}
+
+export function meshCommandConfirm(what: string): string {
+  return tr("mesh_cmd_confirm", { what });
 }

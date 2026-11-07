@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { encodeFrame, FrameDecoder } from "./framing.js";
 import { newNonce, isNonce, clientProof, hubProof, proofEquals, readClientKeyFile } from "./auth.js";
+import type { MeshCaseChoice, MeshCommand } from "./types.js";
 import type { AdminConfig, ConfigPatch, ConnProfile, ConnStatus, IpcResult, StorageInput, SupabaseInput, VerifyResult, Space1CreateInput, Space1JoinInput, NameConflict, RestoreReport, Snapshot } from "./types.js";
 import { effectiveLang, type Lang } from "./i18n.js";
 import { readLanguageFile } from "./langFile.js";
@@ -140,7 +141,7 @@ export class AdminClient {
   // ───── 통신(v3.0) ─────
   async connStatus(): Promise<ConnStatus> {
     const r = await this.call("admin_conn_status", {});
-    return { server: r.server ?? null, members: r.members ?? [], joined: r.joined ?? [], userName: r.userName ?? null, comms: r.comms ?? [], events: r.events ?? [], storage: r.storage ?? null, spaces1: r.spaces1 ?? [] };
+    return { server: r.server ?? null, members: r.members ?? [], joined: r.joined ?? [], userName: r.userName ?? null, comms: r.comms ?? [], events: r.events ?? [], storage: r.storage ?? null, spaces1: r.spaces1 ?? [], mesh: r.mesh ?? null };
   }
   async connSetUser(name: string): Promise<string> { return (await this.call("admin_conn_set_user", { name })).name; }
   async connEnableServer(o: { port: number; bindHost?: string; profile: ConnProfile; spaceName: string; burnOnJoin: boolean }): Promise<number> {
@@ -165,6 +166,19 @@ export class AdminClient {
   async connStorageSetSupabase(o: SupabaseInput): Promise<{ recoveryKey: string }> {
     return { recoveryKey: (await this.call("admin_conn_storage_set", { kind: "supabase", url: o.url, key: o.key, bucket: o.bucket, intervalMin: o.intervalMin })).recoveryKey };
   }
+  // ───── 서버 연결(방식 3) ─────
+  async connMeshInvite(label: string, host: string, expiresInMs: number): Promise<{ code: string; ipWarning: boolean }> {
+    const r = await this.call("admin_conn_mesh_invite", { label, host, expiresInMs });
+    return { code: r.code, ipWarning: r.ipWarning === true };
+  }
+  async connMeshJoin(code: string): Promise<string> { return (await this.call("admin_conn_mesh_join", { code })).spaceId; }
+  async connMeshRemove(spaceId: string): Promise<void> { await this.call("admin_conn_mesh_remove", { spaceId }); }
+  async connMeshSetShared(serverIds: string[]): Promise<void> { await this.call("admin_conn_mesh_set_shared", { serverIds }); }
+  async connMeshSetCase(choice: MeshCaseChoice): Promise<void> { await this.call("admin_conn_mesh_set_case", { choice }); }
+  async connMeshCoordinator(on: boolean): Promise<void> { await this.call("admin_conn_mesh_coordinator", { on }); }
+  async connMeshAccept(spaceId: string | null): Promise<void> { await this.call("admin_conn_mesh_accept", { spaceId }); }
+  async connMeshCommand(cmd: MeshCommand): Promise<void> { await this.call("admin_conn_mesh_command", { cmd }); }
+
   // ───── 공간(방식 1) ─────
   async connS1Create(o: Space1CreateInput): Promise<string> { return (await this.call("admin_conn_s1_create", { ...o })).spaceId; }
   async connS1Invite(spaceId: string, label: string, expiresInMs: number): Promise<string> { return (await this.call("admin_conn_s1_invite", { spaceId, label, expiresInMs })).code; }

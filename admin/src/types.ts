@@ -50,10 +50,31 @@ export interface ConnStatus {
   storage: StorageStatus | null;
   /** 방식 1 공간(v3.0 4단계). 이전 Hub는 없음 → []. */
   spaces1: Space1Status[];
+  /** 방식 3 망(v3.0 5단계). 통신 서버가 없거나 이전 Hub → null. */
+  mesh: MeshStatus | null;
 }
 export interface Space1Status {
   spaceId: string; spaceName: string; role: "owner" | "member"; state: "pending" | "active" | "revoked"; repo: string; epoch: number;
   members: { hubId: string; userName: string; revoked: boolean; me: boolean }[]; lastSyncAt: number | null; lastError: string | null;
+}
+export interface MeshCaseChoice { case: "distributed" | "main" | "single"; main?: string; standby: string[]; }
+export type MeshCommand =
+  | { type: "case"; choice: MeshCaseChoice }
+  | { type: "cut"; target: string }
+  | { type: "unshare"; target: string; ch: string }
+  | { type: "noWrite"; entry: string; hubUser?: string };
+export interface MeshStatus {
+  self: string;
+  shared: string[];
+  excluded: string[];
+  links: { spaceId: string; spaceName: string; dir: "in" | "out"; fingerprint: string; connected: boolean }[];
+  servers: { spaceId: string; spaceName: string; channelCount: number; direct: boolean }[];
+  /** 망 서버별 채널(이름 표시·공유 중단 명령 대상 고르기). */
+  channels?: { spaceId: string; channels: { id: string; name: string }[] }[];
+  gov: {
+    choice: MeshCaseChoice; effective: MeshCaseChoice; coordinator: boolean; accepted: string | null; coordinators: string[];
+    blocked: string[]; unshared: { origin: string; ch: string }[]; noWrite: { entry: string; hubUser?: string }[]; upload: { own: boolean; mirrors: number };
+  } | null;
 }
 export interface Space1CreateInput { spaceName: string; localServerId: string; repo: string; ghToken: string; intervalSec: number; }
 export interface Space1JoinInput { code: string; ghToken: string; }
@@ -142,6 +163,15 @@ export interface AdminApi {
   connS1Revoke(spaceId: string, hubId: string): Promise<IpcResult<void>>;
   connS1SyncNow(spaceId: string): Promise<IpcResult<void>>;
   connS1Leave(spaceId: string): Promise<IpcResult<void>>;
+  // 서버 연결(방식 3, v3.0 5단계)
+  connMeshInvite(label: string, host: string, expiresInMs: number): Promise<IpcResult<{ code: string; ipWarning: boolean }>>;
+  connMeshJoin(code: string): Promise<IpcResult<string>>;
+  connMeshRemove(spaceId: string): Promise<IpcResult<void>>;
+  connMeshSetShared(serverIds: string[]): Promise<IpcResult<void>>;
+  connMeshSetCase(choice: MeshCaseChoice): Promise<IpcResult<void>>;
+  connMeshCoordinator(on: boolean): Promise<IpcResult<void>>;
+  connMeshAccept(spaceId: string | null): Promise<IpcResult<void>>;
+  connMeshCommand(cmd: MeshCommand): Promise<IpcResult<void>>;
   connStoragePruneSet(o: { enabled: boolean; days: number }): Promise<IpcResult<void>>;
   // 통신 서버·채널 삭제(휴지통으로)
   connDeleteServer(serverId: string): Promise<IpcResult<void>>;

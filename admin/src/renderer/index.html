@@ -31,6 +31,7 @@
     <button type="button" role="tab" data-tab="trash" aria-selected="false" data-i18n="tab_trash"></button>
     <button type="button" role="tab" data-tab="conn" aria-selected="false" data-i18n="tab_conn"></button>
     <button type="button" role="tab" data-tab="space1" aria-selected="false" data-i18n="tab_space1"></button>
+    <button type="button" role="tab" data-tab="mesh" aria-selected="false" data-i18n="tab_mesh"></button>
     <button type="button" role="tab" data-tab="security" aria-selected="false"><span data-i18n="tab_security"></span><span id="security-badge" class="badge" hidden></span></button>
   </nav>
   <!-- Language stays usable with the hub down, so it lives outside the inert main (shown on the Settings tab only). -->
@@ -183,6 +184,71 @@
         <label><span data-i18n="s1_token"></span> <input id="s1-join-token" type="password" autocomplete="off" maxlength="500" class="wide"></label>
         <div class="actions"><button type="submit" data-i18n="btn_s1_join"></button></div>
       </form>
+    </section>
+    <section id="tab-mesh" class="panel" hidden>
+      <p class="hint" data-i18n="mesh_intro"></p>
+      <p id="mesh-unavailable" class="hint" hidden></p>
+      <div id="mesh-body">
+        <h2 data-i18n="mesh_links_heading"></h2>
+        <ul id="mesh-links" class="list"></ul>
+        <h2 data-i18n="mesh_servers_heading"></h2>
+        <ul id="mesh-servers" class="list"></ul>
+        <h2 data-i18n="mesh_shared_heading"></h2>
+        <p class="hint" data-i18n="mesh_shared_hint"></p>
+        <div id="mesh-shared" class="form"></div>
+        <div class="actions"><button id="mesh-save-shared" type="button" data-i18n="btn_mesh_save_shared"></button></div>
+        <h2 data-i18n="mesh_invite_heading"></h2>
+        <form id="mesh-invite-form" class="form">
+          <p class="hint" data-i18n="mesh_invite_hint"></p>
+          <label><span data-i18n="mesh_inv_label"></span> <input id="mesh-inv-label" type="text" autocomplete="off" maxlength="64"></label>
+          <label><span data-i18n="conn_invite_host"></span> <input id="mesh-inv-host" type="text" autocomplete="off" maxlength="253" class="wide"></label>
+          <p class="hint" data-i18n="conn_host_hint"></p>
+          <label><span data-i18n="conn_invite_days"></span> <input id="mesh-inv-days" type="text" inputmode="numeric" autocomplete="off" value="7"></label>
+          <div class="actions"><button type="submit" data-i18n="btn_mesh_invite"></button></div>
+        </form>
+        <div id="mesh-inv-out" class="form" hidden>
+          <textarea id="mesh-inv-code" readonly rows="4" spellcheck="false"></textarea>
+          <p class="hint" data-i18n="conn_invite_code_hint"></p>
+          <div class="actions"><button id="mesh-inv-copy" type="button" data-i18n="btn_copy"></button><span id="mesh-inv-copy-msg" class="msg"></span></div>
+        </div>
+        <h2 data-i18n="mesh_join_heading"></h2>
+        <form id="mesh-join-form" class="form">
+          <textarea id="mesh-join-code" rows="3" spellcheck="false" data-i18n-ph="mesh_join_ph"></textarea>
+          <div class="actions"><button type="submit" data-i18n="btn_mesh_join"></button></div>
+        </form>
+        <h2 data-i18n="mesh_case_heading"></h2>
+        <p class="hint" data-i18n="mesh_case_hint"></p>
+        <form id="mesh-case-form" class="form">
+          <select id="mesh-case">
+            <option value="distributed" data-i18n="case_distributed"></option>
+            <option value="main" data-i18n="case_main"></option>
+            <option value="single" data-i18n="case_single"></option>
+          </select>
+          <label><span data-i18n="mesh_case_main"></span> <select id="mesh-case-main"></select></label>
+          <fieldset id="mesh-case-standby"><legend data-i18n="mesh_case_standby"></legend><div id="mesh-case-standby-list"></div></fieldset>
+          <div class="actions"><button type="submit" data-i18n="btn_mesh_save_case"></button><button id="mesh-cmd-case" type="button" data-i18n="btn_mesh_cmd_case" hidden></button></div>
+        </form>
+        <p id="mesh-effective" class="hint"></p>
+        <p id="mesh-upload" class="hint"></p>
+        <h2 data-i18n="mesh_coord_heading"></h2>
+        <p class="hint" data-i18n="mesh_coord_hint"></p>
+        <div class="actions"><button id="mesh-declare" type="button"></button><span id="mesh-is-coord" class="meta"></span></div>
+        <h3 data-i18n="mesh_coordinators"></h3>
+        <ul id="mesh-coords" class="list"></ul>
+        <form id="mesh-cmd-form" class="form" hidden>
+          <h3 data-i18n="mesh_cmd_heading"></h3>
+          <select id="mesh-cmd-type">
+            <option value="cut" data-i18n="cmd_cut"></option>
+            <option value="unshare" data-i18n="cmd_unshare"></option>
+            <option value="noWrite" data-i18n="cmd_nowrite"></option>
+          </select>
+          <label><span data-i18n="mesh_cmd_target"></span> <select id="mesh-cmd-target"></select></label>
+          <label><span data-i18n="mesh_cmd_hubuser"></span> <input id="mesh-cmd-user" type="text" autocomplete="off" maxlength="64"></label>
+          <div class="actions"><button type="submit" data-i18n="btn_mesh_cmd"></button></div>
+        </form>
+        <h3 data-i18n="mesh_effects_heading"></h3>
+        <ul id="mesh-effects" class="list"></ul>
+      </div>
     </section>
     <section id="tab-security" class="panel" hidden>
       <p class="hint" data-i18n="security_intro"></p>

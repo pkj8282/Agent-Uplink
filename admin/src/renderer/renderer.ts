@@ -1,10 +1,11 @@
-import type { AdminApi, AdminConfig, ConnStatus, IpcResult, SecurityFinding, Snapshot, SnapshotServer, TrashItem } from "../types.js";
+import type { AdminApi, AdminConfig, ConnStatus, IpcResult, MeshCommand, MeshStatus, SecurityFinding, Snapshot, SnapshotServer, TrashItem } from "../types.js";
 import {
   ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf,
   emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage,
   restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount,
   parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage,
   connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, parseSupabaseForm, parseS1CreateForm, parseS1JoinForm, space1StateLabel, space1RevokeConfirm, space1LeaveConfirm, storageStatusLine, verifyResultMessage, parsePruneForm,
+  parseMeshCaseForm, meshCaseLabel, meshUploadLine, meshInviteConfirm, meshRemoveConfirm, meshAcceptConfirm, meshUnacceptConfirm, meshCommandWhat, meshCommandConfirm,
 } from "./view.js";
 import type { FormMessage } from "./view.js";
 import { getLang, setLang, tr } from "./lang.js";
@@ -93,6 +94,7 @@ async function refresh(): Promise<void> {
   renderConn(c);
   lastServers = r.data.servers;
   renderSpace1(c, lastServers);
+  renderMesh(c);
   restoreFocus();
 }
 
@@ -455,7 +457,7 @@ function renderConn(c: IpcResult<ConnStatus>): void {
 // 전체 새로고침(로딩·inert)은 하지 않는다. Hub가 꺼졌으면 전체 새로고침으로 넘겨 hubdown 화면을 띄운다.
 let connPolling = false;
 setInterval(async () => {
-  if (connPolling || document.hidden || (byId("tab-conn").hidden && byId("tab-space1").hidden) || document.body.dataset.state !== "ready") return;
+  if (connPolling || document.hidden || (byId("tab-conn").hidden && byId("tab-space1").hidden && byId("tab-mesh").hidden) || document.body.dataset.state !== "ready") return;
   connPolling = true;
   try {
     const t = snapshotSeq.begin();
@@ -464,6 +466,7 @@ setInterval(async () => {
     if (!r.ok && r.hubDown) { void refresh(); return; }
     renderConn(r);
     renderSpace1(r, lastServers);
+    renderMesh(r);
   } finally {
     connPolling = false;
   }
@@ -908,3 +911,249 @@ async function boot(): Promise<void> {
 }
 
 void boot();
+
+// --- 서버 연결(방식 3, v3.0 5단계) ---
+
+let lastMesh: MeshStatus | null = null;
+let lastComms: ConnStatus["comms"] = [];
+let pendingMeshShared: string[] | null = null;
+
+function meshNameOf(id: string): string {
+  if (lastMesh && id === lastMesh.self) return tr("mesh_self");
+  return lastMesh?.servers.find((s) => s.spaceId === id)?.spaceName ?? lastMesh?.links.find((l) => l.spaceId === id)?.spaceName ?? id;
+}
+
+function meshChannelName(origin: string, ch: string): string {
+  return lastMesh?.channels?.find((x) => x.spaceId === origin)?.channels.find((c) => c.id === ch)?.name ?? "";
+}
+
+function fillSelect(sel: HTMLSelectElement, items: [string, string][]): void {
+  const keep = sel.value;
+  sel.replaceChildren(...items.map(([v, label]) => { const o = el("option", label); o.value = v; return o; }));
+  if (items.some(([v]) => v === keep)) sel.value = keep;
+}
+
+function renderMesh(c: IpcResult<ConnStatus>): void {
+  const body = byId("mesh-body");
+  const un = byId("mesh-unavailable");
+  if (!c.ok || !c.data.mesh) {
+    un.textContent = !c.ok ? (c.code === "old_hub_no_op" ? connUnsupportedMessage() : tr("conn_failed", { detail: c.error })) : tr("mesh_no_server");
+    un.hidden = false;
+    body.hidden = true;
+    return;
+  }
+  un.hidden = true;
+  body.hidden = false;
+  const m = c.data.mesh;
+  lastMesh = m;
+  lastComms = c.data.comms;
+  if (!connGate.changed("mesh", m) && !connGate.changed("meshComms", lastComms)) return;
+
+  // 연결된 서버
+  const links = byId("mesh-links");
+  links.replaceChildren();
+  if (m.links.length === 0) links.append(el("li", tr("mesh_no_links"), "empty"));
+  for (const l of m.links) {
+    const li = el("li", undefined, "row");
+    li.dataset.kind = "mesh-link";
+    li.append(el("span", l.spaceName, "name"), el("span", tr(l.dir === "out" ? "mesh_dir_out" : "mesh_dir_in"), "meta"),
+      el("span", tr(l.connected ? "mesh_connected" : "mesh_disconnected"), l.connected ? "meta online" : "meta"), el("span", tr("mesh_fp", { fp: l.fingerprint }), "id"));
+    const b = el("button", tr("btn_mesh_remove"), "danger");
+    b.type = "button";
+    b.addEventListener("click", () => {
+      if (!window.confirm(meshRemoveConfirm(l.spaceName))) return;
+      void connRun(b, () => window.admin.connMeshRemove(l.spaceId));
+    });
+    li.append(b);
+    links.append(li);
+  }
+
+  // 망 서버
+  const servers = byId("mesh-servers");
+  servers.replaceChildren();
+  if (m.servers.length === 0) servers.append(el("li", tr("mesh_no_servers"), "empty"));
+  for (const s of m.servers) {
+    const li = el("li", undefined, "row");
+    li.append(el("span", s.spaceName, "name"), el("span", tr("mesh_channels", { n: s.channelCount }), "meta"), el("span", tr(s.direct ? "mesh_direct" : "mesh_indirect"), "meta"));
+    servers.append(li);
+  }
+
+  // 망 공유(고르는 중이면 덮어쓰지 않음)
+  const shared = byId("mesh-shared");
+  const chosen = new Set(pendingMeshShared ?? m.shared);
+  shared.replaceChildren(...lastComms.map((s) => {
+    const lab = el("label");
+    const box = el("input");
+    box.type = "checkbox";
+    box.value = s.serverId;
+    box.checked = chosen.has(s.serverId);
+    box.addEventListener("change", () => {
+      pendingMeshShared = [...shared.querySelectorAll<HTMLInputElement>("input[type=checkbox]")].filter((x) => x.checked).map((x) => x.value);
+    });
+    lab.append(box, document.createTextNode(` ${s.name}`));
+    return lab;
+  }));
+
+  // DB 경우
+  const g = m.gov;
+  const all: [string, string][] = [[m.self, tr("mesh_self")], ...m.servers.map((s): [string, string] => [s.spaceId, s.spaceName])];
+  if (g && !byId("mesh-case-form").dataset.dirty) {
+    byId<HTMLSelectElement>("mesh-case").value = g.choice.case;
+    fillSelect(byId<HTMLSelectElement>("mesh-case-main"), all);
+    if (g.choice.main) byId<HTMLSelectElement>("mesh-case-main").value = g.choice.main;
+    const sb = byId("mesh-case-standby-list");
+    sb.replaceChildren(...all.map(([id, label]) => {
+      const lab = el("label");
+      const box = el("input");
+      box.type = "checkbox";
+      box.value = id;
+      box.checked = g.choice.standby.includes(id);
+      lab.append(box, document.createTextNode(` ${label}`));
+      return lab;
+    }));
+  }
+  byId("mesh-effective").textContent = g ? tr("mesh_effective", { label: meshCaseLabel(g.effective, meshNameOf) }) : "";
+  byId("mesh-upload").textContent = g ? meshUploadLine(g.upload) : "";
+
+  // 총괄
+  const coord = g?.coordinator === true;
+  byId("mesh-declare").textContent = tr(coord ? "btn_mesh_undeclare" : "btn_mesh_declare");
+  byId("mesh-is-coord").textContent = coord ? tr("mesh_is_coordinator") : "";
+  byId("mesh-cmd-form").hidden = !coord;
+  byId("mesh-cmd-case").hidden = !coord;
+  const coords = byId("mesh-coords");
+  coords.replaceChildren();
+  const others = g?.coordinators ?? [];
+  if (others.length === 0) coords.append(el("li", tr("mesh_no_coordinators"), "empty"));
+  for (const id of others) {
+    const li = el("li", undefined, "row");
+    const name = meshNameOf(id);
+    li.append(el("span", name, "name"));
+    if (g?.accepted === id) {
+      li.append(el("span", tr("mesh_accepted"), "meta online"));
+      const b = el("button", tr("btn_mesh_unaccept"), "danger");
+      b.type = "button";
+      b.addEventListener("click", () => { if (window.confirm(meshUnacceptConfirm(name))) void connRun(b, () => window.admin.connMeshAccept(null)); });
+      li.append(b);
+    } else {
+      const b = el("button", tr("btn_mesh_accept"));
+      b.type = "button";
+      b.addEventListener("click", () => { if (window.confirm(meshAcceptConfirm(name))) void connRun(b, () => window.admin.connMeshAccept(id)); });
+      li.append(b);
+    }
+    coords.append(li);
+  }
+  renderMeshCmdTargets();
+
+  // 따르는 명령의 효과
+  const eff = byId("mesh-effects");
+  eff.replaceChildren();
+  const lines = [
+    ...(g?.blocked ?? []).map((id) => tr("mesh_effect_blocked", { name: meshNameOf(id) })),
+    ...(g?.unshared ?? []).map((u) => tr("mesh_effect_unshared", { name: meshNameOf(u.origin), ch: meshChannelName(u.origin, u.ch) || u.ch })),
+    ...(g?.noWrite ?? []).map((r) => tr("mesh_effect_nowrite", { name: r.hubUser ? `${meshNameOf(r.entry)} / ${r.hubUser}` : meshNameOf(r.entry) })),
+  ];
+  if (lines.length === 0) eff.append(el("li", tr("mesh_no_effects"), "empty"));
+  for (const t of lines) eff.append(el("li", t));
+}
+
+/** 명령 종류에 따라 대상 목록: 끊기·쓰기 막기 = 다른 서버, 공유 중단 = 서버/채널. */
+function renderMeshCmdTargets(): void {
+  const m = lastMesh;
+  if (!m) return;
+  const type = byId<HTMLSelectElement>("mesh-cmd-type").value;
+  const sel = byId<HTMLSelectElement>("mesh-cmd-target");
+  if (type === "unshare") {
+    const items: [string, string][] = [];
+    for (const x of m.channels ?? []) for (const ch of x.channels) items.push([`${x.spaceId}|${ch.id}`, `${meshNameOf(x.spaceId)} / ${ch.name}`]);
+    fillSelect(sel, items);
+  } else {
+    fillSelect(sel, m.servers.map((s): [string, string] => [s.spaceId, s.spaceName]));
+  }
+  byId("mesh-cmd-user").parentElement!.hidden = type !== "noWrite";
+}
+
+byId("mesh-cmd-type").addEventListener("change", () => renderMeshCmdTargets());
+
+byId("mesh-save-shared").addEventListener("click", () => {
+  const ids = pendingMeshShared ?? lastMesh?.shared ?? [];
+  void connRun(byId<HTMLButtonElement>("mesh-save-shared"), () => window.admin.connMeshSetShared(ids), () => { pendingMeshShared = null; });
+});
+
+byId<HTMLFormElement>("mesh-invite-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const parsed = parseInviteForm({
+    label: byId<HTMLInputElement>("mesh-inv-label").value,
+    host: byId<HTMLInputElement>("mesh-inv-host").value,
+    days: byId<HTMLInputElement>("mesh-inv-days").value,
+  });
+  if (!parsed.ok) { showOpMsg({ text: parsed.error, kind: "err" }); return; }
+  // IP 경고(설계 5.6-1): 서버 연결 인증서를 만들 때마다 확인받는다.
+  if (!window.confirm(meshInviteConfirm(parsed.value.label, parsed.value.host))) return;
+  void connRun(submitter(e), () => window.admin.connMeshInvite(parsed.value.label, parsed.value.host, parsed.value.expiresInMs), (d) => {
+    byId<HTMLTextAreaElement>("mesh-inv-code").value = d.code;
+    byId("mesh-inv-copy-msg").textContent = "";
+    byId("mesh-inv-out").hidden = false;
+    byId<HTMLInputElement>("mesh-inv-label").value = "";
+  });
+});
+
+byId("mesh-inv-copy").addEventListener("click", () => void copyBox("mesh-inv-code", "mesh-inv-copy-msg"));
+
+byId<HTMLFormElement>("mesh-join-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const box = byId<HTMLTextAreaElement>("mesh-join-code");
+  const code = parseJoinCode(box.value);
+  if (!code) { showOpMsg({ text: tr("form_code_empty"), kind: "err" }); return; }
+  void connRun(submitter(e), () => window.admin.connMeshJoin(code), () => { box.value = ""; return tr("mesh_join_ok"); });
+});
+
+function meshCaseFromForm(): ReturnType<typeof parseMeshCaseForm> {
+  return parseMeshCaseForm({
+    kase: byId<HTMLSelectElement>("mesh-case").value,
+    main: byId<HTMLSelectElement>("mesh-case-main").value,
+    standby: [...byId("mesh-case-standby-list").querySelectorAll<HTMLInputElement>("input[type=checkbox]")].filter((x) => x.checked).map((x) => x.value),
+  });
+}
+
+byId<HTMLFormElement>("mesh-case-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const parsed = meshCaseFromForm();
+  if (!parsed.ok) { showOpMsg({ text: parsed.error, kind: "err" }); return; }
+  delete byId("mesh-case-form").dataset.dirty;
+  void connRun(submitter(e), () => window.admin.connMeshSetCase(parsed.value));
+});
+
+byId("mesh-case-form").addEventListener("change", () => { byId("mesh-case-form").dataset.dirty = "1"; });
+
+function sendMeshCommand(b: HTMLButtonElement | null, cmd: MeshCommand): void {
+  if (!window.confirm(meshCommandConfirm(meshCommandWhat(cmd, meshNameOf, meshChannelName)))) return;
+  void connRun(b, () => window.admin.connMeshCommand(cmd));
+}
+
+byId("mesh-cmd-case").addEventListener("click", () => {
+  const parsed = meshCaseFromForm();
+  if (!parsed.ok) { showOpMsg({ text: parsed.error, kind: "err" }); return; }
+  sendMeshCommand(byId<HTMLButtonElement>("mesh-cmd-case"), { type: "case", choice: parsed.value });
+});
+
+byId<HTMLFormElement>("mesh-cmd-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const type = byId<HTMLSelectElement>("mesh-cmd-type").value;
+  const target = byId<HTMLSelectElement>("mesh-cmd-target").value;
+  if (!target) { showOpMsg({ text: tr("form_mesh_target_invalid"), kind: "err" }); return; }
+  const user = byId<HTMLInputElement>("mesh-cmd-user").value.trim();
+  let cmd: MeshCommand;
+  if (type === "unshare") {
+    const [origin, ch] = target.split("|");
+    cmd = { type: "unshare", target: origin, ch };
+  } else if (type === "noWrite") cmd = { type: "noWrite", entry: target, ...(user ? { hubUser: user } : {}) };
+  else cmd = { type: "cut", target };
+  sendMeshCommand(submitter(e) ?? byId<HTMLButtonElement>("mesh-declare"), cmd);
+});
+
+byId("mesh-declare").addEventListener("click", () => {
+  const on = !(lastMesh?.gov?.coordinator === true);
+  if (!window.confirm(tr(on ? "mesh_declare_confirm" : "mesh_undeclare_confirm"))) return;
+  void connRun(byId<HTMLButtonElement>("mesh-declare"), () => window.admin.connMeshCoordinator(on));
+});

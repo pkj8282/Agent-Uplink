@@ -508,3 +508,49 @@ test("공간 상태·확인창·사건·오류 문구, 영어 한글 없음", ()
     setLang("ko");
   }
 });
+
+// ── 5단계: 서버 연결(방식 3) ──
+import { parseMeshCaseForm, meshCaseLabel, meshUploadLine, meshInviteConfirm, meshRemoveConfirm, meshAcceptConfirm, meshCommandWhat, meshCommandConfirm } from "./view.js";
+
+test("parseMeshCaseForm: 분산화는 메인 없음, 메인 지정·분산 안 함은 메인 필수, 예비는 메인 지정만", () => {
+  assert.deepEqual(parseMeshCaseForm({ kase: "distributed", main: "x", standby: ["y"] }), { ok: true, value: { case: "distributed", standby: [] } });
+  assert.deepEqual(parseMeshCaseForm({ kase: "main", main: "spA", standby: ["spC", "spA"] }), { ok: true, value: { case: "main", main: "spA", standby: ["spC"] } });
+  assert.deepEqual(parseMeshCaseForm({ kase: "single", main: "spA", standby: ["spC"] }), { ok: true, value: { case: "single", main: "spA", standby: [] } });
+  assert.equal(parseMeshCaseForm({ kase: "main", main: "", standby: [] }).ok, false);
+  assert.equal(parseMeshCaseForm({ kase: "other", main: "spA", standby: [] }).ok, false);
+});
+
+test("망 문구: 경우·올리기·확인창·명령(한국어), 영어엔 한글 없음", () => {
+  const nameOf = (id: string) => ({ spA: "에이 서버", spC: "씨 서버" } as Record<string, string>)[id] ?? id;
+  assert.match(meshCaseLabel({ case: "main", main: "spA", standby: [] }, nameOf), /에이 서버/);
+  assert.match(meshCaseLabel({ case: "distributed", standby: [] }, nameOf), /분산화/);
+  assert.match(meshUploadLine({ own: true, mirrors: 3 }), /3/);
+  assert.match(meshUploadLine({ own: false, mirrors: 0 }), /메인/);
+  assert.match(meshInviteConfirm("씨 서버", "203.0.113.5"), /공인 IP/);
+  assert.match(meshInviteConfirm("씨 서버", "203.0.113.5"), /1회용/);
+  assert.match(meshRemoveConfirm("씨 서버"), /다시 붙을 수 없습니다/);
+  assert.match(meshAcceptConfirm("에이 서버"), /묻지 않고 따릅니다/);
+  assert.match(meshAcceptConfirm("에이 서버"), /철회/);
+  assert.match(meshCommandWhat({ type: "cut", target: "spC" }, nameOf, () => ""), /씨 서버/);
+  assert.match(meshCommandWhat({ type: "unshare", target: "spC", ch: "c1" }, nameOf, () => "일반"), /일반/);
+  assert.match(meshCommandWhat({ type: "noWrite", entry: "spC", hubUser: "비" }, nameOf, () => ""), /비/);
+  assert.match(meshCommandConfirm("무엇"), /묻지 않고 따릅니다/);
+  assert.match(connEventLine({ ts: 1, code: "link_added", detail: { spaceName: "씨 서버" } }), /씨 서버/);
+  assert.match(connEventLine({ ts: 1, code: "mesh_link_dropped", detail: {} }), /끊/);
+  assert.match(connErrorMessage("not_link_invite", ""), /통신 탭/);
+  assert.match(connErrorMessage("not_coordinator", ""), /총괄/);
+  setLang("en");
+  try {
+    for (const t of [meshCaseLabel({ case: "single", main: "spA", standby: [] }, (i) => i), meshCaseLabel({ case: "distributed", standby: [] }, (i) => i),
+      meshUploadLine({ own: true, mirrors: 1 }), meshUploadLine({ own: true, mirrors: 0 }), meshUploadLine({ own: false, mirrors: 0 }),
+      meshInviteConfirm("a", "h"), meshRemoveConfirm("a"), meshAcceptConfirm("a"), meshCommandConfirm("a"),
+      meshCommandWhat({ type: "cut", target: "x" }, (i) => i, () => "c"), meshCommandWhat({ type: "case", choice: { case: "distributed", standby: [] } }, (i) => i, () => ""),
+      meshCommandWhat({ type: "noWrite", entry: "x" }, (i) => i, () => ""), meshCommandWhat({ type: "unshare", target: "x", ch: "y" }, (i) => i, () => "c"),
+      connEventLine({ ts: 1, code: "link_removed", detail: {} }), connEventLine({ ts: 1, code: "mesh_reject_record_forged", detail: {} }),
+      connEventLine({ ts: 1, code: "gov_command_applied", detail: { type: "cut" } }), connErrorMessage("relay_timeout", ""), connErrorMessage("link_self", "")]) assert.equal(hasHangul(t), false, t);
+    const bad = parseMeshCaseForm({ kase: "main", main: "", standby: [] });
+    assert.equal(!bad.ok && hasHangul(bad.error), false);
+  } finally {
+    setLang("ko");
+  }
+});

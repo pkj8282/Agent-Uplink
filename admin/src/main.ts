@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { AdminClient, HubNotRunningError, resolveAdminTarget, toResult } from "./adminClient.js";
 import { isTrustedFrame } from "./ipcGuard.js";
 import { isViewerUrl } from "./auth.js";
-import type { ConfigPatch, IpcResult } from "./types.js";
+import type { ConfigPatch, IpcResult, MeshCaseChoice, MeshCommand } from "./types.js";
 import { effectiveLang, type Lang } from "./i18n.js";
 import { readLanguageFile, writeLanguageFile } from "./langFile.js";
 import { adminMsg, type AdminKey } from "./messages.js";
@@ -112,6 +112,21 @@ handle("admin:connCreateChannel", (arg) => toResult(() => {
   const o = asObj(arg);
   return client.connCreateChannel(asId(o.serverId), asStr(o.name, 200));
 }));
+// 서버 연결(방식 3): 판단(경우·명령 형식 검사)은 Hub가 한다 — 여기서는 모양만 본다.
+handle("admin:connMeshInvite", (arg) => toResult(() => {
+  const o = asObj(arg);
+  return client.connMeshInvite(asStr(o.label, 200), asStr(o.host, 300), asNum(o.expiresInMs));
+}));
+handle("admin:connMeshJoin", (code) => toResult(() => client.connMeshJoin(asStr(code, 8192))));
+handle("admin:connMeshRemove", (id) => toResult(() => client.connMeshRemove(asId(id))));
+handle("admin:connMeshSetShared", (ids) => toResult(() => {
+  if (!Array.isArray(ids) || ids.length > 100 || !ids.every((x) => typeof x === "string")) throw new Error(msg("invalid_target"));
+  return client.connMeshSetShared(ids as string[]);
+}));
+handle("admin:connMeshSetCase", (c) => toResult(() => client.connMeshSetCase(asObj(c) as unknown as MeshCaseChoice)));
+handle("admin:connMeshCoordinator", (on) => toResult(() => client.connMeshCoordinator(on === true)));
+handle("admin:connMeshAccept", (id) => toResult(() => client.connMeshAccept(id === null ? null : asId(id))));
+handle("admin:connMeshCommand", (c) => toResult(() => client.connMeshCommand(asObj(c) as unknown as MeshCommand)));
 handle("admin:connSetShared", (ids) => toResult(() => {
   if (!Array.isArray(ids) || ids.length > 100 || !ids.every((x) => typeof x === "string")) throw new Error(msg("invalid_target"));
   return client.connSetShared(ids as string[]);

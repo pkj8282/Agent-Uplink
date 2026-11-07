@@ -1022,6 +1022,7 @@ export class ConnectionManager implements ConnStatusSource {
     excluded: string[];
     links: { spaceId: string; spaceName: string; dir: "in" | "out"; fingerprint: string; connected: boolean }[];
     servers: { spaceId: string; spaceName: string; channelCount: number; direct: boolean }[];
+    channels: { spaceId: string; channels: { id: string; name: string }[] }[];
     gov: ReturnType<Governance["status"]> | null;
   } | null {
     const cfg = this.store.serverConfig();
@@ -1034,6 +1035,7 @@ export class ConnectionManager implements ConnStatusSource {
       excluded: cfg.meshExcluded ?? [],
       links: links.map((l) => ({ spaceId: l.spaceId, spaceName: l.spaceName, dir: l.dir, fingerprint: spkiFingerprint(l.serverKey).slice(0, 16), connected: live.has(l.spaceId) })),
       servers: (this.mesh?.servers() ?? []).map((s) => ({ spaceId: s.spaceId, spaceName: s.spaceName, channelCount: s.channels.length, direct: links.some((l) => l.spaceId === s.spaceId) })),
+      channels: [{ spaceId: cfg.spaceId, channels: this.meshOwnChannels() }, ...(this.mesh?.servers() ?? []).map((s) => ({ spaceId: s.spaceId, channels: s.channels }))],
       gov: this.gov?.status() ?? null,
     };
   }
