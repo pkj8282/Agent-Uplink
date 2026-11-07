@@ -16,3 +16,8 @@ test("저장소 종류별 폼: Supabase 폼은 처음에 숨김(기본 종류 Gi
   assert.match(html, /<form id="supabase-form" class="form" hidden>/);
   assert.match(html, /<select id="storage-kind"><option value="github"/);
 });
+
+test("렌더러가 만드는 label은 클래스를 단다(.form label은 grid라 체크 박스와 이름이 위아래로 갈라짐 — 5단계 망 공유 목록)", () => {
+  const src = fs.readFileSync(path.join(here, "renderer.ts"), "utf8");
+  assert.equal(/el\("label"\)/.test(src), false);
+});

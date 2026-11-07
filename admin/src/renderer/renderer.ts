@@ -982,7 +982,7 @@ function renderMesh(c: IpcResult<ConnStatus>): void {
   const shared = byId("mesh-shared");
   const chosen = new Set(pendingMeshShared ?? m.shared);
   shared.replaceChildren(...lastComms.map((s) => {
-    const lab = el("label");
+    const lab = el("label", undefined, "check");
     const box = el("input");
     box.type = "checkbox";
     box.value = s.serverId;
@@ -1003,7 +1003,7 @@ function renderMesh(c: IpcResult<ConnStatus>): void {
     if (g.choice.main) byId<HTMLSelectElement>("mesh-case-main").value = g.choice.main;
     const sb = byId("mesh-case-standby-list");
     sb.replaceChildren(...all.map(([id, label]) => {
-      const lab = el("label");
+      const lab = el("label", undefined, "check");
       const box = el("input");
       box.type = "checkbox";
       box.value = id;
