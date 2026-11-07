@@ -258,9 +258,11 @@ export class Mesh {
     return `m.${origin}.${ch}`;
   }
 
-  /** 망에서 알고 있는 다른 서버들(내 서버 제외). */
+  /** 망에서 알고 있는 다른 서버들(내 서버·끊은 서버 제외, 공유 중단된 채널 제외). */
   servers(): { spaceId: string; spaceName: string; channels: { id: string; name: string }[] }[] {
-    return [...this.cats.values()].map((c) => ({ spaceId: c.body.origin, spaceName: c.body.spaceName, channels: c.body.channels }));
+    const p = this.deps.policy;
+    return [...this.cats.values()].filter((c) => !p?.blocked(c.body.origin))
+      .map((c) => ({ spaceId: c.body.origin, spaceName: c.body.spaceName, channels: c.body.channels.filter((ch) => !p?.channelBlocked(c.body.origin, ch.id)) }));
   }
 
   /** 거울 채널 ID → (출처, 채널). 망 거울이 아니면 null. */

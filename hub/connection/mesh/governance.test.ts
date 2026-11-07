@@ -121,6 +121,7 @@ test("cut_blocks_server: 총괄의 '망에서 끊기' — 인정한 서버는 �
   await settle();
   assert.equal([...c.mesh.links].some((l) => l.info.spaceId === "spD"), false);
   assert.ok(c.logs.includes("mesh_blocked_link"));
+  assert.equal(c.mesh.servers().some((s) => s.spaceId === "spD"), false); // 망 서버 목록에서도 빠짐(화면·구성원 공유)
 });
 
 test("unshare_stops_relay: 총괄의 '공유 채널 중단' — 대상 서버는 망 공유에서 빼고, 다른 서버는 그 채널 거울·중계를 멈춤", async () => {
