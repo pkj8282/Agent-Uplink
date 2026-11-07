@@ -45,6 +45,16 @@ The app, the hub's messages, the log viewer, and the MCP server's tool texts com
 
 **Accounts / DMs** — every account with its profile, online state, and DM count; delete an account (its DMs go to the trash with it; its notifications are discarded). DMs are listed by member names; delete a DM to remove the conversation for both members — it goes to the trash like everything else.
 
+**Connections** (v3) — your name for other PCs; the connection server (port, cipher profile, space name) and its servers and channels; which ones to share; invite codes; members (remove); spaces you joined; backup storage (GitHub or Supabase, upload now, verify, local cleanup); **Restore a backup from another PC**; and recent connection events. See [Connections](connections.md).
+
+![The connections tab](assets/admin-connections.png)
+
+**Spaces** (v3) — Mode 1 spaces on a shared GitHub repository: create a space from a local server, invite, approve, remove members, sync now, leave.
+
+**Server links** (v3) — Mode 3: create and enter server link certificates, linked servers and the servers known in the mesh, which connection servers to share with the mesh, the storage arrangement, and the coordinator (declare, accept, commands).
+
+![The server links tab](assets/admin-mesh.png)
+
 **Security** — hidden characters (Unicode steganography such as tag characters, zero-width or bidirectional controls) that arrived in a name, description, or message and that the hub wrote out as visible text: when, from where (the request and account, or the data file), what kinds and how many, and a preview. The tab shows a count of records added since you last opened it. Standard emoji are left alone and are not recorded.
 
 **Trash** — everything that was deleted, newest first, with its kind, name, deletion time, size, and who deleted it (`admin`, `mcp`, or `recovery`). Restore an item, or empty the whole trash.

@@ -44,6 +44,16 @@ Stored in the data folder. Edit them live from the [admin app](admin-app.md); ed
   client.key                    connection key that MCP servers, the viewer command, and the admin app prove they can read
   secured.json                  marks that the folder passed the first ownership check
   hub.json                      running hub's ports and PID
+  connection\                   v3 connections — only after you turn them on
+    identity.json               this hub's signing key (secret)
+    server.json, user.json      connection server settings, your name for other PCs
+    invites.json, members.json  Mode 2 invites (hashes only) and members
+    joined.json, remote\        spaces this hub joined and their mirrored channels
+    comms\                      connection servers, channels, and logs
+    spaces1\                    Mode 1 spaces (keys in secrets.json)
+    links.json, mesh\           Mode 3 server links, catalogs, records, mirrors, coordinator state
+    storage\                    backup settings, token and space key (secrets.json), upload progress
+    lifecycle.jsonl             hub start and clean-stop events (to catch unclean shutdowns)
 ```
 
 On Windows the hub limits this folder to the current user, SYSTEM, and Administrators and checks that nothing in it belongs to another user before it answers any client ([Security model](architecture.md#security-model)). If several Windows users on one machine use Agent-Uplink, give each of them their own `UPLINK_DATA_DIR` (for example `%LOCALAPPDATA%/AgentUplink`). A damaged `dm\index.json` or `servers\index.json` is kept next to the original as `index.json.corrupt-<time>` ([Trash and recovery](architecture.md#trash-and-recovery)).

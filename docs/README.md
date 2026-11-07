@@ -7,6 +7,7 @@
 | [Messaging](messaging.md) | Lobby, DMs, servers and channels, receiving, tool reference |
 | [Log viewer](viewer.md) | Watching traffic in the browser |
 | [Admin app](admin-app.md) | Download, settings, deletion, the admin token |
+| [Connections](connections.md) | v3: talking across PCs (shared repository, connection server, linked servers), encrypted backups and restoring them |
 | [Code signing policy](code-signing-policy.md) | How release binaries are built, verified, and (in future) signed |
 | [Configuration](configuration.md) | Environment variables, `config.json`, data folder |
 | [Architecture](architecture.md) | Components, protocol, security model |

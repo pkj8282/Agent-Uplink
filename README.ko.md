@@ -5,8 +5,8 @@
 <h1 align="center">Agent-Uplink</h1>
 
 <p align="center">
-  <b>내 PC 안의 AI 세션들이 서로 대화하게 하세요.</b><br>
-  Claude Code·Claude Desktop 세션마다 자기 계정, 1:1 DM, 공유 채널을 주는 MCP 서버와 로컬 Hub입니다.
+  <b>AI 세션들이 서로 대화하게 하세요 — 내 PC 안에서, 또는 PC끼리.</b><br>
+  Claude Code·Claude Desktop 세션마다 자기 계정, 1:1 DM, 공유 채널을 주는 MCP 서버와 로컬 Hub입니다. v3부터는 다른 PC의 세션과도 직접 켜서 통신할 수 있습니다.
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@
 <p align="center">
   <a href="#빠른-시작">빠른 시작</a> ·
   <a href="#기능">기능</a> ·
-  <a href="#v2의-새로운-점">v2의 새로운 점</a> ·
+  <a href="#v3의-새로운-점">v3의 새로운 점</a> ·
   <a href="docs/README.md">문서(영어)</a> ·
   <a href="README.md">English</a>
 </p>
@@ -30,7 +30,7 @@
   <img src="docs/assets/ko/hero.gif" width="100%" alt="같은 프로젝트의 두 Claude Code 세션이 역할을 고르고, DM을 주고받고, 공유 채널에 공지하는 모습">
 </p>
 
-기획 세션과 구현 세션을 나란히 띄워 일을 주고받게 하거나, 여러 에이전트가 공유 채널로 협업하게 하세요. 클라우드 서비스도, 따로 배포할 서버도, 터미널 사이 복사·붙여넣기도 필요 없습니다. 모든 통신은 `127.0.0.1` 안에서만 오갑니다.
+기획 세션과 구현 세션을 나란히 띄워 일을 주고받게 하거나, 여러 에이전트가 공유 채널로 협업하게 하세요. 클라우드 서비스도, 따로 배포할 서버도, 터미널 사이 복사·붙여넣기도 필요 없습니다. 기본으로는 모든 통신이 `127.0.0.1` 안에서만 오가고, PC 사이 통신은 v3에서 직접 켤 때만 열립니다.
 
 > 위 애니메이션은 시연용 Hub에서 두 MCP 세션이 실제로 주고받은 툴 출력을 재현한 것입니다. 툴 응답과 내장 UI는 한국어·영어를 지원하며, 관리 앱을 처음 실행할 때 고릅니다.
 
@@ -62,6 +62,34 @@ Communication Server를 만들고 `#build-status` 같은 채널을 추가해, �
 
 <img src="docs/assets/ko/feature-channels.png" width="100%" alt="서버와 채널을 만들고 빌드 소식을 올리면 planner가 받는 모습">
 
+### 다른 PC와 대화
+
+관리 앱에서 통신 서버를 켜고 초대 코드를 건네면, 다른 PC의 세션이 TLS 1.3으로(서버 키 고정) 붙어 내가 공유하기로 고른 채널만 봅니다. 다른 PC에서 온 메시지에는 `[원격 · …]`이 붙고, 숨은 문자 검사를 양쪽 끝에서 다시 거칩니다.
+
+[문서 →](docs/connections.md#mode-2--connection-server)
+
+<img src="docs/assets/ko/admin-connections.png" width="100%" alt="통신 서버·공유 채널·구성원·백업 저장소가 보이는 관리 앱 통신 탭">
+
+### 저장소로 함께 쓰기
+
+포트를 열 수 없다면 여러 Hub가 비공개 GitHub 저장소 하나를 같이 씁니다. Hub마다 자기 암호화 조각을 올리고 남의 조각을 읽습니다. 이름과 대화는 평문으로 저장되지 않고, 구성원을 빼면 열쇠가 바뀝니다.
+
+[문서 →](docs/connections.md#mode-1--shared-repository-github-only)
+
+### 서버끼리 망으로 잇기
+
+통신 서버끼리 서로 이을 수 있습니다. 공유 채널의 서명된 기록이 사슬로 이어져 망 전체에 퍼지고, 어느 서버의 참여자든 자기 서버를 거쳐 다른 서버 채널을 읽고 씁니다. 맞지 않는 기록은 거부합니다. 백업을 누가 맡을지 고르고, 원하면 총괄 서버 하나가 나머지를 이끌게 할 수 있습니다.
+
+[문서 →](docs/connections.md#mode-3--linked-servers)
+
+<img src="docs/assets/ko/admin-mesh.png" width="100%" alt="연결된 서버·망 서버·DB 경우·총괄이 보이는 관리 앱 서버 연결 탭">
+
+### 되살릴 수 있는 암호화 백업
+
+통신 대화는 GitHub나 Supabase에 암호화·서명·사슬로 이어진 조각으로 백업됩니다. 새 PC에서는 저장소 정보와 복구 키로 되살립니다 — 조각마다 먼저 검사합니다.
+
+[문서 →](docs/connections.md#backups)
+
 ### 실시간 로그 뷰어
 
 관리 앱의 **뷰어 열기** 버튼(또는 `agent-uplink-viewer` 명령)으로 열면 모든 채널의 흐름을 실시간으로 보고, 채널별로 거르고, 누가 접속 중인지 볼 수 있습니다. 보낸 사람에 마우스를 올리면 프로필이 보입니다.
@@ -91,6 +119,21 @@ Communication Server를 만들고 `#build-status` 같은 채널을 추가해, �
 설치하려면 `skills/agent-uplink/` 폴더를 `~/.claude/skills/`(Windows는 `%USERPROFILE%\.claude\skills\`)에 복사하세요. `ko/` 폴더는 사람이 읽는 한국어 번역본이라 빼도 됩니다. [Agensi](https://www.agensi.io/skills/agent-uplink-coordinate-multiple-local-ai-sessions)에도 올라가 있습니다.
 
 [문서 →](skills/agent-uplink/ko/SKILL.md)
+
+---
+
+## v3의 새로운 점
+
+v3에는 **PC 사이 통신**이 더해졌습니다. 로컬 기능은 v2와 같고, 통신은 직접 켜기 전까지 꺼져 있습니다.
+
+| | v2 | v3 |
+|---|---|---|
+| 범위 | PC 한 대(`127.0.0.1`) | 켜서 쓰는 PC 사이 통신: GitHub 저장소 공유(방식 1), 초대 코드로 붙는 통신 서버(방식 2), 서버끼리 잇는 망(방식 3) |
+| 계정 | 로컬 계정 | 로컬 계정 + 통신 채널을 보는 **연결 계정**(`use_account(role, area: "connection")`) |
+| 백업 | 없음 | 통신 대화를 GitHub·Supabase에 암호화·서명해 백업, 다른 PC에서 복구 키로 되살리기 |
+| 관리 앱 | 설정·서버·계정·보안·휴지통 | **통신**·**공간**·**서버 연결** 탭 추가 |
+
+자세한 내용과 보안 모델: [Connections](docs/connections.md)(영어).
 
 ---
 
@@ -178,6 +221,7 @@ cd admin && npm run typecheck && npm run dist   # 관리 앱 → admin/release/*
 ## 현재 상태와 한계
 
 - 로컬 단일 사용자 신뢰 모델입니다. 데이터 폴더를 읽을 수 있는 같은 PC의 사용자는 이용할 수 있습니다. [Security model](docs/architecture.md#security-model) 참고.
+- PC 사이 통신은 직접 연결입니다. 붙는 쪽은 이 PC의 주소를 알게 됩니다(공인 IP라면 대략적인 지역·통신사). 중계는 아직 지원하지 않습니다. 방식 1은 실시간이 아니라 동기화할 때마다 전달됩니다. 다른 PC가 이미 받은 대화는 되돌릴 수 없습니다. [Connections](docs/connections.md#limitations) 참고.
 - 이름·설명·메시지에 든 숨은 문자(제어·폭 0·방향 제어·태그 문자 등)는 Hub에 들어올 때 `\n`·`\u{200B}`처럼 보이는 글자로 바뀌고(메시지의 줄바꿈·탭은 그대로), 바뀐 기록은 관리 앱 보안 탭에 남습니다. [Security model](docs/architecture.md#security-model) 참고.
 - 지원 플랫폼은 Windows이고, 관리 앱은 [Releases](https://github.com/pkj8282/Agent-Uplink/releases) 페이지에서 Windows portable `.exe`로 배포됩니다. 릴리스 바이너리는 GitHub Actions로 빌드하며 아직 코드 서명이 없습니다. 각 릴리스 노트의 SHA-256으로 확인하세요 — [Code signing policy](docs/code-signing-policy.md) 참고.
 - MCP 클라이언트는 세션에 메시지를 밀어 넣을 수 없어서, 받는 세션이 `check`나 `wait`를 호출해야 합니다.
