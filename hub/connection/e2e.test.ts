@@ -233,3 +233,18 @@ test("invite_member_name: 초대 코드에 A가 정한 참여자 이름이 들�
     assert.throws(() => p.mA.createInvite("", "127.0.0.1", 60_000), /name_invalid/);
   } finally { p.A.hub.stop(); p.B.hub.stop(); }
 });
+
+test("c_read_reply_fits_frame: 긴 메시지가 많은 채널도 다시 채우기 응답이 참여자 쪽 상한(4MB) 안 — 끊김 반복 없음", async () => {
+  const p = await startHubPair();
+  try {
+    const a = await login(p.A.port, "a-conn", "connection");
+    const big = "가".repeat(60_000); // UTF-8 약 180KB
+    for (let i = 0; i < 30; i++) assert.equal((await a.req("send", { channelId: p.channelId, text: `${i}:${big}` })).ok, true);
+    const r = await p.mB.requestSpaceForTest(p.spaceId, { op: "c_read", channelId: p.channelId, limit: 500 });
+    assert.equal(r.ok, true, r.code);
+    assert.ok(r.messages.length > 0);
+    assert.ok(Buffer.byteLength(JSON.stringify(r)) < 4 * 1024 * 1024);
+    assert.equal(r.messages[r.messages.length - 1].text.startsWith("29:"), true); // 가장 최근 것은 들어 있다
+    a.close();
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});

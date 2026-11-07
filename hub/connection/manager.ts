@@ -61,6 +61,8 @@ interface SpaceState {
 const REMOTE_PREFIX = "r:";
 const MAX_REMOTE_ACCOUNTS = 200;
 const MAX_REMOTE_SERVERS = 100;
+/** c_read 응답의 메시지 바이트 상한 — 참여자 쪽 프레임 상한(4MB)보다 넉넉히 작게. */
+const C_READ_MAX_BYTES = 2 * 1024 * 1024;
 
 export class ConnectionManager implements ConnStatusSource {
   readonly store: ConnectionStore;
@@ -558,7 +560,18 @@ export class ConnectionManager implements ConnStatusSource {
         const ch = this.sharedChannel(req.channelId);
         if (!ch) return fail("channel_forbidden");
         const limit = typeof req.limit === "number" && req.limit > 0 ? Math.min(req.limit, MAX_READ_LIMIT) : 100;
-        return reply({ ok: true, messages: this.deps.channels.recent(ch.id, limit).map((m) => this.wire(m)) });
+        // 응답 프레임이 참여자 쪽 상한(4MB)을 넘으면 참여자가 연결을 끊고 다시 붙어 같은 요청을 되풀이한다
+        // → 가장 최근 메시지부터 바이트 상한까지만(가장 최근 하나는 항상).
+        const all = this.deps.channels.recent(ch.id, limit).map((m) => this.wire(m));
+        const out: typeof all = [];
+        let bytes = 0;
+        for (let i = all.length - 1; i >= 0; i--) {
+          const size = Buffer.byteLength(JSON.stringify(all[i]));
+          if (out.length > 0 && bytes + size > C_READ_MAX_BYTES) break;
+          out.push(all[i]);
+          bytes += size;
+        }
+        return reply({ ok: true, messages: out.reverse() });
       }
       case "c_send": {
         if (!this.allowSend(p.memberId)) {

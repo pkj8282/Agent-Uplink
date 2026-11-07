@@ -136,3 +136,14 @@ test("trim_keeps_recent_and_chain: 거울을 최근 N개로 잘라도 사슬 머
   await until(() => d.mirror(a, ch).length === 4);
   assert.deepEqual(d.mirror(a, ch).map((m) => m.text), ["3", "4", "5", "6"]);
 });
+
+test("pull_reply_fits_frame: 긴 기록이 많아도 당기기 응답 프레임 하나가 1MB(리스너 상한)를 넘지 않고, 전부 넘어온다", async () => {
+  const a = node("에이", "spA"), c = node("씨", "spC");
+  const ch = a.addChannel("일반");
+  const big = "가".repeat(60_000); // UTF-8 약 180KB
+  for (let i = 0; i < 12; i++) a.say(ch, `${i}:${big}`);
+  let maxFrame = 0;
+  connect(a, c, (_from, obj) => { if (obj.id !== undefined && obj.records) maxFrame = Math.max(maxFrame, Buffer.byteLength(JSON.stringify(obj))); return true; });
+  await until(() => c.mirror(a, ch).length === 12, 8000);
+  assert.ok(maxFrame <= 1024 * 1024, `가장 큰 당기기 응답 ${maxFrame}바이트`);
+});

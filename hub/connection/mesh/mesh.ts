@@ -113,6 +113,8 @@ const CHANNEL_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const MAX_SERVERS = 64;
 const MAX_CHANNELS = 100;
 const PULL_BATCH = 500;
+/** 당기기 응답 한 번의 기록 바이트 상한 — 받는 쪽 프레임 상한(1MB)보다 넉넉히 작게. */
+const PULL_MAX_BYTES = 640 * 1024;
 const STRIKES_TO_DROP = 3;
 const REC_PER_SECOND = 200;
 const RELAY_TTL = 8;
@@ -222,12 +224,18 @@ export class Mesh {
     const c = this.chain(origin, ch);
     if (!c) return [];
     const out: Signed<RecordBody>[] = [];
+    let bytes = 0;
     try {
       for (const line of fs.readFileSync(c.file, "utf8").split("\n")) {
         if (!line) continue;
         try {
           const r = JSON.parse(line) as Signed<RecordBody>;
-          if (r.body.n > after) out.push(r);
+          if (r.body.n <= after) continue;
+          const size = Buffer.byteLength(line);
+          // 응답 프레임이 받는 쪽 상한(리스너 1MB)을 넘지 않게 — 기록 하나는 항상 넣는다(기록 하나는 상한보다 작음)
+          if (out.length > 0 && bytes + size > PULL_MAX_BYTES) break;
+          out.push(r);
+          bytes += size;
         } catch { /* 손상 줄 */ }
         if (out.length >= limit) break;
       }
@@ -470,7 +478,7 @@ export class Mesh {
           if (res !== "ok" && res !== "dup") return;
           last = (rec as Signed<RecordBody>).body.n;
         }
-        if (r.records.length < PULL_BATCH || last <= after) return;
+        if (last <= after) return; // 빈 응답이 올 때까지(응답은 개수·바이트로 잘려 옴)
         after = last;
       }
     } finally {
