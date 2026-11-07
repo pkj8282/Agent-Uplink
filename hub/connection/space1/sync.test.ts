@@ -170,3 +170,95 @@ test("squatted_path_skipped: 협력자가 내 다음 번호를 가짜 파일로 
   await sa.tick();
   assert.deepEqual(a.delivered.map((d) => d.msg.text), ["선점 뒤"]);
 });
+
+// ── T4: 퇴출·열쇠 세대·위조 거부(레드팀) ──
+
+test("revoke_rotates_epoch: 퇴출하면 세대가 올라가고, 남은 구성원만 새 열쇠를 받는다", async () => {
+  const be = new MemoryBackend();
+  const { a, sa } = await makeSpace(be);
+  const { b, sb } = await addMember(be, sa, "비");
+  const { c, sb: sc } = await (async () => { const r = await addMember(be, sa, "씨"); return { c: r.b, sb: r.sb }; })();
+  const cHub = sc.status().members.find((m) => m.me)!.hubId;
+  assert.equal(await sa.revoke(cHub), true);
+  assert.equal(sa.status().epoch, 2);
+  await sb.tick();
+  await sc.tick();
+  assert.equal(sb.status().state, "active");
+  assert.equal(sb.status().epoch, 2);
+  assert.equal(sc.status().state, "revoked");
+  assert.equal((sc as any).sec.epochKeys["2"], undefined); // C는 새 열쇠를 못 받음
+  a.channels.append("loc-main", "a", "A", "퇴출 뒤 비밀");
+  await sa.tick();
+  await sb.tick();
+  await sc.tick();
+  assert.deepEqual(b.delivered.map((d) => d.msg.text), ["퇴출 뒤 비밀"]);
+  assert.deepEqual(c.delivered.map((d) => d.msg.text), []);
+  assert.deepEqual(sa.status().members.map((m) => [m.userName, m.revoked]), [["에이", false], ["비", false], ["씨", true]]);
+});
+
+test("revoked_hub_fragments_rejected: 퇴출된 Hub가 옛 열쇠·권한으로 계속 올려도 거부(RED PoC)", async () => {
+  const be = new MemoryBackend();
+  const { a, sa } = await makeSpace(be);
+  const { b, sb } = await addMember(be, sa, "비");
+  const { b: c, sb: sc } = await addMember(be, sa, "씨");
+  c.channels.append(mirror(sc, "loc-main"), "c", "C", "퇴출 전");
+  await sc.tick();
+  await sa.tick();
+  await sb.tick();
+  const oldRoster = structuredClone((sc as any).st.roster);
+  await sa.revoke(sc.status().members.find((m) => m.me)!.hubId);
+  // 공격: C가 옛 명부(세대 1)를 그대로 쓰는 척하며 조각을 더 올린다
+  (sc as any).st.roster = oldRoster;
+  c.channels.append(mirror(sc, "loc-main"), "c", "C", "퇴출 뒤 끼어들기");
+  await (sc as any).writeOwn();
+  await sa.tick();
+  await sb.tick();
+  assert.deepEqual(a.delivered.map((d) => d.msg.text), ["퇴출 전"]);
+  assert.deepEqual(b.delivered.map((d) => d.msg.text), ["퇴출 전"]);
+  assert.ok(a.events.includes("space1_fragment_rejected"));
+});
+
+test("forged_roster_and_key_rejected: 구성원이 관리자인 척 쓴 명부·열쇠 파일은 거부, 자리 선점해도 관리자의 다음 명부는 받는다(RED PoC)", async () => {
+  const be = new MemoryBackend();
+  const { a, sa } = await makeSpace(be);
+  const { b, sb } = await addMember(be, sa, "비");
+  const { b: c, sb: sc } = await addMember(be, sa, "씨");
+  const sp = sb.status().spaceId;
+  const { signEnvelope } = await import("../../../shared/signed.js");
+  const v = (sa as any).st.rosterVersion as number;
+  const roster = structuredClone((sa as any).st.roster);
+  // B(구성원)가 다음 명부 번호를 자기 서명으로 선점: 구성원을 자기만 남기려 함
+  roster.version = v + 1;
+  roster.prevHash = (sa as any).st.rosterHash;
+  roster.members = roster.members.filter((m: any) => m.hubId === (sb as any).myHubId);
+  be.files.set(`agent-uplink/s1/${sp}/roster/${String(v + 1).padStart(8, "0")}.json`, Buffer.from(signEnvelope(roster, b.keys.privateKeyPem, b.keys.publicKeyB64)));
+  // B가 C용 가짜 열쇠 파일
+  be.files.set(`agent-uplink/s1/${sp}/keys/1/${(sc as any).myHubId}.1.json`, Buffer.from(signEnvelope({ v: 1, spaceId: sp, epoch: 1, hubId: (sc as any).myHubId, wrapped: { epk: "x", nonce: "y", ct: "z" } }, b.keys.privateKeyPem, b.keys.publicKeyB64)));
+  await sc.tick();
+  assert.equal(sc.status().state, "active");
+  assert.equal(sc.status().members.filter((m) => !m.revoked).length, 3);
+  assert.ok(c.events.includes("space1_roster_rejected"));
+  // 관리자가 채널을 하나 더 공유 → 선점된 번호를 건너 다음 번호로 명부를 쓰고, C는 그것을 받는다
+  a.channels.register({ id: "loc-new", kind: "server", label: "팀/새방", members: null });
+  (sa as any).ownerChannels = () => [...ownerChannels(), { channelId: "loc-new", name: "새방" }];
+  await sa.tick();
+  await sc.tick();
+  assert.ok(c.channels.getChannel(mirror(sc, "loc-new")));
+  void b;
+});
+
+test("request_forgery_rejected: 서명 없는·증명 틀린 참여 요청은 무시", async () => {
+  const be = new MemoryBackend();
+  const { a, sa } = await makeSpace(be);
+  const sp = sa.status().spaceId;
+  sa.invite("비", 60_000);
+  const { generateSigningKeys: gen } = await import("../../../shared/connCrypto.js");
+  const { signEnvelope } = await import("../../../shared/signed.js");
+  const eve = gen();
+  const inviteId = (sa as any).sec.invites[0].inviteId;
+  be.files.set(`agent-uplink/s1/${sp}/requests/junk-1.json`, Buffer.from("{}"));
+  be.files.set(`agent-uplink/s1/${sp}/requests/eve-2.json`, Buffer.from(signEnvelope({ v: 1, spaceId: sp, inviteId, hubKey: eve.publicKeyB64, xKey: "x", proof: "WRONG", ts: 1 }, eve.privateKeyPem, eve.publicKeyB64)));
+  await sa.tick();
+  assert.equal(sa.status().members.length, 1);
+  assert.ok(a.events.includes("space1_request_rejected"));
+});
