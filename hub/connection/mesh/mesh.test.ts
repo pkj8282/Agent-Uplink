@@ -118,3 +118,21 @@ test("catalog_flood_stops: 고리 망에서 목록 전파가 멈춘다(같은 �
   await settle(100);
   assert.equal(frames, before);
 });
+
+test("trim_keeps_recent_and_chain: 거울을 최근 N개로 잘라도 사슬 머리는 남아 다음 기록을 이어 받고, 당겨 줄 때도 남은 것만", async () => {
+  const a = node("에이", "spA"), c = node("씨", "spC"), d = node("디", "spD");
+  const ch = a.addChannel("일반");
+  connect(a, c);
+  await until(() => c.mesh.servers().length === 1);
+  await settle();
+  for (const t of ["1", "2", "3", "4", "5"]) a.say(ch, t);
+  await until(() => c.mirror(a, ch).length === 5);
+  assert.equal(c.mesh.trim(c.mesh.mirrorId("spA", ch), 3), 2);
+  assert.deepEqual(c.mirror(a, ch).map((m) => m.text), ["3", "4", "5"]);
+  a.say(ch, "6");
+  await until(() => c.mirror(a, ch).length === 4);
+  assert.equal(c.logs.filter((l) => l.startsWith("mesh_reject")).length, 0);
+  connect(c, d); // D는 C에게서만 당김 → 잘린 뒤 남은 것부터
+  await until(() => d.mirror(a, ch).length === 4);
+  assert.deepEqual(d.mirror(a, ch).map((m) => m.text), ["3", "4", "5", "6"]);
+});

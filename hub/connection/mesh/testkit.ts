@@ -7,6 +7,7 @@ import { generateSigningKeys, type SigningKeys } from "../../../shared/connCrypt
 import type { Channel, Message } from "../../../shared/protocol.js";
 import { LinkChannel } from "./link.js";
 import { Mesh, type MeshDeps } from "./mesh.js";
+import { Governance } from "./governance.js";
 
 export interface Node {
   name: string;
@@ -16,6 +17,7 @@ export interface Node {
   channels: ChannelStore;
   own: { id: string; name: string }[];
   mesh: Mesh;
+  gov?: Governance;
   delivered: Message[];
   logs: string[];
   /** 내 채널 하나 만들기(망 공유 목록에도 넣음 — share=false면 안 넣음). */
@@ -25,13 +27,20 @@ export interface Node {
   mirror(origin: Node, chId: string): Message[];
 }
 
-export function node(name: string, spaceId: string, extra: Partial<MeshDeps> = {}): Node {
+export function node(name: string, spaceId: string, extra: Partial<MeshDeps> = {}, opts: { gov?: boolean } = {}): Node {
   const dataDir = tempDir(`mesh-${spaceId}-`);
   const keys = generateSigningKeys();
   const n = {} as Node;
   Object.assign(n, {
     name, spaceId, keys, dataDir, own: [], delivered: [], logs: [],
     channels: new ChannelStore({ dir: path.join(dataDir, "channels") }),
+  });
+  const makeGov = () => new Governance({
+    dir: path.join(dataDir, "mesh"),
+    self: () => ({ spaceId, spaceName: name, userName: `${name}님`, keys }),
+    mesh: () => n.mesh,
+    unshareOwn: (ch) => { n.own = n.own.filter((c) => c.id !== ch); n.mesh.ownChanged(); },
+    log: (code) => n.logs.push(code),
   });
   const make = () => new Mesh({
     dir: path.join(dataDir, "mesh"),
@@ -42,9 +51,16 @@ export function node(name: string, spaceId: string, extra: Partial<MeshDeps> = {
     log: (code) => n.logs.push(code),
     deliver: (_ch: Channel, m: Message) => n.delivered.push(m),
     appendOwn: (ch, from, fromName, text, origin) => (n.channels.getChannel(ch) ? n.channels.append(ch, from, fromName, text, origin) : null),
+    ...(opts.gov ? {
+      policy: { blocked: (id: string) => n.gov!.blocked(id), channelBlocked: (o: string, c: string) => n.gov!.channelBlocked(o, c), noWrite: (e: string, h: string) => n.gov!.noWrite(e, h) },
+      onOtherEvent: (e: { event: string }, l: Parameters<NonNullable<MeshDeps["onOtherEvent"]>>[1]) => n.gov!.onEvent(e, l),
+      onAttach: (l: Parameters<NonNullable<MeshDeps["onAttach"]>>[0]) => n.gov!.onAttach(l),
+      initialWindow: () => n.gov!.initialWindow(),
+    } : {}),
     ...extra,
   });
   n.mesh = make();
+  if (opts.gov) n.gov = makeGov();
   n.addChannel = (chName, share = true) => {
     const id = randomUUID();
     n.channels.register({ id, kind: "server", label: `통신/${chName}`, members: null, area: "connection" }, path.join(dataDir, "comms", `${id}.jsonl`));
@@ -61,6 +77,7 @@ export function node(name: string, spaceId: string, extra: Partial<MeshDeps> = {
     n.channels = new ChannelStore({ dir: path.join(dataDir, "channels") });
     for (const c of n.own) n.channels.register({ id: c.id, kind: "server", label: `통신/${c.name}`, members: null, area: "connection" }, path.join(dataDir, "comms", `${c.id}.jsonl`));
     n.mesh = make();
+    if (opts.gov) n.gov = makeGov();
   };
   n.mirror = (origin, chId) => n.channels.recent(n.mesh.mirrorId(origin.spaceId, chId), 1000);
   return n;

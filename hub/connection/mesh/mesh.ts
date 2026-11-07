@@ -75,6 +75,8 @@ export interface MeshDeps {
   relayTimeoutMs?: number;
   /** 다른 이벤트(명령 등) — 처리했으면 true. */
   onOtherEvent?(e: { event: string; [k: string]: unknown }, from: MeshLink): boolean;
+  /** 연결이 붙어 목록을 보낸 뒤(거버넌스가 자기 알림을 보낸다). */
+  onAttach?(l: MeshLink): void;
 }
 
 export interface PeerInfo {
@@ -231,6 +233,23 @@ export class Mesh {
     return out;
   }
 
+  /** 거울을 최근 keep개로 자른다(기록 원본도 같이). 사슬 머리는 남아 다음 기록을 이어 받는다. 지운 메시지 수. */
+  trim(mirrorId: string, keep: number): number {
+    const m = /^m\.([A-Za-z0-9_-]{1,64})\.([A-Za-z0-9_-]{1,128})$/.exec(mirrorId);
+    const c = m ? this.chain(m[1], m[2]) : undefined;
+    if (!m || !c || c.n <= keep) return 0;
+    const cutoff = c.n - keep;
+    try {
+      const lines = fs.readFileSync(c.file, "utf8").split("\n").filter((line) => {
+        if (!line) return false;
+        try { return (JSON.parse(line) as Signed<RecordBody>).body.n > cutoff; } catch { return false; }
+      });
+      writeFileAtomic(c.file, lines.length ? `${lines.join("\n")}\n` : "");
+    } catch { /* 없음 */ }
+    for (const n of [...c.hashes.keys()]) if (n <= cutoff) c.hashes.delete(n);
+    return this.deps.channels.prune(mirrorId, (msg) => msg.seq > cutoff);
+  }
+
   // ───────── 목록 ─────────
 
   mirrorId(origin: string, ch: string): string {
@@ -362,6 +381,7 @@ export class Mesh {
     });
     ch.event({ event: "cat", c: this.ownCatalog() });
     for (const c of this.cats.values()) if (c.body.origin !== info.spaceId) ch.event({ event: "cat", c: c.signed });
+    this.deps.onAttach?.(l);
     void this.syncHeads(l);
     return l;
   }
@@ -534,7 +554,8 @@ export class Mesh {
     return true;
   }
 
-  private flood(e: { event: string; [k: string]: unknown }, except?: MeshLink): void {
+  /** 이벤트를 모든 연결로(except 빼고). */
+  flood(e: { event: string; [k: string]: unknown }, except?: MeshLink): void {
     for (const l of this.links) if (l !== except) l.ch.event(e);
   }
 
