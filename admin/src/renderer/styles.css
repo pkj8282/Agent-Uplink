@@ -9,6 +9,8 @@
   }
 }
 * { box-sizing: border-box; }
+/* hidden은 항상 숨김 — .form·label 등의 display 규칙이 숨김을 덮지 않게 한다. */
+[hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", "Malgun Gothic", sans-serif; }
 .top { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--line); }
 .top h1 { margin: 0; font-size: 17px; font-weight: 600; }

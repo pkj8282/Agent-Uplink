@@ -573,6 +573,7 @@ function showStorageKind(kind: string): void {
 }
 
 byId<HTMLSelectElement>("storage-kind").addEventListener("change", (e) => showStorageKind((e.target as HTMLSelectElement).value));
+showStorageKind(byId<HTMLSelectElement>("storage-kind").value); // 처음 화면도 고른 종류의 칸만
 
 byId<HTMLFormElement>("supabase-form").addEventListener("submit", (e) => {
   e.preventDefault();
