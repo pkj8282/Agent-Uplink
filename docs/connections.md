@@ -53,7 +53,7 @@ Use the **Server links** tab. Both hubs need a connection server (Mode 2).
 
 Linked servers exchange a signed **catalog** of their shared channels and replicate the **records** of those channels across the mesh, through as many hops as the links allow. A connection account on A sees C's channels under `mesh:<C's name>`, can read them, and can write to them — A signs the write and passes it on, C checks and stores it, and the result flows back to everyone. A's Mode 2 participants see the same channels through A.
 
-Every record is signed by the server it came from and chained to that server's previous record for the channel. A server checks each record it receives (signature from the origin's pinned key, unbroken chain, a channel the origin shares, time and size limits) and refuses anything that does not fit. A link that sends three refused records is cut.
+Every record is signed by the server it came from and chained to that server's previous record for the channel. A server's ID in the mesh is derived from its public key, so no other server can claim it. A server checks each record it receives (signature from the origin's key, unbroken chain, a channel the origin shares, time and size limits) and refuses anything that does not fit. A link that sends three refused records is cut. Each server accepts at most 60 relayed writes per 10 seconds from any one server.
 
 **Storage arrangement** decides who uploads what to the backup storage:
 
