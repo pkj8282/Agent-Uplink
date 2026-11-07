@@ -798,7 +798,7 @@ export const ADMIN_MESSAGES = defineCatalog({
     mesh_no_servers: "No other servers are known in the mesh.",
     mesh_direct: "Direct",
     mesh_indirect: "Through others",
-    mesh_channels: (p: { n: number }) => `${p.n} channels`,
+    mesh_channels: (p: { n: number }) => (p.n === 1 ? "1 channel" : `${p.n} channels`),
     mesh_shared_heading: "Connection servers to share with the mesh",
     mesh_shared_hint: "Only the channels of the servers you choose go to the mesh (separate from participant sharing on the Connections tab). Conversations from before you shared are not sent; only new ones written after sharing are signed and sent.",
     btn_mesh_save_shared: "Save mesh sharing",

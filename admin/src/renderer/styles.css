@@ -78,3 +78,7 @@ body[data-i18n-pending] .top, body[data-i18n-pending] nav, body[data-i18n-pendin
 .row input[type="text"] { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); width: 140px; }
 .row label.check { display: flex; align-items: center; gap: 6px; }
 #tab-conn .meta { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
+/* 서버 연결 탭(v3.0 5단계): 경우 선택은 설명이 길어 넓게, 예비 서버 묶음은 다른 칸과 같은 테두리 */
+#mesh-case { width: auto; max-width: 100%; }
+#mesh-case-standby { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin: 0; }
+#mesh-case-standby legend { padding: 0 4px; color: var(--muted); font-size: 13px; }
