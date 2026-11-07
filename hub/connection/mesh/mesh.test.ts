@@ -13,8 +13,8 @@ test("line_multi_hop: A-C-D로 이으면 D가 A 채널 기록을 받는다(출�
   assert.deepEqual(got.map((m) => m.text), ["하나", "둘"]);
   assert.deepEqual(got.map((m) => m.seq), [1, 2]);
   assert.equal(got[0].origin?.spaceName, "에이");
-  assert.equal(got[0].origin?.hubUser, "에이님");
-  assert.equal(got[0].fromName, "에이AI");
+  assert.equal(got[0].origin?.hubUser, "에이-u");
+  assert.equal(got[0].fromName, "에이-ai");
   assert.equal(got[0].from, "spA/u1");
   assert.equal(d.channels.getChannel(d.mesh.mirrorId("spA", ch))?.area, "connection");
   assert.ok(d.delivered.some((m) => m.text === "하나"));

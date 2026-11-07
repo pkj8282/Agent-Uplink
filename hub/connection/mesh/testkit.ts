@@ -37,14 +37,14 @@ export function node(name: string, spaceId: string, extra: Partial<MeshDeps> = {
   });
   const makeGov = () => new Governance({
     dir: path.join(dataDir, "mesh"),
-    self: () => ({ spaceId, spaceName: name, userName: `${name}님`, keys }),
+    self: () => ({ spaceId, spaceName: name, userName: `${name}-u`, keys }),
     mesh: () => n.mesh,
     unshareOwn: (ch) => { n.own = n.own.filter((c) => c.id !== ch); n.mesh.ownChanged(); },
     log: (code) => n.logs.push(code),
   });
   const make = () => new Mesh({
     dir: path.join(dataDir, "mesh"),
-    self: () => ({ spaceId, spaceName: name, userName: `${name}님`, keys }),
+    self: () => ({ spaceId, spaceName: name, userName: `${name}-u`, keys }),
     ownChannels: () => n.own,
     channels: n.channels,
     guard: (s) => s,
@@ -63,19 +63,19 @@ export function node(name: string, spaceId: string, extra: Partial<MeshDeps> = {
   if (opts.gov) n.gov = makeGov();
   n.addChannel = (chName, share = true) => {
     const id = randomUUID();
-    n.channels.register({ id, kind: "server", label: `통신/${chName}`, members: null, area: "connection" }, path.join(dataDir, "comms", `${id}.jsonl`));
+    n.channels.register({ id, kind: "server", label: `comms/${chName}`, members: null, area: "connection" }, path.join(dataDir, "comms", `${id}.jsonl`));
     if (share) { n.own.push({ id, name: chName }); n.mesh.ownChanged(); }
     return id;
   };
   n.say = (chId, text, from = "u1") => {
-    const m = n.channels.append(chId, from, `${name}AI`, text);
+    const m = n.channels.append(chId, from, `${name}-ai`, text);
     n.mesh.onOwnMessage(chId, m);
     return m;
   };
   n.restart = () => {
     n.mesh.stop();
     n.channels = new ChannelStore({ dir: path.join(dataDir, "channels") });
-    for (const c of n.own) n.channels.register({ id: c.id, kind: "server", label: `통신/${c.name}`, members: null, area: "connection" }, path.join(dataDir, "comms", `${c.id}.jsonl`));
+    for (const c of n.own) n.channels.register({ id: c.id, kind: "server", label: `comms/${c.name}`, members: null, area: "connection" }, path.join(dataDir, "comms", `${c.id}.jsonl`));
     n.mesh = make();
     if (opts.gov) n.gov = makeGov();
   };

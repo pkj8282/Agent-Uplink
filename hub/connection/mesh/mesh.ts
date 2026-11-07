@@ -75,6 +75,8 @@ export interface MeshDeps {
   relayTimeoutMs?: number;
   /** 다른 이벤트(명령 등) — 처리했으면 true. */
   onOtherEvent?(e: { event: string; [k: string]: unknown }, from: MeshLink): boolean;
+  /** 망 서버·채널 목록이 바뀌었을 때(구성원에게 공유 목록 다시 알리기). */
+  onServersChanged?(): void;
   /** 연결이 붙어 목록을 보낸 뒤(거버넌스가 자기 알림을 보낸다). */
   onAttach?(l: MeshLink): void;
 }
@@ -311,7 +313,7 @@ export class Mesh {
         const id = this.mirrorId(origin, chn.id);
         keep.add(id);
         this.deps.channels.register(
-          { id, kind: "server", label: `망:${c.body.spaceName}/${chn.name}`, members: null, area: "connection" },
+          { id, kind: "server", label: `mesh:${c.body.spaceName}/${chn.name}`, members: null, area: "connection" },
           path.join(this.file("mirror"), origin, `${chn.id}.jsonl`),
         );
       }
@@ -323,6 +325,7 @@ export class Mesh {
   /** 정책이 바뀌었을 때 거울을 다시 맞춘다(T6). */
   refreshMirrors(): void {
     for (const origin of this.cats.keys()) this.applyMirrors(origin);
+    this.deps.onServersChanged?.();
   }
 
   private onCatalog(raw: unknown, from: MeshLink): void {
@@ -355,6 +358,7 @@ export class Mesh {
     this.cats.set(b.origin, { signed: raw as Signed<CatalogBody>, body });
     this.saveDir();
     this.applyMirrors(b.origin);
+    this.deps.onServersChanged?.();
     for (const l of this.links) if (l !== from) l.ch.event({ event: "cat", c: raw as object });
     if (added) void this.syncHeads(from);
   }

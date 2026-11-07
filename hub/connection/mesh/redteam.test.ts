@@ -24,8 +24,8 @@ function intruder(target: Node) {
 }
 
 /** A-C-D 줄: D는 A를 C 너머로 안다. A→C 기록 이벤트를 붙잡아 둔다. */
-async function world() {
-  const a = node("에이", "spA"), c = node("씨", "spC"), d = node("디", "spD");
+async function world(dExtra: Parameters<typeof node>[2] = {}) {
+  const a = node("에이", "spA"), c = node("씨", "spC"), d = node("디", "spD", dExtra);
   const ach = a.addChannel("일반");
   const captured: any[] = [];
   connect(a, c, (from, obj) => { if (from === "a" && (obj.event === "rec" || obj.event === "cat")) captured.push(JSON.parse(JSON.stringify(obj))); return true; });
@@ -117,7 +117,8 @@ test("oversize_and_future_rejected: 미래 시각·너무 큰 글 기록 → 거
 });
 
 test("rate_flood_dropped: 한 연결에서 1초에 200개 넘는 기록은 버림", async () => {
-  const { d } = await world();
+  const frozen = Date.now();
+  const { d } = await world({ now: () => frozen }); // 시계 고정: 처리 속도와 무관하게 '같은 1초'
   const m = intruder(d);
   let prev = "";
   for (let n = 1; n <= 260; n++) {

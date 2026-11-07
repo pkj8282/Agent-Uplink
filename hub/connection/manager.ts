@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { MAX_READ_LIMIT, MAX_STORED_TEXT_LENGTH, MAX_TEXT_LENGTH, type AccountInfo, type Channel, type Message, type MessageOrigin } from "../../shared/protocol.js";
-import { newJoinToken } from "../../shared/connCrypto.js";
+import { newJoinToken, spkiFingerprint } from "../../shared/connCrypto.js";
 import { decodeInvite, encodeInvite } from "../../shared/invite.js";
 import type { ProfileId } from "../../shared/cryptoProfile.js";
 import type { ConnEvent, ConnRequest, ConnRequestBody, RemoteAccount, SharedServer } from "../../shared/connProtocol.js";
@@ -27,6 +27,10 @@ import { Lifecycle } from "./lifecycle.js";
 import { SpaceSync, type SpaceChannel, type SpaceDeps } from "./space1/sync.js";
 import type { StorageBackend } from "./storage/backend.js";
 import { DEFAULT_PROFILE } from "../../shared/cryptoProfile.js";
+import { Mesh, type MeshSelf } from "./mesh/mesh.js";
+import { Governance, RELAY_WINDOW, type CaseChoice, type GovCommand } from "./mesh/governance.js";
+import { LinkDialer, joinLink, type LinkSelf } from "./mesh/link.js";
+import type { LinkRecord } from "./store.js";
 
 export interface ManagerDeps {
   dataDir: string;
@@ -66,6 +70,11 @@ export class ConnectionManager implements ConnStatusSource {
   private memberAccounts = new Map<string, { uuid: string; name: string; description: string }[]>();
   private spaces = new Map<string, SpaceState>();
   private tap: ((o: object) => void) | null = null;
+  /** 방식 3(v3.0 5단계) 망 엔진·거버넌스·내가 거는 서버 연결. */
+  private mesh: Mesh | null = null;
+  private gov: Governance | null = null;
+  private dialers = new Map<string, LinkDialer>();
+  private meshTimers: NodeJS.Timeout[] = [];
   /** 구성원별 최근 전송 시각(설계 5.2 "참여자별 메시지 속도 제한", RT-C16). */
   private sendTimes = new Map<string, number[]>();
 
@@ -90,7 +99,13 @@ export class ConnectionManager implements ConnStatusSource {
       spaceId: () => this.store.serverConfig()?.spaceId ?? null,
       profile: () => this.store.serverConfig()?.profile ?? DEFAULT_PROFILE,
       keys: () => this.store.identity(),
-      channels: () => this.comms.servers().flatMap((s) => s.channels.map((c) => ({ id: c.id, logFile: this.comms.logPath(c.id) }))),
+      // 방식 3: 망 경우에 따라 내 채널을 올릴지·거울도 올릴지(메인·지정 서버)
+      channels: () => {
+        const plan = this.gov?.uploadPlan() ?? { own: true, mirrors: [] };
+        const own = plan.own ? this.comms.servers().flatMap((s) => s.channels.map((c) => ({ id: c.id, logFile: this.comms.logPath(c.id) }))) : [];
+        const mirrors = plan.mirrors.flatMap((id) => { const f = this.deps.channels.fileOf(id); return f ? [{ id, logFile: f }] : []; });
+        return [...own, ...mirrors];
+      },
       makeBackend: (cfg, token) => {
         if (cfg.kind === "supabase") {
           return new SupabaseBackend({ url: cfg.url ?? "", key: token, bucket: cfg.bucket ?? "agent-uplink", ...(deps.supabaseInsecureForTest ? { allowInsecureForTest: true } : {}) });
@@ -251,6 +266,11 @@ export class ConnectionManager implements ConnStatusSource {
     }
     for (const j of this.store.joined()) this.startSpace(j);
     this.loadSpaces1();
+    // 방식 3: 망을 쓴 적 있는 Hub만(폴더 또는 서버 연결이 있을 때)
+    if (this.store.serverConfig() && (fs.existsSync(this.meshDir()) || this.store.links().some((l) => !l.removed))) {
+      this.ensureMesh();
+      for (const l of this.store.links()) if (l.dir === "out" && !l.removed) this.startDialer(l);
+    }
     // 가동 사건 기록(사용자 설계): 지난 실행이 정상 종료 보고 없이 끝났으면 비정상 종료 — 밀린 백업을 바로 올린다.
     const clean = new Lifecycle(path.join(this.store.dir, "lifecycle.jsonl")).lastRunClean();
     this.ensureStarted();
@@ -275,6 +295,11 @@ export class ConnectionManager implements ConnStatusSource {
     }
     for (const st of this.spaces.values()) st.client.stop();
     this.spaces.clear();
+    for (const t of this.meshTimers) clearInterval(t);
+    this.meshTimers = [];
+    for (const d of this.dialers.values()) d.stop();
+    this.dialers.clear();
+    this.mesh?.stop();
     const l = this.listener;
     this.listener = null;
     this.listening = false;
@@ -285,6 +310,7 @@ export class ConnectionManager implements ConnStatusSource {
   hasLiveConnection(): boolean {
     if (this.listening) return true;
     for (const st of this.spaces.values()) if (st.client.connected) return true;
+    for (const d of this.dialers.values()) if (d.connected) return true;
     return false;
   }
 
@@ -338,6 +364,11 @@ export class ConnectionManager implements ConnStatusSource {
       onPeerGone: (p) => this.peers.delete(p),
       handle: (p, req, reply) => this.handle(p, req, reply),
       log: (code, detail) => this.log(code, detail),
+      onLink: (rec, ch) => {
+        const mesh = this.ensureMesh();
+        if (mesh) mesh.attach({ spaceId: rec.spaceId, spaceName: rec.spaceName, serverKey: rec.serverKey }, ch);
+        else ch.close();
+      },
     });
     const port = await l.listen(cfg.port, cfg.bindHost ?? "0.0.0.0");
     this.listener = l;
@@ -381,7 +412,21 @@ export class ConnectionManager implements ConnStatusSource {
 
   private sharedServers(): SharedServer[] {
     const cfg = this.store.serverConfig();
-    return cfg ? this.comms.shared(cfg.shared) : [];
+    const out = cfg ? this.comms.shared(cfg.shared) : [];
+    // 방식 3: 망 서버의 공유 채널도 구성원에게(구성원은 이 서버를 거쳐 읽고 씀)
+    for (const s of this.meshServers()) out.push({ serverId: `m.${s.spaceId}`, name: `mesh:${s.spaceName}`, channels: s.channels });
+    return out;
+  }
+
+  /** 거울이 실제로 있는 망 서버와 채널(채널 ID = 거울 ID). */
+  private meshServers(): { spaceId: string; spaceName: string; channels: { channelId: string; name: string }[] }[] {
+    const mesh = this.mesh;
+    if (!mesh) return [];
+    return mesh.servers().map((s) => ({
+      spaceId: s.spaceId,
+      spaceName: s.spaceName,
+      channels: s.channels.map((c) => ({ channelId: mesh.mirrorId(s.spaceId, c.id), name: c.name })).filter((c) => !!this.deps.channels.getChannel(c.channelId)),
+    })).filter((s) => s.channels.length > 0);
   }
 
   private sharedChannel(channelId: unknown): Channel | null {
@@ -479,10 +524,17 @@ export class ConnectionManager implements ConnStatusSource {
         if (!fromName) return fail("from_invalid");
         const text = this.deps.guard(req.text, { source: "request", where: "conn_send", field: "text", account: p.memberId, keepLineBreaks: true });
         if (text.length > MAX_STORED_TEXT_LENGTH) return fail("text_hidden_too_long");
+        if (this.mesh?.parseMirror(ch.id)) {
+          // 방식 3 중계 쓰기: 이 서버가 서명해 대상 서버로(저장·전달은 대상 서버의 기록이 퍼지며 이뤄짐)
+          void this.mesh.relayWrite({ mirrorId: ch.id, from: `${p.memberId}:${from.uuid}`, fromName, hubUser: p.userName, text })
+            .then((r) => reply(r.ok ? { ok: true, seq: r.seq } : { ok: false, code: r.code }));
+          return;
+        }
         const origin: MessageOrigin = { scope: "remote", spaceName: this.store.serverConfig()?.spaceName ?? "", hubUser: p.userName };
         const msg = this.deps.channels.append(ch.id, `${p.memberId}:${from.uuid}`, fromName, text, origin);
         this.deps.deliver(ch, msg);
         this.broadcast(this.msgEvent(msg));
+        this.mesh?.onOwnMessage(ch.id, msg);
         return reply({ ok: true, seq: msg.seq });
       }
       case "c_accounts": {
@@ -518,6 +570,7 @@ export class ConnectionManager implements ConnStatusSource {
   /** Hub가 통신 채널에 로컬(서버 자신의) 메시지를 저장한 뒤 부른다 — 공유 채널이면 구성원에게. */
   onLocalMessage(ch: Channel, msg: Message): void {
     if (ch.area !== "connection" || ch.id.startsWith(REMOTE_PREFIX)) return;
+    this.mesh?.onOwnMessage(ch.id, msg);
     if (!this.sharedChannel(ch.id)) return;
     this.broadcast(this.msgEvent(msg));
   }
@@ -714,6 +767,7 @@ export class ConnectionManager implements ConnStatusSource {
   serversFor(): { serverId: string; name: string; channelCount: number; area?: "connection"; remote?: { spaceName: string; hubUser: string } }[] {
     const out: { serverId: string; name: string; channelCount: number; area?: "connection"; remote?: { spaceName: string; hubUser: string } }[] = [];
     for (const s of this.comms.servers()) out.push({ serverId: s.id, name: s.name, channelCount: s.channels.length, area: "connection" });
+    for (const s of this.meshServers()) out.push({ serverId: `m.${s.spaceId}`, name: `mesh:${s.spaceName}`, channelCount: s.channels.length, remote: { spaceName: s.spaceName, hubUser: s.spaceName } });
     for (const st of this.spaces.values()) {
       for (const s of st.shared) {
         out.push({ serverId: this.remoteId(st.space.spaceId, s.serverId), name: s.name, channelCount: s.channels.length, remote: { spaceName: st.space.spaceName, hubUser: st.space.hostUser } });
@@ -726,6 +780,8 @@ export class ConnectionManager implements ConnStatusSource {
   channelsFor(serverId: string): { channelId: string; name: string }[] | null {
     const own = this.comms.getServer(serverId);
     if (own) return own.channels.map((c) => ({ channelId: c.id, name: c.name }));
+    const ms = this.meshServers().find((s) => `m.${s.spaceId}` === serverId);
+    if (ms) return ms.channels;
     for (const st of this.spaces.values()) {
       for (const s of st.shared) {
         if (this.remoteId(st.space.spaceId, s.serverId) === serverId) {
@@ -759,6 +815,7 @@ export class ConnectionManager implements ConnStatusSource {
     storage: ReturnType<Uploader["status"]>;
     spaces1: ReturnType<SpaceSync["status"]>[];
     comms: { serverId: string; name: string; channels: { channelId: string; name: string }[] }[];
+    mesh: ReturnType<ConnectionManager["meshStatus"]>;
     events: { ts: number; code: string; detail: object }[];
   } {
     const cfg = this.store.serverConfig();
@@ -771,7 +828,213 @@ export class ConnectionManager implements ConnStatusSource {
       storage: this.uploader.status(),
       spaces1: this.space1Status(),
       comms: this.comms.servers().map((s) => ({ serverId: s.id, name: s.name, channels: s.channels.map((c) => ({ channelId: c.id, name: c.name })) })),
+      mesh: this.meshStatus(),
       events: this.events.slice(-50),
+    };
+  }
+
+  // ───────── 방식 3: 서버끼리 망(v3.0 5단계) ─────────
+
+  private meshDir(): string {
+    return path.join(this.store.dir, "mesh");
+  }
+
+  private meshSelf(): MeshSelf {
+    const c = this.store.serverConfig()!;
+    return { spaceId: c.spaceId, spaceName: c.spaceName, userName: this.userName(), keys: this.store.identity() };
+  }
+
+  /** 망 엔진(통신 서버 설정이 있을 때만). 만들 때 파일을 쓰지 않는다 — 실제로 쓸 일이 생길 때 쓴다. */
+  private ensureMesh(): Mesh | null {
+    if (this.mesh) return this.mesh;
+    if (!this.store.serverConfig()) return null;
+    const self = () => this.meshSelf();
+    const gov = new Governance({ dir: this.meshDir(), self, mesh: () => this.mesh!, unshareOwn: (ch) => this.meshExclude(ch), log: (c, d) => this.log(c, d ?? {}) });
+    this.gov = gov;
+    this.mesh = new Mesh({
+      dir: this.meshDir(),
+      self,
+      ownChannels: () => this.meshOwnChannels(),
+      channels: this.deps.channels,
+      guard: (s, field, keep) => this.g(s, "mesh", field, keep),
+      log: (c, d) => this.log(c, d ?? {}),
+      deliver: (ch, msg) => {
+        // 내 Hub에서 중계로 쓴 메시지가 돌아오면 보낸 계정에게는 메아리를 주지 않는다(from = 출처/진입서버/계정)
+        const parts = msg.from.split("/");
+        const skip = parts.length >= 3 && parts[1] === this.store.serverConfig()?.spaceId ? parts.slice(2).join("/") : undefined;
+        this.deps.deliver(ch, msg, skip);
+        if (this.sharedChannel(ch.id)) this.broadcast(this.msgEvent(msg));
+      },
+      policy: gov,
+      onOtherEvent: (e, l) => gov.onEvent(e, l),
+      onAttach: (l) => gov.onAttach(l),
+      initialWindow: () => gov.initialWindow(),
+      appendOwn: (chId, from, fromName, text, origin) => {
+        const ch = this.comms.findChannel(chId) ? this.deps.channels.getChannel(chId) : undefined;
+        if (!ch) return null;
+        const msg = this.deps.channels.append(chId, from, fromName, text, origin);
+        this.deps.deliver(ch, msg);
+        if (this.sharedChannel(chId)) this.broadcast(this.msgEvent(msg));
+        return msg;
+      },
+      onServersChanged: () => this.broadcastShared(),
+    });
+    const t1 = setInterval(() => { if (this.mesh && this.mesh.links.size > 0) gov.tick(); }, 30_000);
+    const t2 = setInterval(() => this.trimMirrors(), 10 * 60_000);
+    t1.unref(); t2.unref();
+    this.meshTimers.push(t1, t2);
+    this.trimMirrors();
+    return this.mesh;
+  }
+
+  /** 거울을 최근 500개로(메인·예비·지정 서버는 안 자름, Ruling 7). */
+  private trimMirrors(): void {
+    if (!this.mesh || !this.gov) return;
+    for (const id of this.gov.trimPlan()) this.mesh.trim(id, RELAY_WINDOW);
+  }
+
+  private meshOwnChannels(): { id: string; name: string }[] {
+    const cfg = this.store.serverConfig();
+    if (!cfg) return [];
+    const excluded = new Set(cfg.meshExcluded ?? []);
+    const want = new Set(cfg.meshShared ?? []);
+    return this.comms.servers().filter((s) => want.has(s.id)).flatMap((s) => s.channels.filter((c) => !excluded.has(c.id)).map((c) => ({ id: c.id, name: c.name })));
+  }
+
+  private meshExclude(ch: string): void {
+    const cfg = this.store.serverConfig();
+    if (!cfg) return;
+    this.store.setServerConfig({ ...cfg, meshExcluded: [...new Set([...(cfg.meshExcluded ?? []), ch])] });
+    this.log("mesh_channel_unshared_by_coordinator", { channelId: ch });
+    this.mesh?.ownChanged();
+  }
+
+  /** 망에 공유할 통신 서버를 고른다(방식 2 공유와 따로). */
+  meshSetShared(serverIds: string[]): void {
+    const cfg = this.store.serverConfig();
+    if (!cfg) throw new Error("server_not_configured");
+    const exists = new Set(this.comms.servers().map((s) => s.id));
+    this.store.setServerConfig({ ...cfg, meshShared: serverIds.filter((id) => exists.has(id)) });
+    this.ensureMesh()?.ownChanged();
+  }
+
+  /** 서버 연결 인증서(1회용)를 만든다 — 이 Hub 주인의 승인. */
+  meshInvite(label: string, host: string, expiresInMs: number): { code: string; ipWarning: boolean } {
+    const cfg = this.store.serverConfig();
+    if (!cfg?.enabled) throw new Error("server_not_enabled");
+    const name = validateName(label, "server", (s) => this.g(s, "mesh_invite", "label"));
+    if (!name.ok) throw new Error("name_invalid");
+    const keys = this.store.identity();
+    const token = newJoinToken();
+    const expiresAt = Date.now() + expiresInMs;
+    this.store.addLinkInvite(token, name.name, expiresAt);
+    this.ensureMesh();
+    const code = encodeInvite({
+      v: 1, kind: "link", spaceId: cfg.spaceId, spaceName: cfg.spaceName, profile: cfg.profile,
+      endpoint: { type: "direct", host, port: cfg.port }, serverKey: keys.publicKeyB64, token, expiresAt, hostUser: this.userName(), memberName: name.name,
+    }, keys.privateKeyPem);
+    return { code, ipWarning: true };
+  }
+
+  /** 받은 서버 연결 인증서로 잇는다 — 이 Hub 주인의 승인. */
+  async meshJoin(code: string): Promise<{ ok: true; spaceId: string } | { ok: false; code: string }> {
+    const d = decodeInvite(code, Date.now());
+    if (!d.ok) return d;
+    if (d.invite.kind !== "link") return { ok: false, code: "not_link_invite" };
+    const cfg = this.store.serverConfig();
+    if (!cfg) return { ok: false, code: "server_not_enabled" };
+    if (d.invite.spaceId === cfg.spaceId) return { ok: false, code: "link_self" };
+    const self = this.meshSelf();
+    const r = await joinLink(d.invite, { keys: self.keys, spaceId: self.spaceId, spaceName: self.spaceName });
+    if (!r.ok) return r;
+    const name = validateName(r.link.spaceName, "server", (s) => this.g(s, "mesh_join", "spaceName"));
+    const link: LinkRecord = { ...r.link, spaceName: name.ok ? name.name : "?" };
+    this.store.addLink(link);
+    this.ensureStarted();
+    this.ensureMesh();
+    this.startDialer(link);
+    this.log("link_added", { spaceId: link.spaceId, spaceName: link.spaceName });
+    return { ok: true, spaceId: link.spaceId };
+  }
+
+  private startDialer(link: LinkRecord): void {
+    this.dialers.get(link.spaceId)?.stop();
+    const self = this.meshSelf();
+    const linkSelf: LinkSelf = { keys: self.keys, spaceId: self.spaceId, spaceName: self.spaceName };
+    const d = new LinkDialer({
+      link,
+      self: linkSelf,
+      onUp: (ch) => {
+        const mesh = this.ensureMesh();
+        if (mesh) mesh.attach({ spaceId: link.spaceId, spaceName: link.spaceName, serverKey: link.serverKey }, ch);
+        else ch.close();
+      },
+      onDown: () => this.log("link_down", { spaceId: link.spaceId }),
+      onError: (code) => this.log("link_connect_failed", { spaceId: link.spaceId, code }),
+      ...(this.deps.backoffMs ? { backoffMs: this.deps.backoffMs } : {}),
+    });
+    this.dialers.set(link.spaceId, d);
+    d.start();
+  }
+
+  /** 서버 연결 끊기(그 서버의 키로는 다시 인증 못 함). */
+  meshRemove(spaceId: string): boolean {
+    const ok = this.store.removeLink(spaceId);
+    this.dialers.get(spaceId)?.stop();
+    this.dialers.delete(spaceId);
+    this.listener?.disconnectLink(spaceId);
+    this.mesh?.dropLinksTo(spaceId);
+    if (ok) this.log("link_removed", { spaceId });
+    return ok;
+  }
+
+  private needGov(): Governance {
+    this.ensureMesh();
+    if (!this.gov) throw new Error("server_not_configured");
+    return this.gov;
+  }
+
+  meshSetCase(c: CaseChoice): void {
+    this.needGov().setChoice(c);
+  }
+
+  meshCoordinator(on: boolean): void {
+    this.needGov().declareCoordinator(on);
+  }
+
+  meshAccept(spaceId: string | null): void {
+    this.needGov().accept(spaceId);
+  }
+
+  meshCommand(cmd: GovCommand): void {
+    this.needGov().issue(cmd);
+  }
+
+  /** 연결 계정이 망 거울(m.…)에 쓴다 — 대상 서버로 중계. */
+  async sendMesh(channelId: string, from: Account, text: string): Promise<{ ok: true; seq: number } | { ok: false; code: string }> {
+    if (!this.mesh?.parseMirror(channelId)) return { ok: false, code: "channel_not_found" };
+    return this.mesh.relayWrite({ mirrorId: channelId, from: from.uuid, fromName: from.name, hubUser: this.userName(), text });
+  }
+
+  meshStatus(): {
+    self: string;
+    shared: string[];
+    excluded: string[];
+    links: { spaceId: string; spaceName: string; dir: "in" | "out"; fingerprint: string; connected: boolean }[];
+    servers: { spaceId: string; spaceName: string; channelCount: number; direct: boolean }[];
+    gov: ReturnType<Governance["status"]> | null;
+  } | null {
+    const cfg = this.store.serverConfig();
+    if (!cfg) return null;
+    const live = new Set([...(this.mesh?.links ?? [])].map((l) => l.info.spaceId));
+    const links = this.store.links().filter((l) => !l.removed);
+    return {
+      self: cfg.spaceId,
+      shared: cfg.meshShared ?? [],
+      excluded: cfg.meshExcluded ?? [],
+      links: links.map((l) => ({ spaceId: l.spaceId, spaceName: l.spaceName, dir: l.dir, fingerprint: spkiFingerprint(l.serverKey).slice(0, 16), connected: live.has(l.spaceId) })),
+      servers: (this.mesh?.servers() ?? []).map((s) => ({ spaceId: s.spaceId, spaceName: s.spaceName, channelCount: s.channels.length, direct: links.some((l) => l.spaceId === s.spaceId) })),
+      gov: this.gov?.status() ?? null,
     };
   }
 

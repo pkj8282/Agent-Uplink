@@ -26,6 +26,7 @@ import { StorageError } from "./connection/storage/backend.js";
 import { parseRepo } from "./connection/storage/github.js";
 import { parseSupabaseUrl } from "./connection/storage/supabase.js";
 import { ConnectionManager } from "./connection/manager.js";
+import type { CaseChoice, GovCommand } from "./connection/mesh/governance.js";
 import { isProfileId } from "../shared/cryptoProfile.js";
 import {
   MAGIC,
@@ -379,6 +380,40 @@ export class Hub {
           return { ok: true };
         case "admin_conn_revoke":
           return c.revoke(String(q.memberId ?? "")) ? { ok: true } : fail("member_not_found", "member_not_found");
+        // ── 방식 3(서버끼리 망) ──
+        case "admin_conn_mesh_invite": {
+          const host = q.host;
+          if (typeof host !== "string" || host.trim().length === 0 || host.length > 253) return fail("host_invalid", "host_invalid");
+          const ms = q.expiresInMs;
+          if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 1 || ms > 30 * 24 * 3600_000) return fail("expires_invalid", "expires_invalid");
+          return { ok: true, ...c.meshInvite(typeof q.label === "string" ? q.label : "", host.trim(), ms) };
+        }
+        case "admin_conn_mesh_join": {
+          const r = await c.meshJoin(String(q.code ?? ""));
+          return r.ok ? { ok: true, spaceId: r.spaceId } : fail(r.code, "conn_op_failed", { code: r.code });
+        }
+        case "admin_conn_mesh_remove":
+          return c.meshRemove(String(q.spaceId ?? "")) ? { ok: true } : fail("link_not_found", "conn_op_failed", { code: "link_not_found" });
+        case "admin_conn_mesh_set_shared": {
+          const ids = q.serverIds;
+          if (!Array.isArray(ids) || ids.length > 100 || !ids.every((x) => typeof x === "string")) return fail("shared_invalid", "shared_invalid");
+          c.meshSetShared(ids as string[]);
+          return { ok: true };
+        }
+        case "admin_conn_mesh_set_case":
+          c.meshSetCase(q.choice as CaseChoice);
+          return { ok: true };
+        case "admin_conn_mesh_coordinator":
+          c.meshCoordinator(q.on === true);
+          return { ok: true };
+        case "admin_conn_mesh_accept":
+          c.meshAccept(typeof q.spaceId === "string" ? q.spaceId : null);
+          return { ok: true };
+        case "admin_conn_mesh_command":
+          c.meshCommand(q.cmd as GovCommand);
+          return { ok: true };
+        case "admin_conn_mesh_status":
+          return { ok: true, mesh: c.meshStatus() };
         default:
           return fail("unknown_op", "unknown_op");
       }
@@ -942,6 +977,14 @@ export class Hub {
         // 통신 채널(v3.0)은 연결 계정만.
         if (ch.area === "connection" && sender.area !== "connection") {
           reply(this.err("channel_forbidden", "channel_forbidden"));
+          return;
+        }
+        if (ch.id.startsWith("m.")) {
+          // 방식 3 망 거울: 이 서버가 서명해 대상 서버로 중계(저장·전달은 대상 서버 기록이 퍼지며)
+          void this.conn.sendMesh(ch.id, sender, req.text).then((r) => {
+            if (r.ok) reply({ ok: true, seq: r.seq });
+            else reply(this.err(r.code, "remote_send_failed", { code: r.code }));
+          });
           return;
         }
         if (ch.id.startsWith("r:")) {

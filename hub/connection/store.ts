@@ -17,6 +17,10 @@ export interface ServerConfig {
   burnOnJoin: boolean;
   /** 공유하는 Connection Communications 서버 ID들. */
   shared: string[];
+  /** 방식 3: 망에 공유하는 통신 서버 ID들(기본 없음 — Ruling 4). */
+  meshShared?: string[];
+  /** 방식 3: 망 공유에서 뺀 채널(총괄 unshare가 내 채널을 가리킨 것). */
+  meshExcluded?: string[];
 }
 
 export interface MemberRecord {
