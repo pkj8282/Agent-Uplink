@@ -37,6 +37,18 @@ export interface JoinedSpace {
   hostUser: string;
 }
 
+/** 서버 연결(방식 3)로 이어진 다른 통신 서버. dir = out(내가 거는 쪽, endpoint 있음) / in(상대가 거는 쪽). */
+export interface LinkRecord {
+  spaceId: string;
+  spaceName: string;
+  serverKey: string;
+  dir: "in" | "out";
+  endpoint?: Endpoint;
+  profile?: ProfileId;
+  addedAt: number;
+  removed: boolean;
+}
+
 export type InviteUse = "ok" | "invalid" | "expired" | "used" | "bound_other";
 
 interface InviteRecord {
@@ -167,6 +179,57 @@ export class ConnectionStore {
     if (!m) return false;
     m.revoked = true;
     this.write("members.json", list);
+    return true;
+  }
+
+  // ───────── 서버 연결(방식 3) ─────────
+
+  private linkInvites(): InviteRecord[] {
+    const v = this.read<InviteRecord[]>("link-invites.json", []);
+    return Array.isArray(v) ? v : [];
+  }
+
+  /** 서버 연결 인증서 토큰(항상 1회용 — Ruling 1). */
+  addLinkInvite(token: string, label: string, expiresAt: number): void {
+    this.write("link-invites.json", [...this.linkInvites(), { tokenHash: tokenHash(token), label, expiresAt, used: false }]);
+  }
+
+  useLinkInvite(token: string, nowMs: number): "ok" | "invalid" | "expired" | "used" {
+    const want = Buffer.from(tokenHash(String(token)), "hex");
+    const list = this.linkInvites();
+    let found: InviteRecord | undefined;
+    for (const rec of list) {
+      const have = Buffer.from(rec.tokenHash, "hex");
+      if (have.length === want.length && timingSafeEqual(have, want) && !found) found = rec;
+    }
+    if (!found) return "invalid";
+    if (found.expiresAt <= nowMs) return "expired";
+    if (found.used) return "used";
+    found.used = true;
+    this.write("link-invites.json", list);
+    return "ok";
+  }
+
+  links(): LinkRecord[] {
+    const v = this.read<LinkRecord[]>("links.json", []);
+    return Array.isArray(v) ? v : [];
+  }
+
+  link(spaceId: string): LinkRecord | undefined {
+    return this.links().find((l) => l.spaceId === spaceId);
+  }
+
+  addLink(l: LinkRecord): void {
+    this.write("links.json", [...this.links().filter((x) => x.spaceId !== l.spaceId), l]);
+  }
+
+  /** 서버 연결 끊기(기록은 남기고 removed — 같은 키로 다시 인증 못 함). */
+  removeLink(spaceId: string): boolean {
+    const list = this.links();
+    const l = list.find((x) => x.spaceId === spaceId);
+    if (!l) return false;
+    l.removed = true;
+    this.write("links.json", list);
     return true;
   }
 

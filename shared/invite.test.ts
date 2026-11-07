@@ -74,3 +74,12 @@ test("invite_member_name_roundtrip: 참여자 이름(A가 정함)이 서명 안�
   assert.equal(r.ok && r.invite.memberName, "비");
   assert.deepEqual(decodeInvite(forge(code, (p) => { p.memberName = "에이"; }), now), { ok: false, code: "invite_bad_signature" });
 });
+
+test("link_invite_roundtrip: 서버 연결 인증서(kind link)도 같은 형식·서명, 다른 kind는 거부", () => {
+  const link: InvitePayload = { ...base, kind: "link" };
+  const r = decodeInvite(encodeInvite(link, k.privateKeyPem), now);
+  assert.equal(r.ok, true);
+  if (r.ok) assert.equal(r.invite.kind, "link");
+  const other = encodeInvite({ ...base, kind: "admin" as unknown as "join" }, k.privateKeyPem);
+  assert.deepEqual(decodeInvite(other, now), { ok: false, code: "invite_malformed" });
+});

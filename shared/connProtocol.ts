@@ -15,6 +15,18 @@ export function authSigData(challengeB64: string, ekmB64: string, memberId: stri
   return Buffer.from(`uplink-auth\n${challengeB64}\n${ekmB64}\n${memberId}`, "utf8");
 }
 
+/** 서버 연결(방식 3) 참여 서명: 붙는 서버 C의 서버 키·공간 ID를 이 TLS 세션에 묶는다. */
+export function linkJoinSigData(challengeB64: string, ekmB64: string, token: string, serverKey: string, spaceId: string): Buffer {
+  return Buffer.from(`uplink-link-join\n${challengeB64}\n${ekmB64}\n${token}\n${serverKey}\n${spaceId}`, "utf8");
+}
+
+export function linkAuthSigData(challengeB64: string, ekmB64: string, spaceId: string): Buffer {
+  return Buffer.from(`uplink-link-auth\n${challengeB64}\n${ekmB64}\n${spaceId}`, "utf8");
+}
+
+/** 서버 연결로 인증된 연결에서만 받는 요청(이벤트는 망 엔진이 이름으로 거른다). */
+export const LINK_OPS_AFTER_AUTH = ["l_heads", "l_pull"] as const;
+
 export const CONN_OPS_AFTER_AUTH = ["c_list", "c_send", "c_read", "c_accounts"] as const;
 
 export type ConnRequest =
@@ -24,7 +36,9 @@ export type ConnRequest =
   | { op: "c_list"; id: number }
   | { op: "c_send"; id: number; channelId: string; from: { uuid: string; name: string }; text: string }
   | { op: "c_read"; id: number; channelId: string; limit?: number }
-  | { op: "c_accounts"; id: number; accounts: { uuid: string; name: string; description: string }[] };
+  | { op: "c_accounts"; id: number; accounts: { uuid: string; name: string; description: string }[] }
+  | { op: "l_join"; id: number; token: string; serverKey: string; spaceId: string; spaceName: string; sig: string }
+  | { op: "l_auth"; id: number; spaceId: string; sig: string };
 
 /** id를 뺀 요청 본문(유니온 각 갈래별로 — 보내는 쪽이 id를 붙인다). */
 export type ConnRequestBody = ConnRequest extends unknown ? (ConnRequest extends infer R ? (R extends ConnRequest ? Omit<R, "id"> : never) : never) : never;

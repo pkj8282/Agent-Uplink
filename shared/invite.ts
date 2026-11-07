@@ -10,7 +10,8 @@ export type Endpoint =
 
 export interface InvitePayload {
   v: 1;
-  kind: "join";
+  /** join = 참여자 Hub 초대(방식 2), link = 서버 연결 인증서(방식 3, 받는 쪽도 통신 서버). */
+  kind: "join" | "link";
   spaceId: string;
   spaceName: string;
   profile: ProfileId;
@@ -83,7 +84,7 @@ export function decodeInvite(code: string, nowMs: number): { ok: true; invite: I
   const q = p as Record<string, unknown>;
   if (q.v !== 1) return bad("invite_version");
   // spaceId는 참여자 PC의 폴더 이름(connection/remote/<spaceId>)이 된다 → 경로에 안전한 문자만(RT-C14).
-  if (q.kind !== "join" || typeof q.spaceId !== "string" || !SPACE_ID_RE.test(q.spaceId) || !isStr(q.spaceName) || !validEndpoint(q.endpoint)
+  if ((q.kind !== "join" && q.kind !== "link") || typeof q.spaceId !== "string" || !SPACE_ID_RE.test(q.spaceId) || !isStr(q.spaceName) || !validEndpoint(q.endpoint)
     || !isStr(q.serverKey, 1024) || !isStr(q.token) || typeof q.expiresAt !== "number" || !isStr(q.hostUser) || !isStr(q.memberName)) {
     return bad("invite_malformed");
   }

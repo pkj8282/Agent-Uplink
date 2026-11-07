@@ -7,13 +7,14 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { encodeFrame, FrameDecoder, FrameTooLargeError } from "../../shared/framing.js";
 import { selfSignedCertPem } from "../../shared/x509.js";
 import { verifyB64 } from "../../shared/connCrypto.js";
+import { LinkChannel, LINK_OPS } from "./mesh/link.js";
 import { DEFAULT_PROFILE, PROFILES } from "../../shared/cryptoProfile.js";
 import {
-  CONN_EKM_LABEL, CONN_MAGIC, CONN_OPS_AFTER_AUTH, CONN_VERSION, authSigData, joinSigData,
+  CONN_EKM_LABEL, CONN_MAGIC, CONN_OPS_AFTER_AUTH, CONN_VERSION, authSigData, joinSigData, linkAuthSigData, linkJoinSigData,
   type ConnEvent, type ConnRequest,
 } from "../../shared/connProtocol.js";
 import { validateName } from "../names.js";
-import type { ConnectionStore } from "./store.js";
+import type { ConnectionStore, LinkRecord } from "./store.js";
 
 export interface ConnLimits {
   maxConnections: number;
@@ -48,6 +49,9 @@ export interface ConnListenerDeps {
   onPeerGone(p: ConnPeer): void;
   handle(p: ConnPeer, req: ConnRequest, reply: (r: object) => void): void;
   log(code: string, detail: object): void;
+  /** 서버 연결(방식 3)로 인증된 연결 — 없으면 l_join·l_auth를 받지 않는다. */
+  onLink?(rec: LinkRecord, ch: LinkChannel): void;
+  onLinkGone?(rec: LinkRecord, ch: LinkChannel): void;
   /** 원격 이름 감독(숨은 문자 이스케이프) — 없으면 validateName 기본 정리. */
   cleanName?: (s: string) => string;
   /** 시험용: 이 리스너가 내보내는 모든 프레임(응답·이벤트)을 본다. */
@@ -55,11 +59,13 @@ export interface ConnListenerDeps {
 }
 
 const AFTER_AUTH = new Set<string>(CONN_OPS_AFTER_AUTH);
+const SPACE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 export class ConnListener {
   private readonly limits: ConnLimits;
   private srv: tls.Server | null = null;
   private socketsByMember = new Map<string, Set<tls.TLSSocket>>();
+  private socketsByLink = new Map<string, Set<tls.TLSSocket>>();
   private attempts = new Map<string, number[]>();
   private preAuthByIp = new Map<string, number>();
 
@@ -95,12 +101,18 @@ export class ConnListener {
     const srv = this.srv;
     this.srv = null;
     for (const set of this.socketsByMember.values()) for (const s of set) s.destroy();
+    for (const set of this.socketsByLink.values()) for (const s of set) s.destroy();
     if (!srv) return Promise.resolve();
     return new Promise((r) => srv.close(() => r()));
   }
 
   disconnect(memberId: string): void {
     for (const s of this.socketsByMember.get(memberId) ?? []) s.destroy();
+  }
+
+  /** 서버 연결 끊기(그 서버의 소켓 전부). */
+  disconnectLink(spaceId: string): void {
+    for (const s of this.socketsByLink.get(spaceId) ?? []) s.destroy();
   }
 
   /** IP별 분당 참여·인증 시도 상한. 넘으면 false. */
@@ -136,8 +148,9 @@ export class ConnListener {
       else this.preAuthByIp.set(ip, n);
     };
     let peer: ConnPeer | null = null;
+    let link: { rec: LinkRecord; ch: LinkChannel } | null = null;
     let decoder = new FrameDecoder({ maxFrame: this.limits.preAuthMaxFrame });
-    const timer = setTimeout(() => { if (!peer) sock.destroy(); }, this.limits.preAuthTimeoutMs);
+    const timer = setTimeout(() => { if (!peer && !link) sock.destroy(); }, this.limits.preAuthTimeoutMs);
     sock.setNoDelay(true);
     sock.on("error", () => {});
     sock.on("close", () => {
@@ -146,6 +159,11 @@ export class ConnListener {
       if (peer) {
         this.socketsByMember.get(peer.memberId)?.delete(sock);
         this.deps.onPeerGone(peer);
+      }
+      if (link) {
+        this.socketsByLink.get(link.rec.spaceId)?.delete(sock);
+        link.ch.notifyClosed();
+        this.deps.onLinkGone?.(link.rec, link.ch);
       }
     });
 
@@ -170,8 +188,21 @@ export class ConnListener {
       this.deps.onPeer(peer);
     };
 
+    const becomeLink = (rec: LinkRecord) => {
+      clearTimeout(timer);
+      releasePreAuth();
+      decoder = new FrameDecoder({ maxFrame: this.limits.maxFrame });
+      const ch = new LinkChannel({ write: (o) => send(o), close: () => sock.destroy(), allowedOps: LINK_OPS });
+      link = { rec, ch };
+      let set = this.socketsByLink.get(rec.spaceId);
+      if (!set) this.socketsByLink.set(rec.spaceId, (set = new Set()));
+      set.add(sock);
+      this.deps.onLink?.(rec, ch);
+    };
+
     const onFrame = (f: unknown) => {
       if (sock.destroyed) return;
+      if (link) return link.ch.feed(f); // 서버 연결: 양방향(요청·응답·이벤트) — 허용 op는 LinkChannel이 거른다
       const r = f as { op?: unknown; id?: unknown } | null;
       if (!r || typeof r !== "object" || typeof r.op !== "string" || typeof r.id !== "number") {
         sock.destroy();
@@ -225,6 +256,40 @@ export class ConnListener {
           }
           becomePeer(m.memberId, m.userName);
           reply({ ok: true, memberId: m.memberId, spaceName: this.deps.store.serverConfig()?.spaceName ?? "" });
+          return;
+        }
+        case "l_join": {
+          if (!this.deps.onLink) return fail("auth_required", true);
+          if (!this.allowAttempt(ip)) { this.deps.log("rate_limited", { ip }); return fail("rate_limited", true); }
+          const q = f as { token?: unknown; serverKey?: unknown; spaceId?: unknown; spaceName?: unknown; sig?: unknown };
+          const store = this.deps.store;
+          const own = store.serverConfig();
+          const name = validateName(q.spaceName, "server", this.deps.cleanName);
+          const bad = () => { this.deps.log("link_join_failed", { ip }); return fail("link_join_failed"); };
+          if (!own || typeof q.token !== "string" || typeof q.serverKey !== "string" || typeof q.sig !== "string" || !name.ok
+            || typeof q.spaceId !== "string" || !SPACE_ID_RE.test(q.spaceId) || q.spaceId === own.spaceId
+            || !verifyB64(q.serverKey, linkJoinSigData(challenge, ekm, q.token, q.serverKey, q.spaceId), q.sig)) return bad();
+          const existing = store.link(q.spaceId);
+          if (existing && (existing.removed || existing.serverKey !== q.serverKey)) return bad();
+          if (store.useLinkInvite(q.token, Date.now()) !== "ok") return bad();
+          const rec: LinkRecord = { spaceId: q.spaceId, spaceName: name.name, serverKey: q.serverKey, dir: "in", addedAt: existing?.addedAt ?? Date.now(), removed: false };
+          store.addLink(rec);
+          this.deps.log("link_joined", { spaceId: rec.spaceId, spaceName: rec.spaceName });
+          reply({ ok: true, spaceId: own.spaceId, spaceName: own.spaceName });
+          becomeLink(rec);
+          return;
+        }
+        case "l_auth": {
+          if (!this.deps.onLink) return fail("auth_required", true);
+          if (!this.allowAttempt(ip)) { this.deps.log("rate_limited", { ip }); return fail("rate_limited", true); }
+          const q = f as { spaceId?: unknown; sig?: unknown };
+          const rec = typeof q.spaceId === "string" ? this.deps.store.link(q.spaceId) : undefined;
+          if (!rec || rec.removed || typeof q.sig !== "string" || !verifyB64(rec.serverKey, linkAuthSigData(challenge, ekm, rec.spaceId), q.sig)) {
+            this.deps.log("link_auth_failed", { ip });
+            return fail("link_auth_failed");
+          }
+          reply({ ok: true, spaceId: this.deps.store.serverConfig()?.spaceId ?? "", spaceName: this.deps.store.serverConfig()?.spaceName ?? "" });
+          becomeLink(rec);
           return;
         }
         default:

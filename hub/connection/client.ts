@@ -32,17 +32,23 @@ function checkPeer(sock: tls.TLSSocket, serverKey: string, profile: ProfileId): 
   return null;
 }
 
-/** 고정된 TLS 연결을 연다. onEvent는 id 없는 프레임(서버 이벤트)을 받는다. */
-function openPinned(
+export interface PinnedSocket {
+  sock: tls.TLSSocket;
+  ekm: string;
+  /** 받은 프레임 처리기를 단다(달기 전에 온 프레임은 모아 뒀다가 넘긴다). */
+  onFrame(fn: (f: any) => void): void;
+}
+
+/** 공개키 고정 TLS 소켓(프레임 단위). 서버 연결(방식 3)은 이 위에 양방향 채널을 올린다. */
+export function openPinnedSocket(
   target: { endpoint: InvitePayload["endpoint"]; serverKey: string; profile: ProfileId },
   timeoutMs: number,
-  onEvent: (e: ConnEvent) => void,
-): Promise<{ ok: true; ch: Channel } | { ok: false; code: ConnectError }> {
+): Promise<{ ok: true; ps: PinnedSocket } | { ok: false; code: ConnectError }> {
   const ep = target.endpoint;
   if (ep.type !== "direct") return Promise.resolve({ ok: false, code: "relay_unsupported" });
   return new Promise((resolve) => {
     let settled = false;
-    const done = (r: { ok: true; ch: Channel } | { ok: false; code: ConnectError }) => {
+    const done = (r: { ok: true; ps: PinnedSocket } | { ok: false; code: ConnectError }) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -67,41 +73,60 @@ function openPinned(
       if (bad) return done({ ok: false, code: bad });
       sock.on("error", () => {});
       const dec = new FrameDecoder({ maxFrame: CLIENT_MAX_FRAME });
-      const pending = new Map<number, (r: any) => void>();
-      let next = 1;
+      let handler: ((f: any) => void) | null = null;
+      const queued: any[] = [];
       sock.on("data", (chunk: Buffer) => {
         try {
-          dec.push(chunk, (f: any) => {
-            if (f && typeof f.id === "number") {
-              const p = pending.get(f.id);
-              if (p) { pending.delete(f.id); p(f); }
-            } else if (f && typeof f.event === "string") {
-              onEvent(f as ConnEvent);
-            }
-          });
+          dec.push(chunk, (f: any) => { if (handler) handler(f); else queued.push(f); });
         } catch {
           sock.destroy();
         }
       });
-      sock.once("close", () => {
-        for (const p of pending.values()) p({ ok: false, code: "connection_lost" });
-        pending.clear();
-      });
       const ekm = sock.exportKeyingMaterial(32, CONN_EKM_LABEL, Buffer.alloc(0)).toString("base64");
       done({
         ok: true,
-        ch: {
-          sock,
-          ekm,
-          req: (r) => new Promise((res) => {
-            if (sock.destroyed) return res({ ok: false, code: "connection_lost" });
-            const id = next++;
-            pending.set(id, res);
-            sock.write(encodeFrame({ ...r, id }));
-          }),
-        },
+        ps: { sock, ekm, onFrame: (fn) => { handler = fn; for (const f of queued.splice(0)) fn(f); } },
       });
     });
+  });
+}
+
+/** 고정된 TLS 연결을 연다. onEvent는 id 없는 프레임(서버 이벤트)을 받는다. */
+function openPinned(
+  target: { endpoint: InvitePayload["endpoint"]; serverKey: string; profile: ProfileId },
+  timeoutMs: number,
+  onEvent: (e: ConnEvent) => void,
+): Promise<{ ok: true; ch: Channel } | { ok: false; code: ConnectError }> {
+  return openPinnedSocket(target, timeoutMs).then((o) => {
+    if (!o.ok) return o;
+    const { sock, ekm } = o.ps;
+    const pending = new Map<number, (r: any) => void>();
+    let next = 1;
+    o.ps.onFrame((f: any) => {
+      if (f && typeof f.id === "number") {
+        const p = pending.get(f.id);
+        if (p) { pending.delete(f.id); p(f); }
+      } else if (f && typeof f.event === "string") {
+        onEvent(f as ConnEvent);
+      }
+    });
+    sock.once("close", () => {
+      for (const p of pending.values()) p({ ok: false, code: "connection_lost" });
+      pending.clear();
+    });
+    return {
+      ok: true as const,
+      ch: {
+        sock,
+        ekm,
+        req: (r: ConnRequestBody) => new Promise((res) => {
+          if (sock.destroyed) return res({ ok: false, code: "connection_lost" });
+          const id = next++;
+          pending.set(id, res);
+          sock.write(encodeFrame({ ...r, id }));
+        }),
+      },
+    };
   });
 }
 
