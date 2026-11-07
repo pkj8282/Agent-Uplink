@@ -102,8 +102,8 @@ export class ConnectionManager implements ConnStatusSource {
       // 방식 3: 망 경우에 따라 내 채널을 올릴지·거울도 올릴지(메인·지정 서버)
       channels: () => {
         const plan = this.gov?.uploadPlan() ?? { own: true, mirrors: [] };
-        const own = plan.own ? this.comms.servers().flatMap((s) => s.channels.map((c) => ({ id: c.id, logFile: this.comms.logPath(c.id) }))) : [];
-        const mirrors = plan.mirrors.flatMap((id) => { const f = this.deps.channels.fileOf(id); return f ? [{ id, logFile: f }] : []; });
+        const own = plan.own ? this.comms.servers().flatMap((s) => s.channels.map((c) => ({ id: c.id, name: `${s.name}/${c.name}`, logFile: this.comms.logPath(c.id) }))) : [];
+        const mirrors = plan.mirrors.flatMap((id) => { const f = this.deps.channels.fileOf(id); return f ? [{ id, name: this.deps.channels.getChannel(id)?.label ?? id, logFile: f }] : []; });
         return [...own, ...mirrors];
       },
       makeBackend: (cfg, token) => {

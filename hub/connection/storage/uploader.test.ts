@@ -15,7 +15,7 @@ const cfg: StorageConfig = { kind: "github", repo: "o/r", intervalMin: 5 };
 function setup(dir = tempDir("uplink-up-"), keys = generateSigningKeys(), backend = new MemoryBackend()) {
   const logs = path.join(dir, "logs");
   fs.mkdirSync(logs, { recursive: true });
-  const chans = ["c1", "c2"].map((id) => ({ id, logFile: path.join(logs, `${id}.jsonl`) }));
+  const chans = ["c1", "c2"].map((id) => ({ id, name: `비밀팀/${id}방`, logFile: path.join(logs, `${id}.jsonl`) }));
   const seqs: Record<string, number> = {};
   for (const c of chans) {
     if (fs.existsSync(c.logFile)) seqs[c.id] = fs.readFileSync(c.logFile, "utf8").split("\n").filter(Boolean).length;
@@ -277,4 +277,16 @@ test("switch_target_legacy_state: 저장소 정보가 없는 예전 진행 기�
   fs.writeFileSync(f, JSON.stringify(st));
   await t.up.configure({ kind: "github", repo: "o/other", intervalMin: 5 }, TOKEN);
   assert.equal(t.up.status().nextIndex, 0);
+});
+
+test("fragment_carries_channel_names_encrypted: 조각 암호문 안에 든 채널의 이름이 있고, 저장소 바이트에는 이름 평문이 없다", async () => {
+  const t = setup();
+  const { recoveryKey } = await t.up.configure(cfg, TOKEN);
+  t.add("c1", "a"); t.add("c1", "b");
+  await t.up.uploadNow();
+  const [bytes] = [...t.backend.files.values()];
+  assert.equal(bytes.toString("utf8").includes("비밀팀"), false);
+  const d = decodeFragment(bytes, { spaceKey: fromBase32(recoveryKey)! });
+  assert.ok(d.ok);
+  if (d.ok) assert.deepEqual(d.body.channels, [{ id: "c1", name: "비밀팀/c1방" }]);
 });

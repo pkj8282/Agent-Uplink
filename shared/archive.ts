@@ -29,6 +29,8 @@ export interface FragmentHeader {
 
 export interface FragmentBody {
   messages: Message[];
+  /** 이 조각에 든 채널의 이름(v3.0 7단계 — 다른 PC 복원용). 암호문 안에만 있다. 옛 조각에는 없음. */
+  channels?: { id: string; name: string }[];
 }
 
 export type FragmentError = "frag_malformed" | "frag_bad_signature" | "frag_hub_mismatch" | "frag_decrypt_failed" | "frag_profile_unknown";
@@ -107,6 +109,10 @@ export function decodeFragment(bytes: Buffer, o: { spaceKey: Buffer; expectHubKe
     return bad("frag_decrypt_failed");
   }
   if (!body || !Array.isArray(body.messages)) return bad("frag_malformed");
+  if (body.channels !== undefined) {
+    if (!Array.isArray(body.channels)) return bad("frag_malformed");
+    body.channels = body.channels.filter((c) => !!c && typeof c.id === "string" && typeof c.name === "string");
+  }
   return { ok: true, header, body, hash: sha256hex(bytes) };
 }
 

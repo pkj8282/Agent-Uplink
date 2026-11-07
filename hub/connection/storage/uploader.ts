@@ -34,7 +34,7 @@ export interface UploaderDeps {
   spaceId: () => string | null;
   profile: () => ProfileId;
   keys: () => SigningKeys;
-  channels: () => { id: string; logFile: string }[];
+  channels: () => { id: string; logFile: string; name?: string }[];
   makeBackend: (cfg: StorageConfig, token: string) => StorageBackend;
   log: (code: string, detail?: object) => void;
   /** 로컬 정리: 채널 로그에서 keep이 false인 메시지를 지우고 개수를 돌려준다. */
@@ -209,6 +209,12 @@ export class Uploader {
     return this.running;
   }
 
+  /** 조각에 든 채널의 이름(암호문 안에 넣음 — 다른 PC 복원 때 채널 이름을 되살린다). */
+  private namesOf(chunk: Message[]): { id: string; name: string }[] {
+    const ids = new Set(chunk.map((m) => m.channelId));
+    return this.d.channels().filter((c) => ids.has(c.id) && typeof c.name === "string").map((c) => ({ id: c.id, name: c.name! }));
+  }
+
   private pending(st: State): Message[] {
     const out: Message[] = [];
     for (const c of this.d.channels()) {
@@ -271,7 +277,7 @@ export class Uploader {
         const p = `${this.root(spaceId)}/${day}/${String(index).padStart(8, "0")}.frag`;
         const f = encodeFragment({
           header: { spaceId, hubKey: keys.publicKeyB64, profile: this.d.profile(), epoch: EPOCH, index, prevHash: st.lastHash, createdAt },
-          body: { messages: chunk },
+          body: { messages: chunk, channels: this.namesOf(chunk) },
           spaceKey,
           privateKeyPem: keys.privateKeyPem,
         });
