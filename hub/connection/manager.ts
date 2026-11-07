@@ -22,6 +22,7 @@ import { ConnClient, joinSpace } from "./client.js";
 import { CommsStore } from "./comms.js";
 import { Uploader, type StorageConfig } from "./storage/uploader.js";
 import { GitHubBackend } from "./storage/github.js";
+import { SupabaseBackend } from "./storage/supabase.js";
 import { Lifecycle } from "./lifecycle.js";
 import { DEFAULT_PROFILE } from "../../shared/cryptoProfile.js";
 
@@ -35,6 +36,8 @@ export interface ManagerDeps {
   backoffMs?: number[];
   /** 시험 전용: 저장소 API 주소. */
   storageApiBase?: string;
+  /** 시험 전용: Supabase http 가짜 서버 허용. */
+  supabaseInsecureForTest?: boolean;
 }
 
 interface SpaceState {
@@ -83,6 +86,9 @@ export class ConnectionManager implements ConnStatusSource {
       keys: () => this.store.identity(),
       channels: () => this.comms.servers().flatMap((s) => s.channels.map((c) => ({ id: c.id, logFile: this.comms.logPath(c.id) }))),
       makeBackend: (cfg, token) => {
+        if (cfg.kind === "supabase") {
+          return new SupabaseBackend({ url: cfg.url ?? "", key: token, bucket: cfg.bucket ?? "agent-uplink", ...(deps.supabaseInsecureForTest ? { allowInsecureForTest: true } : {}) });
+        }
         return new GitHubBackend({ token, repo: cfg.repo ?? "", ...(cfg.branch ? { branch: cfg.branch } : {}), ...(deps.storageApiBase ? { apiBase: deps.storageApiBase } : {}) });
       },
       log: (code, detail) => this.log(code, detail),

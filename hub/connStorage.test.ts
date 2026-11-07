@@ -135,3 +135,50 @@ test("stop_uploads_last: 정지하면 마지막으로 한 번 올린다", async 
     t.c.close();
   } finally { t.hub.stop(); await g.close(); }
 });
+
+test("supabase_set_upload_verify_flow: Supabase로 연결 → 지금 올리기 → 검증, 입력 검사, 키 비노출", async () => {
+  const { fakeSupabase, SUPA_KEY } = await import("./connection/storage/fakeSupabase.js");
+  const sb = await fakeSupabase();
+  const t = await startTestHub({ supabaseInsecureForTest: true } as any);
+  const token = fs.readFileSync(path.join(t.dataDir, "admin.key"), "utf8").trim();
+  const c = new TestClient(t.port);
+  await c.ready();
+  const req = (op: string, p: object = {}) => c.req(op, { token, ...p }) as Promise<any>;
+  try {
+    await req("admin_conn_enable_server", { port: await freePort(), bindHost: "127.0.0.1", profile: "tls13-chacha20", spaceName: "팀" });
+    const srv = await req("admin_conn_create_server", { name: "팀작업" });
+    const ch = (await req("admin_conn_create_channel", { serverId: srv.serverId, name: "main" })).channelId;
+    assert.equal((await req("admin_conn_storage_set", { kind: "supabase", url: sb.url, key: "", intervalMin: 5 })).code, "storage_config_invalid");
+    assert.equal((await req("admin_conn_storage_set", { kind: "supabase", url: sb.url, key: SUPA_KEY, bucket: "bad/bucket", intervalMin: 5 })).code, "storage_config_invalid");
+    const set = await req("admin_conn_storage_set", { kind: "supabase", url: sb.url, key: SUPA_KEY, intervalMin: 5 });
+    assert.equal(set.ok, true, set.code);
+    assert.match(set.recoveryKey, /^[A-Z2-7]{4}-/);
+    assert.deepEqual([...sb.buckets.keys()], ["agent-uplink"]); // 기본 버킷
+    await say(t.port, ch, ["수파베이스로"]);
+    const up = await req("admin_conn_storage_upload_now");
+    assert.deepEqual([up.ok, up.fragments, up.messages], [true, 1, 1]);
+    assert.equal(sb.objects.size, 1);
+    const v = await req("admin_conn_storage_verify");
+    assert.deepEqual([v.fragments, v.messages, v.breaks, v.missing, v.bad], [1, 1, [], [], []]);
+    const st = (await req("admin_conn_storage_status")).storage;
+    assert.deepEqual([st.kind, st.url, st.bucket], ["supabase", sb.url, "agent-uplink"]);
+    const all = JSON.stringify([st, await req("admin_conn_status")]);
+    assert.equal(all.includes(SUPA_KEY), false);
+    for (const f of ["config.json", "state.json"]) assert.equal(fs.readFileSync(path.join(t.dataDir, "connection", "storage", f), "utf8").includes(SUPA_KEY), false, f);
+    c.close();
+  } finally { t.hub.stop(); await sb.close(); }
+});
+
+test("supabase_url_must_be_supabase_co: 실제 Hub는 https://<ref>.supabase.co 만 받는다", async () => {
+  const t = await startTestHub();
+  const token = fs.readFileSync(path.join(t.dataDir, "admin.key"), "utf8").trim();
+  const c = new TestClient(t.port);
+  await c.ready();
+  try {
+    await c.req("admin_conn_enable_server", { token, port: await freePort(), bindHost: "127.0.0.1", profile: "tls13-chacha20", spaceName: "팀" });
+    for (const url of ["http://127.0.0.1:1", "https://evil.com", "https://x.supabase.co.evil.com"]) {
+      assert.equal((await c.req("admin_conn_storage_set", { token, kind: "supabase", url, key: "sb_secret_x", intervalMin: 5 })).code, "storage_config_invalid", url);
+    }
+    c.close();
+  } finally { t.hub.stop(); }
+});

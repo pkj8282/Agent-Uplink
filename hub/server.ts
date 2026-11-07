@@ -24,6 +24,7 @@ import { currentLang } from "../shared/langConfig.js";
 import { SecurityLog } from "./securityLog.js";
 import { StorageError } from "./connection/storage/backend.js";
 import { parseRepo } from "./connection/storage/github.js";
+import { parseSupabaseUrl } from "./connection/storage/supabase.js";
 import { ConnectionManager } from "./connection/manager.js";
 import { isProfileId } from "../shared/cryptoProfile.js";
 import {
@@ -64,6 +65,8 @@ export interface HubOptions {
   connBackoffMs?: number[];
   /** 시험 전용: 저장소 API 주소(가짜 GitHub). */
   storageApiBase?: string;
+  /** 시험 전용: Supabase 주소로 http 가짜 서버를 허용. */
+  supabaseInsecureForTest?: boolean;
 }
 
 interface Waiter {
@@ -203,6 +206,7 @@ export class Hub {
       deliver: (ch, msg, skip) => this.fanout(ch, msg.from, msg.fromName, msg.text, msg.ts, msg.origin, skip),
       ...(this.opts.connBackoffMs ? { backoffMs: this.opts.connBackoffMs } : {}),
       ...(this.opts.storageApiBase ? { storageApiBase: this.opts.storageApiBase } : {}),
+      ...(this.opts.supabaseInsecureForTest ? { supabaseInsecureForTest: true } : {}),
     });
     this.trash = new TrashStore({ dir: this.opts.dataDir });
     this.trashOps = new TrashOps({
@@ -288,6 +292,19 @@ export class Hub {
           return r.ok ? { ok: true, spaceId: r.spaceId } : fail(r.code, "conn_op_failed", { code: r.code });
         }
         case "admin_conn_storage_set": {
+          if (q.kind === "supabase") {
+            // Supabase: 프로젝트 주소(https://<ref>.supabase.co), secret key, 버킷(기본 agent-uplink). 키는 응답·기록에 되돌려 쓰지 않는다.
+            const key = q.key;
+            const interval = q.intervalMin ?? 5;
+            const bucket = q.bucket ?? "agent-uplink";
+            const url = typeof q.url === "string" ? (this.opts.supabaseInsecureForTest ? q.url.trim().replace(/\/+$/, "") : parseSupabaseUrl(q.url)) : null;
+            const ok = !!url && typeof key === "string" && key.length > 0 && key.length <= 1000 && !/\s/.test(key)
+              && typeof bucket === "string" && /^[a-z0-9][a-z0-9._-]{0,62}$/.test(bucket)
+              && typeof interval === "number" && Number.isInteger(interval) && interval >= 1 && interval <= 60;
+            if (!ok) return fail("storage_config_invalid", "storage_config_invalid");
+            const r = await c.storageSet({ kind: "supabase", url: url!, bucket: bucket as string, intervalMin: interval as number }, key as string);
+            return { ok: true, recoveryKey: r.recoveryKey };
+          }
           // 관리 토큰 칸(token)과 겹치지 않게 저장소 토큰은 ghToken. 토큰은 응답·기록에 되돌려 쓰지 않는다.
           const tok = q.ghToken;
           const interval = q.intervalMin ?? 5;

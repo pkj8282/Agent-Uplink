@@ -12,9 +12,12 @@ import { writeFileAtomic, writeSecretFile } from "../../fsutil.js";
 import { StorageError, type StorageBackend } from "./backend.js";
 
 export interface StorageConfig {
-  kind: "github";
+  kind: "github" | "supabase";
   /** GitHub 저장소(owner/name). */
   repo?: string;
+  /** Supabase 프로젝트 주소·버킷. */
+  url?: string;
+  bucket?: string;
   branch?: string;
   /** 업로드 주기(분, 1~60). */
   intervalMin: number;
@@ -22,7 +25,7 @@ export interface StorageConfig {
   prune?: { enabled: boolean; days: number };
 }
 
-/** token = 저장소 자격 증명(불투명 문자열, 지금은 GitHub PAT). */
+/** token = 저장소 자격 증명(불투명 문자열): GitHub PAT 또는 Supabase secret key. */
 interface Secrets { token?: string; spaceKey?: string }
 interface State { lastSeq: Record<string, number>; nextIndex: number; lastHash: string; lastUploadAt: number | null; lastError: string | null; lastPruneAt?: number | null }
 
@@ -117,7 +120,7 @@ export class Uploader {
     const spaceKey = sec.spaceKey ? Buffer.from(sec.spaceKey, "base64") : randomBytes(32);
     this.saveSecrets({ token, spaceKey: spaceKey.toString("base64") });
     const prev = this.config()?.prune;
-    writeFileAtomic(this.file("config.json"), JSON.stringify({ kind: cfg.kind, ...(cfg.repo ? { repo: cfg.repo } : {}), ...(cfg.branch ? { branch: cfg.branch } : {}), intervalMin: cfg.intervalMin, ...(prev ? { prune: prev } : {}) }, null, 2));
+    writeFileAtomic(this.file("config.json"), JSON.stringify({ kind: cfg.kind, ...(cfg.repo ? { repo: cfg.repo } : {}), ...(cfg.url ? { url: cfg.url } : {}), ...(cfg.bucket ? { bucket: cfg.bucket } : {}), ...(cfg.branch ? { branch: cfg.branch } : {}), intervalMin: cfg.intervalMin, ...(prev ? { prune: prev } : {}) }, null, 2));
     if (this.timer) this.start(); // 주기 반영
     return { recoveryKey: recoveryKeyOf(spaceKey) };
   }
@@ -172,13 +175,13 @@ export class Uploader {
     return { removed };
   }
 
-  status(): { configured: boolean; kind?: "github"; repo?: string; intervalMin?: number; lastUploadAt: number | null; lastError: string | null; nextIndex: number; prune?: { enabled: boolean; days: number; lastPruneAt: number | null } } {
+  status(): { configured: boolean; kind?: "github" | "supabase"; repo?: string; url?: string; bucket?: string; intervalMin?: number; lastUploadAt: number | null; lastError: string | null; nextIndex: number; prune?: { enabled: boolean; days: number; lastPruneAt: number | null } } {
     const cfg = this.config();
     const st = this.state();
     const configured = !!cfg && !!this.secrets().token;
     return {
       configured,
-      ...(configured && cfg ? { kind: cfg.kind, ...(cfg.repo ? { repo: cfg.repo } : {}), intervalMin: cfg.intervalMin, prune: { enabled: cfg.prune?.enabled === true, days: cfg.prune?.days ?? 30, lastPruneAt: st.lastPruneAt ?? null } } : {}),
+      ...(configured && cfg ? { kind: cfg.kind, ...(cfg.repo ? { repo: cfg.repo } : {}), ...(cfg.url ? { url: cfg.url } : {}), ...(cfg.bucket ? { bucket: cfg.bucket } : {}), intervalMin: cfg.intervalMin, prune: { enabled: cfg.prune?.enabled === true, days: cfg.prune?.days ?? 30, lastPruneAt: st.lastPruneAt ?? null } } : {}),
       lastUploadAt: st.lastUploadAt,
       lastError: st.lastError,
       nextIndex: st.nextIndex,
