@@ -5,7 +5,6 @@ import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 import { freePort, startTestHub, tempDir, TestClient } from "./testing.js";
-import { fakeGoogle } from "./connection/storage/fakeGoogle.js";
 
 /** 가짜 GitHub(o/r) — 조각 수만 센다. */
 async function fakeGitHub() {
@@ -111,35 +110,4 @@ test("no_connection_no_lifecycle: 통신을 켠 적 없는 Hub는 사건 기록�
   await t.hub.conn.stop();
   t.hub.stop();
   assert.equal(fs.existsSync(path.join(t.dataDir, "connection")), false);
-});
-
-test("google_login_flow: Google 로그인 시작 → 콜백 → 연결 완료 → 복구 키 한 번 → Drive로 업로드", async () => {
-  const gg = await fakeGoogle();
-  const t = await startTestHub({ googleApiBase: gg.apiBase, googleAuthEndpoints: { auth: "https://accounts.google.com/o/oauth2/v2/auth", token: gg.apiBase.token } } as any);
-  const a = await admin(t);
-  try {
-    assert.equal((await a.req("admin_conn_storage_google_begin", { clientId: "cid", intervalMin: 5 })).code, "server_not_enabled");
-    const ch = await setupServer(a, await freePort());
-    assert.equal((await a.req("admin_conn_storage_google_begin", { clientId: "", intervalMin: 5 })).code, "storage_config_invalid");
-    const b = await a.req("admin_conn_storage_google_begin", { clientId: "cid.apps.googleusercontent.com", clientSecret: "sec", intervalMin: 5 });
-    assert.equal(b.ok, true, b.code);
-    const u = new URL(b.authUrl);
-    assert.equal((await a.req("admin_conn_status")).storageLogin, "pending");
-    assert.equal((await a.req("admin_conn_storage_google_result")).code, "storage_login_pending");
-    const cb = await fetch(`${u.searchParams.get("redirect_uri")}/?code=c&state=${encodeURIComponent(u.searchParams.get("state")!)}`);
-    assert.equal(cb.status, 200);
-    let st: any;
-    for (let i = 0; i < 100; i++) { st = await a.req("admin_conn_status"); if (st.storageLogin !== "pending") break; await new Promise((r) => setTimeout(r, 20)); }
-    assert.equal(st.storageLogin, "done");
-    assert.equal(st.storage.kind, "google");
-    const r1 = await a.req("admin_conn_storage_google_result");
-    assert.match(r1.recoveryKey, /^[A-Z2-7]{4}-/);
-    assert.equal((await a.req("admin_conn_storage_google_result")).code, "storage_login_pending"); // 한 번만
-    await say(t.port, ch, "드라이브로");
-    const up = await a.req("admin_conn_storage_upload_now");
-    assert.deepEqual([up.ok, up.fragments, up.messages], [true, 1, 1]);
-    assert.equal([...gg.files.values()].filter((f) => !f.folder).length, 1);
-    const all = JSON.stringify([st, await a.req("admin_conn_storage_status")]);
-    for (const s of ["sec", "refresh-token-GOOD"]) assert.equal(all.includes(s), false, s);
-  } finally { a.c.close(); t.hub.stop(); await gg.close(); }
 });

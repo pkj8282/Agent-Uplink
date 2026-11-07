@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AdminClient, HubNotRunningError, resolveAdminTarget, toResult } from "./adminClient.js";
 import { isTrustedFrame } from "./ipcGuard.js";
-import { isGoogleAuthUrl, isViewerUrl } from "./auth.js";
+import { isViewerUrl } from "./auth.js";
 import type { ConfigPatch, IpcResult } from "./types.js";
 import { effectiveLang, type Lang } from "./i18n.js";
 import { readLanguageFile, writeLanguageFile } from "./langFile.js";
@@ -129,14 +129,6 @@ handle("admin:connStorageSet", (arg) => toResult(() => {
 handle("admin:connStorageUploadNow", () => toResult(() => client.connStorageUploadNow()));
 handle("admin:connStorageVerify", () => toResult(() => client.connStorageVerify()));
 handle("admin:connStorageClear", () => toResult(() => client.connStorageClear()));
-handle("admin:connStorageGoogleBegin", (arg) => toResult(async () => {
-  const o = asObj(arg);
-  const secret = o.clientSecret === undefined || o.clientSecret === "" ? undefined : asStr(o.clientSecret, 300);
-  const url = await client.connStorageGoogleBegin({ clientId: asStr(o.clientId, 300), ...(secret ? { clientSecret: secret } : {}), intervalMin: asNum(o.intervalMin) });
-  if (!isGoogleAuthUrl(url)) throw new Error(msg("bad_google_url"));
-  await shell.openExternal(url);
-}));
-handle("admin:connStorageGoogleResult", () => toResult(() => client.connStorageGoogleResult()));
 handle("admin:connStoragePruneSet", (arg) => toResult(() => {
   const o = asObj(arg);
   if (typeof o.enabled !== "boolean") throw new Error(msg("invalid_target"));

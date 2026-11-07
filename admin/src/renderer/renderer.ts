@@ -4,7 +4,7 @@ import {
   emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage,
   restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount,
   parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage,
-  connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, storageStatusLine, verifyResultMessage, parseGoogleForm, parsePruneForm, loginStateLine,
+  connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, storageStatusLine, verifyResultMessage, parsePruneForm,
 } from "./view.js";
 import type { FormMessage } from "./view.js";
 import { getLang, setLang, tr } from "./lang.js";
@@ -258,7 +258,7 @@ const connGate = new ChangeGate();
 /** 공유 체크를 바꿨지만 저장하지 않은 상태(null = Hub 값대로). */
 let pendingShared: Set<string> | null = null;
 
-for (const id of ["conn-user-form", "conn-server-form", "conn-invite-form", "storage-form", "google-form", "prune-form"]) {
+for (const id of ["conn-user-form", "conn-server-form", "conn-invite-form", "storage-form", "prune-form"]) {
   byId(id).addEventListener("input", (e) => { if (e.target instanceof Element) connDirty.add(e.target); });
   byId(id).addEventListener("change", (e) => { if (e.target instanceof Element) connDirty.add(e.target); });
 }
@@ -328,14 +328,6 @@ function renderConn(c: IpcResult<ConnStatus>): void {
     const pe = byId<HTMLInputElement>("prune-enabled");
     if (!connDirty.has(pe)) pe.checked = sto.prune.enabled;
     setIfClean(byId<HTMLInputElement>("prune-days"), String(sto.prune.days));
-  }
-  // Google 로그인 진행: 끝나면 복구 키를 한 번 받아 보여 준다.
-  const ls = byId("google-login-state");
-  ls.textContent = loginStateLine(s.storageLogin);
-  ls.className = `msg ${s.storageLogin?.startsWith("failed:") ? "err" : ""}`;
-  if (googleWaiting && s.storageLogin && s.storageLogin !== "pending") {
-    googleWaiting = false;
-    if (s.storageLogin === "done") void showGoogleRecoveryKey();
   }
   if (sto?.configured) {
     setIfClean(byId<HTMLInputElement>("storage-repo"), sto.repo ?? "");
@@ -550,37 +542,6 @@ function showRecoveryKey(key: string): void {
   byId("storage-recovery-msg").textContent = "";
   byId("storage-recovery").hidden = false;
 }
-
-// 저장소 종류: GitHub 폼 / Google 폼을 바꿔 보여 준다.
-byId<HTMLSelectElement>("storage-kind").addEventListener("change", (e) => {
-  const google = (e.target as HTMLSelectElement).value === "google";
-  byId("google-form").hidden = !google;
-  byId("storage-form").querySelectorAll<HTMLElement>("label").forEach((l) => { l.hidden = google; });
-  byId<HTMLButtonElement>("storage-form").querySelector<HTMLButtonElement>("button[type=submit]")!.hidden = google;
-});
-
-let googleWaiting = false;
-
-async function showGoogleRecoveryKey(): Promise<void> {
-  const r = await window.admin.connStorageGoogleResult();
-  if (r.ok) {
-    byId<HTMLInputElement>("google-client-secret").value = ""; // 비밀은 화면에 남기지 않는다
-    showRecoveryKey(r.data.recoveryKey);
-  }
-}
-
-byId<HTMLFormElement>("google-form").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const parsed = parseGoogleForm({
-    clientId: byId<HTMLInputElement>("google-client-id").value,
-    clientSecret: byId<HTMLInputElement>("google-client-secret").value,
-    intervalMin: byId<HTMLInputElement>("google-interval").value,
-  });
-  if (!parsed.ok) { showOpMsg({ text: parsed.error, kind: "err" }); return; }
-  clearDirty(byId("google-form"));
-  googleWaiting = true;
-  void connRun(submitter(e), () => window.admin.connStorageGoogleBegin(parsed.value), () => tr("login_pending")).then((ok) => { if (!ok) googleWaiting = false; });
-});
 
 byId<HTMLFormElement>("prune-form").addEventListener("submit", (e) => {
   e.preventDefault();

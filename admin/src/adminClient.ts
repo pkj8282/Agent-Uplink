@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { encodeFrame, FrameDecoder } from "./framing.js";
 import { newNonce, isNonce, clientProof, hubProof, proofEquals, readClientKeyFile } from "./auth.js";
-import type { AdminConfig, ConfigPatch, ConnProfile, ConnStatus, IpcResult, StorageInput, VerifyResult, GoogleInput, NameConflict, RestoreReport, Snapshot } from "./types.js";
+import type { AdminConfig, ConfigPatch, ConnProfile, ConnStatus, IpcResult, StorageInput, VerifyResult, NameConflict, RestoreReport, Snapshot } from "./types.js";
 import { effectiveLang, type Lang } from "./i18n.js";
 import { readLanguageFile } from "./langFile.js";
 import { adminMsg, LEGACY_UNKNOWN_OP, type AdminKey } from "./messages.js";
@@ -140,7 +140,7 @@ export class AdminClient {
   // ───── 통신(v3.0) ─────
   async connStatus(): Promise<ConnStatus> {
     const r = await this.call("admin_conn_status", {});
-    return { server: r.server ?? null, members: r.members ?? [], joined: r.joined ?? [], userName: r.userName ?? null, comms: r.comms ?? [], events: r.events ?? [], storage: r.storage ?? null, storageLogin: r.storageLogin ?? null };
+    return { server: r.server ?? null, members: r.members ?? [], joined: r.joined ?? [], userName: r.userName ?? null, comms: r.comms ?? [], events: r.events ?? [], storage: r.storage ?? null };
   }
   async connSetUser(name: string): Promise<string> { return (await this.call("admin_conn_set_user", { name })).name; }
   async connEnableServer(o: { port: number; bindHost?: string; profile: ConnProfile; spaceName: string; burnOnJoin: boolean }): Promise<number> {
@@ -170,11 +170,6 @@ export class AdminClient {
     return { fragments: r.fragments, messages: r.messages, breaks: r.breaks ?? [], missing: r.missing ?? [], bad: r.bad ?? [] };
   }
   async connStorageClear(): Promise<void> { await this.call("admin_conn_storage_clear", {}); }
-  /** Google 로그인 시작 → 로그인 주소(main이 확인 후 연다). 비밀은 Hub로만 보낸다. */
-  async connStorageGoogleBegin(o: GoogleInput): Promise<string> {
-    return (await this.call("admin_conn_storage_google_begin", { clientId: o.clientId, ...(o.clientSecret ? { clientSecret: o.clientSecret } : {}), intervalMin: o.intervalMin })).authUrl;
-  }
-  async connStorageGoogleResult(): Promise<{ recoveryKey: string }> { return { recoveryKey: (await this.call("admin_conn_storage_google_result", {})).recoveryKey }; }
   async connStoragePruneSet(o: { enabled: boolean; days: number }): Promise<void> { await this.call("admin_conn_storage_prune_set", o); }
   async connDeleteServer(serverId: string): Promise<void> { await this.call("admin_conn_delete_server", { serverId }); }
   async connDeleteChannel(channelId: string): Promise<void> { await this.call("admin_conn_delete_channel", { channelId }); }

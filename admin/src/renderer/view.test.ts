@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount, parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage, connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, storageStatusLine, verifyResultMessage, parseGoogleForm, parsePruneForm, loginStateLine } from "./view.js";
+import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount, parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage, connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, storageStatusLine, verifyResultMessage, parsePruneForm } from "./view.js";
 import { setLang, tr } from "./lang.js";
 import { hasHangul } from "../../../hub/testing.js";
 
@@ -402,30 +402,20 @@ test("통신 서버·채널 삭제 항목은 휴지통에 '통신' 표시", () =
 });
 
 // ── v3.0 3b ──
-test("parseGoogleForm·parsePruneForm: Google Client ID 필수·비밀 선택, 정리 일수 7~365", () => {
-  assert.deepEqual(parseGoogleForm({ clientId: " cid.apps.googleusercontent.com ", clientSecret: "", intervalMin: "5" }), { ok: true, value: { clientId: "cid.apps.googleusercontent.com", intervalMin: 5 } });
-  assert.deepEqual(parseGoogleForm({ clientId: "cid", clientSecret: " s ", intervalMin: "1" }), { ok: true, value: { clientId: "cid", clientSecret: "s", intervalMin: 1 } });
-  for (const clientId of ["", " ", "a b"]) assert.equal(parseGoogleForm({ clientId, clientSecret: "", intervalMin: "5" }).ok, false, clientId);
-  assert.equal(parseGoogleForm({ clientId: "c", clientSecret: "a b", intervalMin: "5" }).ok, false);
-  assert.equal(parseGoogleForm({ clientId: "c", clientSecret: "", intervalMin: "61" }).ok, false);
+test("parsePruneForm: 정리 일수 7~365", () => {
   assert.deepEqual(parsePruneForm({ enabled: true, days: "30" }), { ok: true, value: { enabled: true, days: 30 } });
   for (const days of ["6", "366", "x", ""]) assert.equal(parsePruneForm({ enabled: true, days }).ok, false, days);
 });
 
-test("Google 상태·로그인 줄·새 사건 문구, 영어 화면에 한글 없음", () => {
-  assert.match(storageStatusLine({ configured: true, kind: "google", intervalMin: 5, lastUploadAt: null, lastError: null, nextIndex: 0 }), /Google Drive/);
-  assert.match(loginStateLine("pending"), /기다리는 중/);
-  assert.match(loginStateLine("failed:oauth_denied"), /거부/);
-  assert.equal(loginStateLine(null), "");
-  assert.equal(loginStateLine("done"), "");
+test("3b 새 사건 문구, 영어 화면에 한글 없음", () => {
   assert.match(connEventLine({ ts: 1, code: "unclean_shutdown_detected", detail: {} }), /비정상 종료/);
   assert.match(connEventLine({ ts: 1, code: "prune_done", detail: { removed: 3 } }), /3/);
   assert.match(connEventLine({ ts: 1, code: "prune_skipped", detail: {} }), /정리하지 않음/);
+  assert.match(storageStatusLine({ configured: true, kind: "github", repo: "o/r", intervalMin: 5, lastUploadAt: null, lastError: null, nextIndex: 0, prune: { enabled: true, days: 30, lastPruneAt: 1 } }), /로컬 정리 30일/);
   setLang("en");
   try {
-    for (const s of [loginStateLine("pending"), loginStateLine("failed:oauth_timeout"), connErrorMessage("oauth_no_refresh_token", ""),
-      storageStatusLine({ configured: true, kind: "google", intervalMin: 5, lastUploadAt: null, lastError: null, nextIndex: 0, prune: { enabled: true, days: 30, lastPruneAt: 1 } }),
-      connEventLine({ ts: 1, code: "unclean_shutdown_detected", detail: {} }), connEventLine({ ts: 1, code: "prune_done", detail: { removed: 1 } })]) assert.equal(hasHangul(s), false, s);
+    for (const t of [connEventLine({ ts: 1, code: "unclean_shutdown_detected", detail: {} }), connEventLine({ ts: 1, code: "prune_done", detail: { removed: 1 } }),
+      storageStatusLine({ configured: true, kind: "github", repo: "o/r", intervalMin: 5, lastUploadAt: null, lastError: null, nextIndex: 0, prune: { enabled: true, days: 30, lastPruneAt: 1 } })]) assert.equal(hasHangul(t), false, t);
   } finally {
     setLang("ko");
   }

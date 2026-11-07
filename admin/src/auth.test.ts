@@ -23,17 +23,3 @@ test("뷰어 URL 검사가 원본과 같다", () => {
     assert.equal(copy.isViewerUrl(u), origIsViewerUrl(u), u);
   }
 });
-
-test("isGoogleAuthUrl: Google OAuth 인증 주소(https·accounts.google.com·/o/oauth2/v2/auth)만", async () => {
-  const { isGoogleAuthUrl } = await import("./auth.js");
-  assert.equal(isGoogleAuthUrl("https://accounts.google.com/o/oauth2/v2/auth?client_id=x&redirect_uri=http%3A%2F%2F127.0.0.1%3A5000"), true);
-  for (const bad of [
-    "http://accounts.google.com/o/oauth2/v2/auth?x=1",
-    "https://accounts.google.com.evil.com/o/oauth2/v2/auth?x=1",
-    "https://evil.com/o/oauth2/v2/auth?x=1",
-    "https://user@accounts.google.com/o/oauth2/v2/auth?x=1",
-    "https://accounts.google.com/o/oauth2/v2/other?x=1",
-    "https://accounts.google.com:444/o/oauth2/v2/auth?x=1",
-    "file:///c:/x", "", 5, null,
-  ]) assert.equal(isGoogleAuthUrl(bad), false, String(bad));
-});

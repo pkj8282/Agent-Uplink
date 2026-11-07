@@ -12,8 +12,8 @@ import { writeFileAtomic, writeSecretFile } from "../../fsutil.js";
 import { StorageError, type StorageBackend } from "./backend.js";
 
 export interface StorageConfig {
-  kind: "github" | "google";
-  /** GitHub 저장소(owner/name). Google은 없음. */
+  kind: "github";
+  /** GitHub 저장소(owner/name). */
   repo?: string;
   branch?: string;
   /** 업로드 주기(분, 1~60). */
@@ -22,7 +22,7 @@ export interface StorageConfig {
   prune?: { enabled: boolean; days: number };
 }
 
-/** token = 저장소 자격 증명(불투명): GitHub PAT 또는 Google {clientId,clientSecret?,refreshToken} JSON. */
+/** token = 저장소 자격 증명(불투명 문자열, 지금은 GitHub PAT). */
 interface Secrets { token?: string; spaceKey?: string }
 interface State { lastSeq: Record<string, number>; nextIndex: number; lastHash: string; lastUploadAt: number | null; lastError: string | null; lastPruneAt?: number | null }
 
@@ -172,7 +172,7 @@ export class Uploader {
     return { removed };
   }
 
-  status(): { configured: boolean; kind?: "github" | "google"; repo?: string; intervalMin?: number; lastUploadAt: number | null; lastError: string | null; nextIndex: number; prune?: { enabled: boolean; days: number; lastPruneAt: number | null } } {
+  status(): { configured: boolean; kind?: "github"; repo?: string; intervalMin?: number; lastUploadAt: number | null; lastError: string | null; nextIndex: number; prune?: { enabled: boolean; days: number; lastPruneAt: number | null } } {
     const cfg = this.config();
     const st = this.state();
     const configured = !!cfg && !!this.secrets().token;

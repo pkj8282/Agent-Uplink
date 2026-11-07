@@ -22,9 +22,6 @@ import { ConnClient, joinSpace } from "./client.js";
 import { CommsStore } from "./comms.js";
 import { Uploader, type StorageConfig } from "./storage/uploader.js";
 import { GitHubBackend } from "./storage/github.js";
-import { DriveBackend } from "./storage/drive.js";
-import { StorageError } from "./storage/backend.js";
-import { startGoogleLogin, type GoogleLogin } from "./storage/googleAuth.js";
 import { Lifecycle } from "./lifecycle.js";
 import { DEFAULT_PROFILE } from "../../shared/cryptoProfile.js";
 
@@ -38,9 +35,6 @@ export interface ManagerDeps {
   backoffMs?: number[];
   /** 시험 전용: 저장소 API 주소. */
   storageApiBase?: string;
-  /** 시험 전용: 가짜 Google 토큰·Drive 주소, OAuth 끝점. */
-  googleApiBase?: { token: string; drive: string; upload: string };
-  googleAuthEndpoints?: { auth: string; token: string };
 }
 
 interface SpaceState {
@@ -89,12 +83,6 @@ export class ConnectionManager implements ConnStatusSource {
       keys: () => this.store.identity(),
       channels: () => this.comms.servers().flatMap((s) => s.channels.map((c) => ({ id: c.id, logFile: this.comms.logPath(c.id) }))),
       makeBackend: (cfg, token) => {
-        if (cfg.kind === "google") {
-          let cred: { clientId?: unknown; clientSecret?: unknown; refreshToken?: unknown } = {};
-          try { cred = JSON.parse(token); } catch { /* 아래에서 거부 */ }
-          if (typeof cred.clientId !== "string" || typeof cred.refreshToken !== "string") throw new StorageError("storage_auth_failed");
-          return new DriveBackend({ clientId: cred.clientId, refreshToken: cred.refreshToken, ...(typeof cred.clientSecret === "string" ? { clientSecret: cred.clientSecret } : {}), ...(deps.googleApiBase ? { apiBase: deps.googleApiBase } : {}) });
-        }
         return new GitHubBackend({ token, repo: cfg.repo ?? "", ...(cfg.branch ? { branch: cfg.branch } : {}), ...(deps.storageApiBase ? { apiBase: deps.storageApiBase } : {}) });
       },
       log: (code, detail) => this.log(code, detail),
@@ -104,7 +92,6 @@ export class ConnectionManager implements ConnStatusSource {
 
   readonly uploader: Uploader;
   private lifecycle: Lifecycle | null = null;
-  private google: { login: GoogleLogin; state: string; recoveryKey: string | null } | null = null;
 
   /** 이번 실행의 시작 사건을 한 번 기록한다(통신을 처음 켠 실행 포함). 이미 기록했으면 아무것도 안 함. */
   private ensureStarted(): void {
@@ -117,35 +104,6 @@ export class ConnectionManager implements ConnStatusSource {
   storageSet(cfg: StorageConfig, token: string): Promise<{ recoveryKey: string }> {
     if (!this.store.serverConfig()) throw new Error("server_not_enabled");
     return this.uploader.configure(cfg, token).then((r) => { this.ensureStarted(); this.uploader.start(); return r; });
-  }
-
-  /** Google 로그인 시작(관리 op): 1회용 콜백을 열고 로그인 주소를 돌려준다. 끝나면 스스로 저장소를 연결한다. */
-  async googleLoginBegin(clientId: string, clientSecret: string | undefined, intervalMin: number): Promise<{ authUrl: string }> {
-    if (!this.store.serverConfig()) throw new Error("server_not_enabled");
-    this.google?.login.cancel();
-    const login = await startGoogleLogin({ clientId, ...(clientSecret ? { clientSecret } : {}), ...(this.deps.googleAuthEndpoints ? { endpoints: this.deps.googleAuthEndpoints } : {}) });
-    const g = { login, state: "pending", recoveryKey: null as string | null };
-    this.google = g;
-    void login.done.then(async (r) => {
-      if (this.google !== g) return; // 새 로그인이 시작됨
-      if (!r.ok) { g.state = `failed:${r.code}`; this.log("storage_login_failed", { code: r.code }); return; }
-      try {
-        const cred = JSON.stringify({ clientId, ...(clientSecret ? { clientSecret } : {}), refreshToken: r.refreshToken });
-        g.recoveryKey = (await this.storageSet({ kind: "google", intervalMin }, cred)).recoveryKey;
-        g.state = "done";
-      } catch (e) {
-        g.state = `failed:${e instanceof StorageError ? e.code : (e as Error).message}`;
-        this.log("storage_login_failed", { code: g.state.slice(7) });
-      }
-    });
-    return { authUrl: login.authUrl };
-  }
-
-  /** Google 로그인으로 연결한 뒤의 복구 키(한 번만). */
-  takeGoogleRecoveryKey(): string | null {
-    const k = this.google?.state === "done" ? this.google.recoveryKey : null;
-    if (k && this.google) this.google.recoveryKey = null;
-    return k;
   }
 
   private log(code: string, detail: object = {}): void {
@@ -189,7 +147,6 @@ export class ConnectionManager implements ConnStatusSource {
 
   async stop(): Promise<void> {
     await this.uploader.stop(); // 정상 종료 직전 마지막 업로드(설계 4.2)
-    this.google?.login.cancel();
     // 정상 종료 보고는 마지막 업로드를 끝낸 뒤에(Hub가 직접 쓴다).
     if (this.lifecycle) {
       this.lifecycle.recordCleanStop(Date.now(), this.uploader.chainHead());
@@ -679,7 +636,6 @@ export class ConnectionManager implements ConnStatusSource {
     joined: { spaceId: string; spaceName: string; hostUser: string; connected: boolean }[];
     userName: string | null;
     storage: ReturnType<Uploader["status"]>;
-    storageLogin: string | null;
     comms: { serverId: string; name: string; channels: { channelId: string; name: string }[] }[];
     events: { ts: number; code: string; detail: object }[];
   } {
@@ -691,7 +647,6 @@ export class ConnectionManager implements ConnStatusSource {
       joined: this.store.joined().map((j) => ({ spaceId: j.spaceId, spaceName: j.spaceName, hostUser: j.hostUser, connected: !!this.spaces.get(j.spaceId)?.client.connected })),
       userName: this.store.userName(),
       storage: this.uploader.status(),
-      storageLogin: this.google?.state ?? null,
       comms: this.comms.servers().map((s) => ({ serverId: s.id, name: s.name, channels: s.channels.map((c) => ({ channelId: c.id, name: c.name })) })),
       events: this.events.slice(-50),
     };

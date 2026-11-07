@@ -1,4 +1,4 @@
-// 백업 저장소 인터페이스(v3.0 3단계): GitHub·Google Drive가 같은 모양으로 붙는다. 경로는 "/"로 나눈 상대 경로.
+// 백업 저장소 인터페이스(v3.0 3단계): GitHub(와 이후 저장소)가 같은 모양으로 붙는다. 경로는 "/"로 나눈 상대 경로.
 export type StorageErrorCode =
   | "storage_auth_failed"
   | "storage_forbidden"
