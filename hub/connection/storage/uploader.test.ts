@@ -245,3 +245,36 @@ test("prune_off_by_default_and_once_per_day: 기본 꺼짐, 켜도 하루 한 �
   assert.throws(() => t.up.setPrune({ enabled: true, days: 6 }));
   assert.throws(() => t.up.setPrune({ enabled: true, days: 366 }));
 });
+
+test("switch_target_restarts_chain: 저장소를 바꾸면 새 저장소에 대화 전체를 0번부터 올린다(같은 저장소로 다시 연결하면 이어 감)", async () => {
+  const t = setup();
+  await t.up.configure(cfg, TOKEN);
+  t.add("c1", "a"); t.add("c1", "b");
+  await t.up.uploadNow();
+  // 같은 저장소로 다시 연결 → 이어 감
+  await t.up.configure(cfg, TOKEN);
+  assert.equal(t.up.status().nextIndex, 1);
+  // 다른 저장소로 → 처음부터(복구 키는 그대로)
+  const before = (await t.up.configure(cfg, TOKEN)).recoveryKey;
+  const r = await t.up.configure({ kind: "github", repo: "o/other", intervalMin: 5 }, TOKEN);
+  assert.equal(r.recoveryKey, before);
+  assert.equal(t.up.status().nextIndex, 0);
+  assert.equal(t.up.status().lastUploadAt, null);
+  t.backend.files.clear(); // 새 저장소는 비어 있음
+  assert.deepEqual(await t.up.uploadNow(), { fragments: 1, messages: 2 });
+  const v = await t.up.verify();
+  assert.deepEqual([v.fragments, v.messages, v.breaks, v.missing], [1, 2, [], []]);
+});
+
+test("switch_target_legacy_state: 저장소 정보가 없는 예전 진행 기록도 지금 설정과 다르면 처음부터", async () => {
+  const t = setup();
+  await t.up.configure(cfg, TOKEN);
+  t.add("c1", "a");
+  await t.up.uploadNow();
+  const f = path.join(t.dir, "connection", "storage", "state.json");
+  const st = JSON.parse(fs.readFileSync(f, "utf8"));
+  delete st.target;
+  fs.writeFileSync(f, JSON.stringify(st));
+  await t.up.configure({ kind: "github", repo: "o/other", intervalMin: 5 }, TOKEN);
+  assert.equal(t.up.status().nextIndex, 0);
+});

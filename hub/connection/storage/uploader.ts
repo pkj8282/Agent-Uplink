@@ -27,7 +27,7 @@ export interface StorageConfig {
 
 /** token = 저장소 자격 증명(불투명 문자열): GitHub PAT 또는 Supabase secret key. */
 interface Secrets { token?: string; spaceKey?: string }
-interface State { lastSeq: Record<string, number>; nextIndex: number; lastHash: string; lastUploadAt: number | null; lastError: string | null; lastPruneAt?: number | null }
+interface State { lastSeq: Record<string, number>; nextIndex: number; lastHash: string; lastUploadAt: number | null; lastError: string | null; lastPruneAt?: number | null; /** 이 진행 기록이 가리키는 저장소(종류·주소). */ target?: string }
 
 export interface UploaderDeps {
   dir: string;
@@ -85,7 +85,7 @@ export class Uploader {
 
   private state(): State {
     const s = readJson<Partial<State>>(this.file("state.json"), {});
-    return { lastSeq: s.lastSeq ?? {}, nextIndex: s.nextIndex ?? 0, lastHash: s.lastHash ?? "", lastUploadAt: s.lastUploadAt ?? null, lastError: s.lastError ?? null, lastPruneAt: s.lastPruneAt ?? null };
+    return { lastSeq: s.lastSeq ?? {}, nextIndex: s.nextIndex ?? 0, lastHash: s.lastHash ?? "", lastUploadAt: s.lastUploadAt ?? null, lastError: s.lastError ?? null, lastPruneAt: s.lastPruneAt ?? null, ...(s.target !== undefined ? { target: s.target } : {}) };
   }
 
   private saveState(s: State): void {
@@ -114,11 +114,26 @@ export class Uploader {
   }
 
   /** 연결: 확인(check)이 성공한 뒤에만 저장한다. 공간 열쇠가 없으면 만든다. 복구 키는 이 응답에서만 돌려준다. */
+  /** 저장소 식별(진행 기록을 저장소마다 나누는 열쇠). */
+  private static targetOf(cfg: StorageConfig): string {
+    return cfg.kind === "supabase" ? `supabase:${cfg.url ?? ""}/${cfg.bucket ?? ""}` : `github:${cfg.repo ?? ""}#${cfg.branch ?? ""}`;
+  }
+
   async configure(cfg: StorageConfig, token: string): Promise<{ recoveryKey: string }> {
     await this.d.makeBackend(cfg, token).check();
     const sec = this.secrets();
     const spaceKey = sec.spaceKey ? Buffer.from(sec.spaceKey, "base64") : randomBytes(32);
     this.saveSecrets({ token, spaceKey: spaceKey.toString("base64") });
+    // 진행 기록은 저장소마다: 다른 저장소로 바꾸면 새 저장소에 대화 전체를 0번부터 올린다(같은 저장소면 이어 감).
+    const target = Uploader.targetOf(cfg);
+    const st = this.state();
+    const oldCfg = this.config();
+    const old = st.target ?? (oldCfg ? Uploader.targetOf(oldCfg) : undefined); // 저장소 정보 없는 예전 기록은 지금 설정으로 판단
+    if (old !== undefined && old !== target) {
+      this.saveState({ lastSeq: {}, nextIndex: 0, lastHash: "", lastUploadAt: null, lastError: null, lastPruneAt: st.lastPruneAt ?? null, target });
+    } else if (st.target !== target) {
+      this.saveState({ ...st, target });
+    }
     const prev = this.config()?.prune;
     writeFileAtomic(this.file("config.json"), JSON.stringify({ kind: cfg.kind, ...(cfg.repo ? { repo: cfg.repo } : {}), ...(cfg.url ? { url: cfg.url } : {}), ...(cfg.bucket ? { bucket: cfg.bucket } : {}), ...(cfg.branch ? { branch: cfg.branch } : {}), intervalMin: cfg.intervalMin, ...(prev ? { prune: prev } : {}) }, null, 2));
     if (this.timer) this.start(); // 주기 반영
