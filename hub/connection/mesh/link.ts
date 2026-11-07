@@ -25,10 +25,9 @@ export class LinkChannel {
   private pending = new Map<number, (r: any) => void>();
   private next = 1;
   private closed = false;
-  private handlers: LinkHandlers = {
-    onRequest: (_r, reply) => reply({ ok: false, code: "op_not_allowed" }),
-    onEvent: () => {},
-  };
+  /** 처리기를 달기 전에 온 요청·이벤트는 모아 둔다(상대가 붙자마자 보내도 잃지 않게). */
+  private handlers: LinkHandlers | null = null;
+  private queued: unknown[] = [];
   private readonly closeListeners: (() => void)[] = [];
 
   /** allowedOps를 주면 그 밖의 요청은 처리기에 넘기지 않고 op_not_allowed. */
@@ -36,6 +35,7 @@ export class LinkChannel {
 
   setHandlers(h: LinkHandlers): void {
     this.handlers = h;
+    for (const f of this.queued.splice(0)) this.feed(f);
   }
 
   get isClosed(): boolean {
@@ -55,6 +55,7 @@ export class LinkChannel {
       const id = x.id;
       const reply = (r: object) => { if (!this.closed) this.io.write({ ...r, id }); };
       if (this.io.allowedOps && !this.io.allowedOps.has(x.op)) return reply({ ok: false, code: "op_not_allowed" });
+      if (!this.handlers) { if (this.queued.length < 10_000) this.queued.push(f); return; }
       try {
         this.handlers.onRequest(f as { op: string }, reply);
       } catch {
@@ -68,6 +69,7 @@ export class LinkChannel {
       return;
     }
     if (typeof x.event === "string") {
+      if (!this.handlers) { if (this.queued.length < 10_000) this.queued.push(f); return; }
       try {
         this.handlers.onEvent(f as { event: string });
       } catch {
@@ -107,10 +109,11 @@ export class LinkChannel {
   }
 
   /** 시험·망 엔진 단위 시험용: 메모리로 이은 채널 한 쌍(전달은 다음 틱). */
-  static memoryPair(): [LinkChannel, LinkChannel] {
+  static memoryPair(tap?: (from: "a" | "b", obj: any) => boolean): [LinkChannel, LinkChannel] {
     let a: LinkChannel;
     let b: LinkChannel;
     const send = (to: () => LinkChannel, obj: object) => {
+      if (tap && !tap(to() === b ? "a" : "b", obj)) return; // 시험: false면 이 프레임을 버림
       const copy = JSON.parse(JSON.stringify(obj));
       setImmediate(() => to().feed(copy));
     };
