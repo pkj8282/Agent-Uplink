@@ -136,6 +136,11 @@ export class ChannelStore {
     return removed;
   }
 
+  /** 채널 로그 파일 위치(등록된 채널만). */
+  fileOf(channelId: string): string | undefined {
+    return this.entries.get(channelId)?.file;
+  }
+
   /** 등록된 채널 ID 목록. */
   ids(): string[] {
     return [...this.entries.keys()];

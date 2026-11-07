@@ -127,3 +127,49 @@ export function checkChain(list: { index: number; prevHash: string; hash: string
   }
   return { ok: breaks.length === 0 && !forked, breaks };
 }
+
+/**
+ * 서명·형식만 확인하고 머리를 돌려준다(복호화하지 않음, v3.0 4단계 방식 1).
+ * 열쇠가 없는 옛 세대 조각도 사슬(이전 해시)을 이어 가기 위해 쓴다.
+ */
+export function peekFragment(bytes: Buffer, expectHubKey: string): { ok: true; header: FragmentHeader; hash: string } | { ok: false; code: FragmentError } {
+  const bad = (code: FragmentError) => ({ ok: false as const, code });
+  const L = bytes.toString("utf8").split("\n");
+  if (L.length !== 4 || L[0] !== FRAGMENT_MAGIC) return bad("frag_malformed");
+  let h: unknown;
+  try {
+    h = JSON.parse(L[1]);
+  } catch {
+    return bad("frag_malformed");
+  }
+  if (!validHeader(h)) return bad("frag_malformed");
+  if (!isProfileId(h.profile)) return bad("frag_profile_unknown");
+  const header = h as FragmentHeader;
+  if (header.hubKey !== expectHubKey) return bad("frag_hub_mismatch");
+  let ok = false;
+  try {
+    ok = verifyB64(header.hubKey, sigData(L[1], L[3]), L[2]);
+  } catch {
+    ok = false;
+  }
+  return ok ? { ok: true, header, hash: sha256hex(bytes) } : bad("frag_bad_signature");
+}
+
+/** 메시지를 조각 평문 상한 안으로 나눈다. */
+export function chunkMessages<T>(msgs: T[]): T[][] {
+  const out: T[][] = [];
+  let cur: T[] = [];
+  let size = 0;
+  for (const m of msgs) {
+    const n = Buffer.byteLength(JSON.stringify(m)) + 1;
+    if (cur.length > 0 && size + n > MAX_FRAGMENT_PLAINTEXT) {
+      out.push(cur);
+      cur = [];
+      size = 0;
+    }
+    cur.push(m);
+    size += n;
+  }
+  if (cur.length > 0) out.push(cur);
+  return out;
+}
