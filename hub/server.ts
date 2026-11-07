@@ -27,6 +27,7 @@ import { parseRepo } from "./connection/storage/github.js";
 import { parseSupabaseUrl } from "./connection/storage/supabase.js";
 import { ConnectionManager } from "./connection/manager.js";
 import type { CaseChoice, GovCommand } from "./connection/mesh/governance.js";
+import type { StorageConfig } from "./connection/storage/uploader.js";
 import { isProfileId } from "../shared/cryptoProfile.js";
 import {
   MAGIC,
@@ -258,7 +259,7 @@ export class Hub {
       if (code === "server_not_configured") return fail("server_not_enabled", "server_not_enabled");
       if (e instanceof StorageError) return fail(e.code, "storage_failed", { code: e.code });
       if (code === "storage_not_configured") return fail(code, "storage_not_configured");
-      if (/^(invite_|space1_|space_not_found)/.test(code)) return fail(code, "conn_op_failed", { code });
+      if (/^(invite_|space1_|space_not_found|recovery_key_invalid|restore_empty)/.test(code)) return fail(code, "conn_op_failed", { code });
       return fail("conn_op_failed", "conn_op_failed", { code: (e as NodeJS.ErrnoException).code ?? code });
     };
     try {
@@ -301,30 +302,22 @@ export class Hub {
           return r.ok ? { ok: true, spaceId: r.spaceId } : fail(r.code, "conn_op_failed", { code: r.code });
         }
         case "admin_conn_storage_set": {
-          if (q.kind === "supabase") {
-            // Supabase: 프로젝트 주소(https://<ref>.supabase.co), secret key, 버킷(기본 agent-uplink). 키는 응답·기록에 되돌려 쓰지 않는다.
-            const key = q.key;
-            const interval = q.intervalMin ?? 5;
-            const bucket = q.bucket ?? "agent-uplink";
-            const url = typeof q.url === "string" ? (this.opts.supabaseInsecureForTest ? q.url.trim().replace(/\/+$/, "") : parseSupabaseUrl(q.url)) : null;
-            const ok = !!url && typeof key === "string" && key.length > 0 && key.length <= 1000 && !/\s/.test(key)
-              && typeof bucket === "string" && /^[a-z0-9][a-z0-9._-]{0,62}$/.test(bucket)
-              && typeof interval === "number" && Number.isInteger(interval) && interval >= 1 && interval <= 60;
-            if (!ok) return fail("storage_config_invalid", "storage_config_invalid");
-            const r = await c.storageSet({ kind: "supabase", url: url!, bucket: bucket as string, intervalMin: interval as number }, key as string);
-            return { ok: true, recoveryKey: r.recoveryKey };
-          }
-          // 관리 토큰 칸(token)과 겹치지 않게 저장소 토큰은 ghToken. 토큰은 응답·기록에 되돌려 쓰지 않는다.
-          const tok = q.ghToken;
-          const interval = q.intervalMin ?? 5;
-          const branch = q.branch;
-          const ok = q.kind === "github" && typeof q.repo === "string" && parseRepo(q.repo) !== null
-            && typeof tok === "string" && tok.length > 0 && tok.length <= 500 && !/\s/.test(tok)
-            && typeof interval === "number" && Number.isInteger(interval) && interval >= 1 && interval <= 60
-            && (branch === undefined || (typeof branch === "string" && /^[\w./-]{1,255}$/.test(branch)));
-          if (!ok) return fail("storage_config_invalid", "storage_config_invalid");
-          const r = await c.storageSet({ kind: "github", repo: q.repo as string, ...(branch ? { branch: branch as string } : {}), intervalMin: interval as number }, tok as string);
+          const s = this.parseStorageInput(q, true);
+          if (!s) return fail("storage_config_invalid", "storage_config_invalid");
+          const r = await c.storageSet(s.cfg, s.token);
           return { ok: true, recoveryKey: r.recoveryKey };
+        }
+        // 다른 PC 백업 복원(v3.0 7단계): 토큰·복구 키는 이 요청 동안만 쓰고 저장하지 않는다.
+        case "admin_conn_storage_restore_scan": {
+          const s = this.parseStorageInput(q, false);
+          if (!s || typeof q.recoveryKey !== "string" || q.recoveryKey.length > 200) return fail("storage_config_invalid", "storage_config_invalid");
+          return { ok: true, candidates: await c.restoreScan(s.cfg, s.token, q.recoveryKey) };
+        }
+        case "admin_conn_storage_restore": {
+          const s = this.parseStorageInput(q, false);
+          const idOk = (v: unknown) => typeof v === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(v);
+          if (!s || typeof q.recoveryKey !== "string" || q.recoveryKey.length > 200 || !idOk(q.spaceId) || !idOk(q.hubId)) return fail("storage_config_invalid", "storage_config_invalid");
+          return { ok: true, ...(await c.restore(s.cfg, s.token, q.recoveryKey, { spaceId: q.spaceId as string, hubId: q.hubId as string }, String(q.serverName ?? ""))) };
         }
         case "admin_conn_storage_prune_set": {
           const days = q.days ?? 30;
@@ -420,6 +413,30 @@ export class Hub {
     } catch (e) {
       return thrown(e);
     }
+  }
+
+  /** 저장소 연결 입력(GitHub: repo·ghToken·branch / Supabase: url·key·bucket). withInterval=false면 주기는 검사하지 않음(복원). 틀리면 null. */
+  private parseStorageInput(q: Record<string, unknown>, withInterval: boolean): { cfg: StorageConfig; token: string } | null {
+    const interval = q.intervalMin ?? 5;
+    const intervalOk = !withInterval || (typeof interval === "number" && Number.isInteger(interval) && interval >= 1 && interval <= 60);
+    if (!intervalOk) return null;
+    const intervalMin = withInterval ? (interval as number) : 5;
+    if (q.kind === "supabase") {
+      // Supabase: 프로젝트 주소(https://<ref>.supabase.co), secret key, 버킷(기본 agent-uplink). 키는 응답·기록에 되돌려 쓰지 않는다.
+      const key = q.key;
+      const bucket = q.bucket ?? "agent-uplink";
+      const url = typeof q.url === "string" ? (this.opts.supabaseInsecureForTest ? q.url.trim().replace(/\/+$/, "") : parseSupabaseUrl(q.url)) : null;
+      const ok = !!url && typeof key === "string" && key.length > 0 && key.length <= 1000 && !/\s/.test(key)
+        && typeof bucket === "string" && /^[a-z0-9][a-z0-9._-]{0,62}$/.test(bucket);
+      return ok ? { cfg: { kind: "supabase", url: url!, bucket: bucket as string, intervalMin }, token: key as string } : null;
+    }
+    // 관리 토큰 칸(token)과 겹치지 않게 저장소 토큰은 ghToken. 토큰은 응답·기록에 되돌려 쓰지 않는다.
+    const tok = q.ghToken;
+    const branch = q.branch;
+    const ok = q.kind === "github" && typeof q.repo === "string" && parseRepo(q.repo) !== null
+      && typeof tok === "string" && tok.length > 0 && tok.length <= 500 && !/\s/.test(tok)
+      && (branch === undefined || (typeof branch === "string" && /^[\w./-]{1,255}$/.test(branch)));
+    return ok ? { cfg: { kind: "github", repo: q.repo as string, ...(branch ? { branch: branch as string } : {}), intervalMin }, token: tok as string } : null;
   }
 
   /** 시험용: 채널이 등록돼 있는가. */

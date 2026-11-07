@@ -182,3 +182,49 @@ test("supabase_url_must_be_supabase_co: 실제 Hub는 https://<ref>.supabase.co 
     c.close();
   } finally { t.hub.stop(); }
 });
+
+test("restore_e2e_new_hub: Hub X의 백업을 새 Hub Y가 저장소 정보+복구 키로 찾아 되살리고, 연결 계정이 읽는다", async () => {
+  const g = await fakeGitHub();
+  const X = await hubWithServer(g.apiBase);
+  const Y = await startTestHub({ storageApiBase: g.apiBase } as any);
+  try {
+    await say(X.port, X.channelId, ["예전 대화 1", "예전 대화 2"]);
+    const { recoveryKey } = await X.req("admin_conn_storage_set", { kind: "github", repo: "o/r", ghToken: TOKEN, intervalMin: 5 });
+    assert.equal((await X.req("admin_conn_storage_upload_now")).ok, true);
+    const yToken = fs.readFileSync(path.join(Y.dataDir, "admin.key"), "utf8").trim();
+    const yc = new TestClient(Y.port);
+    await yc.ready();
+    const yreq = (op: string, p: object = {}) => yc.req(op, { token: yToken, ...p }) as Promise<any>;
+    const input = { kind: "github", repo: "o/r", ghToken: TOKEN, recoveryKey };
+    assert.equal((await yreq("admin_conn_storage_restore_scan", { ...input, recoveryKey: "AAAA" })).code, "recovery_key_invalid");
+    const scan = await yreq("admin_conn_storage_restore_scan", input);
+    assert.equal(scan.ok, true, scan.code);
+    assert.equal(scan.candidates.length, 1);
+    const r = await yreq("admin_conn_storage_restore", { ...input, spaceId: scan.candidates[0].spaceId, hubId: scan.candidates[0].hubId, serverName: "되살림" });
+    assert.equal(r.ok, true, r.code);
+    assert.equal(r.messageCount, 2);
+    assert.equal(r.channelCount, 1);
+    assert.deepEqual(r.breaks, []);
+    const st = await yreq("admin_conn_status");
+    const srv = st.comms.find((s: { name: string }) => s.name === "되살림");
+    assert.ok(srv, JSON.stringify(st.comms));
+    assert.equal(srv.channels[0].name, "팀작업/main");
+    // 연결 계정은 통신이 켜져 있을 때만 로그인(기존 설계) — 새 PC도 통신 서버를 켠다
+    await yreq("admin_conn_enable_server", { port: await freePort(), bindHost: "127.0.0.1", profile: "tls13-chacha20", spaceName: "새 PC" });
+    const ai = new TestClient(Y.port);
+    await ai.ready();
+    assert.equal((await ai.req("login", { uuid: "y-ai", area: "connection" })).ok, true);
+    const msgs = (await ai.req("read", { channelId: srv.channels[0].channelId })).messages ?? [];
+    assert.deepEqual(msgs.map((m: { text: string }) => m.text), ["예전 대화 1", "예전 대화 2"]);
+    // 토큰·복구 키는 Y에 남지 않는다
+    const all: string[] = [];
+    const walk = (d: string) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else all.push(fs.readFileSync(p, "latin1")); } };
+    walk(Y.dataDir);
+    assert.equal(all.some((s) => s.includes(TOKEN) || s.includes(recoveryKey) || s.includes(recoveryKey.replace(/-/g, ""))), false);
+    // 저장소에 쓰지 않았다(파일 수 그대로)
+    const before = g.files.size;
+    await yreq("admin_conn_storage_restore_scan", input);
+    assert.equal(g.files.size, before);
+    ai.close(); yc.close();
+  } finally { X.c.close(); X.hub.stop(); Y.hub.stop(); await g.close(); }
+});

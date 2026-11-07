@@ -4,7 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { MAX_READ_LIMIT, MAX_STORED_TEXT_LENGTH, MAX_TEXT_LENGTH, type AccountInfo, type Channel, type Message, type MessageOrigin } from "../../shared/protocol.js";
+import { MAX_READ_LIMIT, MAX_STORED_TEXT_LENGTH, MAX_TEXT_LENGTH, NAME_MAX, type AccountInfo, type Channel, type Message, type MessageOrigin } from "../../shared/protocol.js";
 import { newJoinToken, spkiFingerprint } from "../../shared/connCrypto.js";
 import { decodeInvite, encodeInvite } from "../../shared/invite.js";
 import type { ProfileId } from "../../shared/cryptoProfile.js";
@@ -26,6 +26,7 @@ import { SupabaseBackend } from "./storage/supabase.js";
 import { Lifecycle } from "./lifecycle.js";
 import { SpaceSync, type SpaceChannel, type SpaceDeps } from "./space1/sync.js";
 import type { StorageBackend } from "./storage/backend.js";
+import { parseRecoveryKey, restoreBackup, scanBackups, type BackupCandidate } from "./storage/restore.js";
 import { DEFAULT_PROFILE } from "../../shared/cryptoProfile.js";
 import { Mesh, type MeshSelf } from "./mesh/mesh.js";
 import { Governance, RELAY_WINDOW, type CaseChoice, type GovCommand } from "./mesh/governance.js";
@@ -106,18 +107,68 @@ export class ConnectionManager implements ConnStatusSource {
         const mirrors = plan.mirrors.flatMap((id) => { const f = this.deps.channels.fileOf(id); return f ? [{ id, name: this.deps.channels.getChannel(id)?.label ?? id, logFile: f }] : []; });
         return [...own, ...mirrors];
       },
-      makeBackend: (cfg, token) => {
-        if (cfg.kind === "supabase") {
-          return new SupabaseBackend({ url: cfg.url ?? "", key: token, bucket: cfg.bucket ?? "agent-uplink", ...(deps.supabaseInsecureForTest ? { allowInsecureForTest: true } : {}) });
-        }
-        return new GitHubBackend({ token, repo: cfg.repo ?? "", ...(cfg.branch ? { branch: cfg.branch } : {}), ...(deps.storageApiBase ? { apiBase: deps.storageApiBase } : {}) });
-      },
+      makeBackend: (cfg, token) => this.makeStorageBackend(cfg, token),
       log: (code, detail) => this.log(code, detail),
       prune: (id, keep) => deps.channels.prune(id, keep),
     });
   }
 
   readonly uploader: Uploader;
+
+  private makeStorageBackend(cfg: StorageConfig, token: string): StorageBackend {
+    if (cfg.kind === "supabase") {
+      return new SupabaseBackend({ url: cfg.url ?? "", key: token, bucket: cfg.bucket ?? "agent-uplink", ...(this.deps.supabaseInsecureForTest ? { allowInsecureForTest: true } : {}) });
+    }
+    return new GitHubBackend({ token, repo: cfg.repo ?? "", ...(cfg.branch ? { branch: cfg.branch } : {}), ...(this.deps.storageApiBase ? { apiBase: this.deps.storageApiBase } : {}) });
+  }
+
+  // ───────── 다른 PC 백업 복원(v3.0 7단계) ─────────
+
+  private restoreKey(recoveryKey: string): Buffer {
+    const k = parseRecoveryKey(recoveryKey);
+    if (!k) throw new Error("recovery_key_invalid");
+    return k;
+  }
+
+  /** 복구 키로 풀리는 백업 찾기. 저장소에 쓰지 않고 토큰·키를 저장하지 않는다. */
+  async restoreScan(cfg: StorageConfig, token: string, recoveryKey: string): Promise<BackupCandidate[]> {
+    const key = this.restoreKey(recoveryKey);
+    const backend = this.makeStorageBackend(cfg, token);
+    await backend.check();
+    return scanBackups(backend, key);
+  }
+
+  /** 백업 하나를 새 통신 서버로 되살린다. 되살린 메시지는 인박스로 보내지 않는다(지난 대화). */
+  async restore(cfg: StorageConfig, token: string, recoveryKey: string, target: { spaceId: string; hubId: string }, serverName: string):
+    Promise<{ serverId: string; channelCount: number; messageCount: number; breaks: number[]; bad: { path: string; code: string }[] }> {
+    const key = this.restoreKey(recoveryKey);
+    const name = validateName(serverName, "server", (s) => this.g(s, "restore", "serverName"));
+    if (!name.ok) throw new Error("name_invalid");
+    const r = await restoreBackup(this.makeStorageBackend(cfg, token), key, target);
+    if (r.channels.length === 0) throw new Error("restore_empty");
+    const serverId = this.comms.createServer(name.name).id;
+    let messages = 0;
+    r.channels.forEach((ch, i) => {
+      const raw = Array.from(ch.name ?? "").slice(0, NAME_MAX).join("");
+      const v = validateName(raw, "channel", (s) => this.g(s, "restore", "channelName"));
+      const chId = this.createCommsChannel(serverId, v.ok ? v.name : `#${i + 1}`);
+      for (const m of ch.messages) {
+        if (m.text.length > MAX_STORED_TEXT_LENGTH) continue;
+        const o = m.origin;
+        const msg = this.deps.channels.appendExternal(chId, {
+          seq: m.seq,
+          ts: typeof m.ts === "number" ? m.ts : 0,
+          from: this.g(String(m.from ?? "?").slice(0, 300), "restore", "from"),
+          fromName: this.nameOf(m.fromName, "restore") ?? "?",
+          text: this.g(m.text, "restore", "text", true),
+          ...(o && typeof o === "object" ? { origin: { scope: "remote" as const, spaceName: this.g(String(o.spaceName ?? ""), "restore", "spaceName"), hubUser: this.g(String(o.hubUser ?? ""), "restore", "hubUser") } } : {}),
+        });
+        if (msg) messages++;
+      }
+    });
+    this.log("storage_restored", { channels: r.channels.length, messages, breaks: r.breaks.length, bad: r.bad.length });
+    return { serverId, channelCount: r.channels.length, messageCount: messages, breaks: r.breaks, bad: r.bad };
+  }
   private lifecycle: Lifecycle | null = null;
   /** 방식 1 공간들(v3.0 4단계)과 동기화 타이머. */
   private spaces1 = new Map<string, { sync: SpaceSync; timer: NodeJS.Timeout | null }>();
