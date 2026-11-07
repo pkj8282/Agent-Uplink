@@ -67,7 +67,9 @@ test("put_never_overwrites: 이미 있으면 덮어쓰지 않는다", async () =
 test("error_codes: 401 키 틀림·403·429·5xx(일시정지 등)·닿지 않음", async () => {
   const s = await fakeSupabase();
   try {
-    assert.equal((await codeOf(make(s.url, "sb_secret_WRONG").check())).code, "storage_auth_failed");
+    assert.equal((await codeOf(make(s.url, "sb_secret_WRONG").check())).code, "storage_auth_failed"); // 실제: 400 authorization 필요
+    assert.equal((await codeOf(make(s.url, "eyJhbGciOiJIUzI1NiJ9.e30.x").check())).code, "storage_auth_failed"); // 실제: 400 + 403 Unauthorized
+    assert.equal((await codeOf(make(s.url, "sb_secret_WRONG").list("a"))).code, "storage_auth_failed");
   } finally { await s.close(); }
   const cases: [number, Record<string, string>, string][] = [
     [403, {}, "storage_forbidden"], [429, { "retry-after": "4" }, "storage_rate_limited"], [503, {}, "storage_unreachable"], [540, {}, "storage_unreachable"],

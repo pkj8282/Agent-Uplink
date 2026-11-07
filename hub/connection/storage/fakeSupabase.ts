@@ -16,7 +16,12 @@ export async function fakeSupabase(opts: { hook?: (req: http.IncomingMessage, re
       seen.push({ method: req.method!, url: req.url!, apikey: req.headers.apikey as string | undefined, auth: req.headers.authorization, body });
       if (opts.hook?.(req, res)) return;
       const json = (code: number, v: unknown) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(v)); };
-      if (req.headers.apikey !== SUPA_KEY) return json(401, { message: "Invalid API key" });
+      // 실제 Supabase(2026-11-07 확인): 틀린 secret key는 Authorization이 붙지 않아 400 InvalidRequest,
+      // 틀린 JWT(예전 service_role 키)는 400 + statusCode "403" Unauthorized/AccessDenied.
+      if (req.headers.apikey !== SUPA_KEY) {
+        if (String(req.headers.apikey ?? "").startsWith("eyJ")) return json(400, { statusCode: "403", error: "Unauthorized", message: "Failed to base64url decode the signature", code: "AccessDenied" });
+        return json(400, { statusCode: "400", error: "Error", message: "headers must have required property 'authorization'", code: "InvalidRequest" });
+      }
       const u = new URL(req.url!, "http://x");
       const p = decodeURIComponent(u.pathname);
       let m: RegExpExecArray | null;

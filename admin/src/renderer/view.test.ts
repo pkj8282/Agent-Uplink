@@ -457,3 +457,19 @@ test("Supabase 상태 줄: 프로젝트 이름·주기, 닿지 못하면 일시�
     setLang("ko");
   }
 });
+
+test("저장소 오류 문구는 GitHub 전용이 아니다(Supabase에서도 맞는 말)", () => {
+  for (const code of ["storage_auth_failed", "storage_bad_response", "storage_unreachable", "storage_rate_limited", "storage_repo_not_found", "storage_forbidden"]) {
+    const ko = connErrorMessage(code, "");
+    assert.doesNotMatch(ko, /^GitHub(가|에|의)/, code);
+    assert.ok(ko.length > 0, code);
+  }
+  assert.match(connErrorMessage("storage_auth_failed", ""), /키/);
+  assert.match(connErrorMessage("storage_forbidden", ""), /Supabase/);
+  setLang("en");
+  try {
+    for (const code of ["storage_bad_response", "storage_unreachable", "storage_rate_limited"]) assert.doesNotMatch(connErrorMessage(code, ""), /^(GitHub sent|Could not reach GitHub|Hit the GitHub)/, code);
+  } finally {
+    setLang("ko");
+  }
+});

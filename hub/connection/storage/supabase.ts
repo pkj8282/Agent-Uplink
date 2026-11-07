@@ -43,12 +43,23 @@ export class SupabaseBackend implements StorageBackend {
     }
     if (res.status === 401) throw new StorageError("storage_auth_failed");
     if (res.status === 403) throw new StorageError("storage_forbidden");
+    if (res.status === 400 && (await SupabaseBackend.isAuthError(res))) throw new StorageError("storage_auth_failed");
     if (res.status === 429) {
       const retry = Number(res.headers.get("retry-after"));
       throw new StorageError("storage_rate_limited", Number.isFinite(retry) && retry > 0 ? retry * 1000 : 30_000);
     }
     if (res.status >= 500) throw new StorageError("storage_unreachable"); // 일시정지(540 등)·서버 오류
     return res;
+  }
+
+  /**
+   * 400 응답이 인증 실패인가(실제 Supabase 2026-11-07 확인): 틀린 secret key는 Authorization이 붙지 않아
+   * "headers must have required property 'authorization'"(InvalidRequest), 틀린 JWT는 statusCode "401"/"403"·Unauthorized·AccessDenied·InvalidJWT.
+   * 본문은 복제본에서 읽어 원래 응답은 그대로 둔다.
+   */
+  private static async isAuthError(res: Response): Promise<boolean> {
+    const t = await res.clone().text().catch(() => "");
+    return /required property 'authorization'|"statusCode"\s*:\s*"40[13]"|Unauthorized|AccessDenied|InvalidJWT|Invalid Compact JWS/i.test(t);
   }
 
   /** 400 응답 본문이 '없음'을 뜻하는가(Storage는 없는 대상에도 400을 준다). */
