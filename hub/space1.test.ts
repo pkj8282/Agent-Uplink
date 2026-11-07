@@ -149,3 +149,11 @@ test("member_can_discover_space_channels: 구성원 쪽 로컬 세션이 list_se
     aiB.close();
   } finally { s.A.hub.stop(); s.B.hub.stop(); }
 });
+
+test("conn_status_includes_spaces1: 통신 상태 응답에 방식 1 공간 목록이 실린다(관리 앱 공간 탭)", async () => {
+  const s = await setup();
+  try {
+    const st = await s.A.req("admin_conn_status");
+    assert.deepEqual(st.spaces1.map((x: any) => [x.spaceName, x.role, x.state]), [["공간", "owner", "active"]]);
+  } finally { s.A.hub.stop(); s.B.hub.stop(); }
+});

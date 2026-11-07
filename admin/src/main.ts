@@ -130,6 +130,24 @@ handle("admin:connStorageSetSupabase", (arg) => toResult(() => {
   const o = asObj(arg);
   return client.connStorageSetSupabase({ url: asStr(o.url, 200), key: asStr(o.key, 1000), bucket: asStr(o.bucket, 63), intervalMin: asNum(o.intervalMin) });
 }));
+handle("admin:connS1Create", (arg) => toResult(() => {
+  const o = asObj(arg);
+  return client.connS1Create({ spaceName: asStr(o.spaceName, 200), localServerId: asId(o.localServerId), repo: asStr(o.repo, 200), ghToken: asStr(o.ghToken, 500), intervalSec: asNum(o.intervalSec) });
+}));
+handle("admin:connS1Invite", (arg) => toResult(() => {
+  const o = asObj(arg);
+  return client.connS1Invite(asId(o.spaceId), asStr(o.label, 200), asNum(o.expiresInMs));
+}));
+handle("admin:connS1Join", (arg) => toResult(() => {
+  const o = asObj(arg);
+  return client.connS1Join({ code: asStr(o.code, 8192), ghToken: asStr(o.ghToken, 500) });
+}));
+handle("admin:connS1Revoke", (arg) => toResult(() => {
+  const o = asObj(arg);
+  return client.connS1Revoke(asId(o.spaceId), asId(o.hubId));
+}));
+handle("admin:connS1SyncNow", (id) => toResult(() => client.connS1SyncNow(asId(id))));
+handle("admin:connS1Leave", (id) => toResult(() => client.connS1Leave(asId(id))));
 handle("admin:connStorageUploadNow", () => toResult(() => client.connStorageUploadNow()));
 handle("admin:connStorageVerify", () => toResult(() => client.connStorageVerify()));
 handle("admin:connStorageClear", () => toResult(() => client.connStorageClear()));

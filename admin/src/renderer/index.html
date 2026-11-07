@@ -30,6 +30,7 @@
     <button type="button" role="tab" data-tab="accounts" aria-selected="false" data-i18n="tab_accounts"></button>
     <button type="button" role="tab" data-tab="trash" aria-selected="false" data-i18n="tab_trash"></button>
     <button type="button" role="tab" data-tab="conn" aria-selected="false" data-i18n="tab_conn"></button>
+    <button type="button" role="tab" data-tab="space1" aria-selected="false" data-i18n="tab_space1"></button>
     <button type="button" role="tab" data-tab="security" aria-selected="false"><span data-i18n="tab_security"></span><span id="security-badge" class="badge" hidden></span></button>
   </nav>
   <!-- Language stays usable with the hub down, so it lives outside the inert main (shown on the Settings tab only). -->
@@ -156,6 +157,32 @@
         <h2 data-i18n="conn_events_heading"></h2>
         <ul id="conn-events" class="list"></ul>
       </div>
+    </section>
+    <section id="tab-space1" class="panel" hidden>
+      <p class="hint" data-i18n="s1_intro"></p>
+      <h2 data-i18n="s1_list_heading"></h2>
+      <ul id="s1-list" class="list"></ul>
+      <div id="s1-invite-out" class="form" hidden>
+        <textarea id="s1-invite-code" readonly rows="4" spellcheck="false"></textarea>
+        <p class="hint" data-i18n="conn_invite_code_hint"></p>
+        <div class="actions"><button id="s1-invite-copy" type="button" data-i18n="btn_copy"></button><span id="s1-invite-copy-msg" class="msg"></span></div>
+      </div>
+      <h2 data-i18n="s1_create_heading"></h2>
+      <form id="s1-create-form" class="form">
+        <p class="hint" data-i18n="s1_create_hint"></p>
+        <label><span data-i18n="s1_space_name"></span> <input id="s1-name" type="text" autocomplete="off" maxlength="64"></label>
+        <label><span data-i18n="s1_local_server"></span> <select id="s1-server"></select></label>
+        <label><span data-i18n="s1_repo"></span> <input id="s1-repo" type="text" autocomplete="off" maxlength="141" class="wide"></label>
+        <label><span data-i18n="s1_token"></span> <input id="s1-token" type="password" autocomplete="off" maxlength="500" class="wide"></label>
+        <label><span data-i18n="s1_interval"></span> <input id="s1-interval" type="text" inputmode="numeric" autocomplete="off" value="30"></label>
+        <div class="actions"><button type="submit" data-i18n="btn_s1_create"></button></div>
+      </form>
+      <h2 data-i18n="s1_join_heading"></h2>
+      <form id="s1-join-form" class="form">
+        <textarea id="s1-join-code" rows="3" spellcheck="false" data-i18n-ph="s1_join_ph"></textarea>
+        <label><span data-i18n="s1_token"></span> <input id="s1-join-token" type="password" autocomplete="off" maxlength="500" class="wide"></label>
+        <div class="actions"><button type="submit" data-i18n="btn_s1_join"></button></div>
+      </form>
     </section>
     <section id="tab-security" class="panel" hidden>
       <p class="hint" data-i18n="security_intro"></p>

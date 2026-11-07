@@ -1,10 +1,10 @@
-import type { AdminApi, AdminConfig, ConnStatus, IpcResult, SecurityFinding, Snapshot, TrashItem } from "../types.js";
+import type { AdminApi, AdminConfig, ConnStatus, IpcResult, SecurityFinding, Snapshot, SnapshotServer, TrashItem } from "../types.js";
 import {
   ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf,
   emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage,
   restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount,
   parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage,
-  connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, parseSupabaseForm, storageStatusLine, verifyResultMessage, parsePruneForm,
+  connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, parseSupabaseForm, parseS1CreateForm, parseS1JoinForm, space1StateLabel, space1RevokeConfirm, space1LeaveConfirm, storageStatusLine, verifyResultMessage, parsePruneForm,
 } from "./view.js";
 import type { FormMessage } from "./view.js";
 import { getLang, setLang, tr } from "./lang.js";
@@ -91,6 +91,8 @@ async function refresh(): Promise<void> {
   renderSecurity(r.data);
   renderSaveBlocked(r.data);
   renderConn(c);
+  lastServers = r.data.servers;
+  renderSpace1(c, lastServers);
   restoreFocus();
 }
 
@@ -258,7 +260,7 @@ const connGate = new ChangeGate();
 /** 공유 체크를 바꿨지만 저장하지 않은 상태(null = Hub 값대로). */
 let pendingShared: Set<string> | null = null;
 
-for (const id of ["conn-user-form", "conn-server-form", "conn-invite-form", "storage-form", "supabase-form", "storage-kind-form", "prune-form"]) {
+for (const id of ["conn-user-form", "conn-server-form", "conn-invite-form", "storage-form", "supabase-form", "storage-kind-form", "prune-form", "s1-create-form", "s1-join-form"]) {
   byId(id).addEventListener("input", (e) => { if (e.target instanceof Element) connDirty.add(e.target); });
   byId(id).addEventListener("change", (e) => { if (e.target instanceof Element) connDirty.add(e.target); });
 }
@@ -453,7 +455,7 @@ function renderConn(c: IpcResult<ConnStatus>): void {
 // 전체 새로고침(로딩·inert)은 하지 않는다. Hub가 꺼졌으면 전체 새로고침으로 넘겨 hubdown 화면을 띄운다.
 let connPolling = false;
 setInterval(async () => {
-  if (connPolling || document.hidden || byId("tab-conn").hidden || document.body.dataset.state !== "ready") return;
+  if (connPolling || document.hidden || (byId("tab-conn").hidden && byId("tab-space1").hidden) || document.body.dataset.state !== "ready") return;
   connPolling = true;
   try {
     const t = snapshotSeq.begin();
@@ -461,10 +463,114 @@ setInterval(async () => {
     if (!snapshotSeq.isLatest(t) || document.body.dataset.state !== "ready") return; // 그사이 전체 새로고침이 시작됨
     if (!r.ok && r.hubDown) { void refresh(); return; }
     renderConn(r);
+    renderSpace1(r, lastServers);
   } finally {
     connPolling = false;
   }
 }, 2000);
+
+// --- 공간(방식 1, v3.0 4단계) ---
+
+let lastServers: SnapshotServer[] = [];
+
+function renderSpace1(c: IpcResult<ConnStatus>, servers: SnapshotServer[]): void {
+  // 공유할 로컬 서버 고르기(바뀌었을 때만 다시 — 고른 값 유지)
+  const sel = byId<HTMLSelectElement>("s1-server");
+  if (connGate.changed("s1servers", servers.map((s) => [s.id, s.name]))) {
+    const keep = sel.value;
+    sel.replaceChildren(...servers.map((s) => { const o = el("option", s.name); o.value = s.id; return o; }));
+    if (servers.some((s) => s.id === keep)) sel.value = keep;
+  }
+  const list = byId("s1-list");
+  if (!c.ok) {
+    if (connGate.changed("s1", c.error)) list.replaceChildren(el("li", c.code === "old_hub_no_op" ? connUnsupportedMessage() : tr("conn_failed", { detail: c.error }), "empty"));
+    return;
+  }
+  const spaces = c.data.spaces1;
+  if (!connGate.changed("s1", spaces)) return;
+  list.replaceChildren();
+  if (spaces.length === 0) list.append(el("li", tr("s1_no_spaces"), "empty"));
+  for (const sp of spaces) {
+    const li = el("li");
+    li.dataset.kind = "s1-space";
+    const row = el("div", undefined, "row");
+    const at = sp.lastSyncAt ? new Date(sp.lastSyncAt).toLocaleString(localeOf(getLang())) : tr("s1_never");
+    row.append(el("span", sp.spaceName, "name"), el("span", space1StateLabel(sp.role, sp.state), sp.state === "active" ? "meta online" : "meta"), el("span", tr("s1_meta", { repo: sp.repo, epoch: sp.epoch, at }), "meta"));
+    if (sp.lastError) row.append(el("span", connErrorMessage(sp.lastError, sp.lastError), "flag"));
+    const sync = el("button", tr("btn_s1_sync"));
+    sync.type = "button";
+    sync.addEventListener("click", () => void connRun(sync, () => window.admin.connS1SyncNow(sp.spaceId)));
+    row.append(sync);
+    if (sp.role === "owner" && sp.state === "active") {
+      const label = el("input");
+      label.type = "text";
+      label.maxLength = 64;
+      label.placeholder = tr("s1_invite_label_ph");
+      const inv = el("button", tr("btn_s1_invite"));
+      inv.type = "button";
+      inv.addEventListener("click", () => {
+        const name = label.value.trim();
+        if (!name) { showOpMsg({ text: tr("form_label_invalid"), kind: "err" }); return; }
+        void connRun(inv, () => window.admin.connS1Invite(sp.spaceId, name, 7 * 86_400_000), (code) => {
+          byId<HTMLTextAreaElement>("s1-invite-code").value = code;
+          byId("s1-invite-copy-msg").textContent = "";
+          byId("s1-invite-out").hidden = false;
+        });
+      });
+      row.append(label, inv);
+    }
+    const leave = el("button", tr("btn_s1_leave"), "danger");
+    leave.type = "button";
+    leave.addEventListener("click", () => {
+      if (!window.confirm(space1LeaveConfirm(sp.spaceName))) return;
+      void connRun(leave, () => window.admin.connS1Leave(sp.spaceId));
+    });
+    row.append(leave);
+    const sub = el("ul");
+    for (const m of sp.members) {
+      const mli = el("li", undefined, "row");
+      mli.dataset.kind = "s1-member";
+      mli.append(el("span", `${m.userName}${m.me ? ` ${tr("s1_me")}` : ""}`, "name"), el("span", m.hubId, "id"));
+      if (m.revoked) mli.append(el("span", tr("s1_state_revoked"), "flag"));
+      else if (sp.role === "owner" && !m.me) {
+        const b = el("button", tr("btn_s1_revoke"), "danger");
+        b.type = "button";
+        b.addEventListener("click", () => {
+          if (!window.confirm(space1RevokeConfirm(m.userName))) return;
+          void connRun(b, () => window.admin.connS1Revoke(sp.spaceId, m.hubId));
+        });
+        mli.append(b);
+      }
+      sub.append(mli);
+    }
+    li.append(row, sub);
+    list.append(li);
+  }
+}
+
+byId("s1-invite-copy").addEventListener("click", () => void copyBox("s1-invite-code", "s1-invite-copy-msg"));
+
+byId<HTMLFormElement>("s1-create-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const tokenBox = byId<HTMLInputElement>("s1-token");
+  const parsed = parseS1CreateForm({
+    spaceName: byId<HTMLInputElement>("s1-name").value, localServerId: byId<HTMLSelectElement>("s1-server").value,
+    repo: byId<HTMLInputElement>("s1-repo").value, token: tokenBox.value, intervalSec: byId<HTMLInputElement>("s1-interval").value,
+  });
+  if (!parsed.ok) { showOpMsg({ text: parsed.error, kind: "err" }); return; }
+  clearDirty(byId("s1-create-form"));
+  void connRun(submitter(e), () => window.admin.connS1Create(parsed.value), () => { tokenBox.value = ""; byId<HTMLInputElement>("s1-name").value = ""; });
+});
+
+byId<HTMLFormElement>("s1-join-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const tokenBox = byId<HTMLInputElement>("s1-join-token");
+  const codeBox = byId<HTMLTextAreaElement>("s1-join-code");
+  const parsed = parseS1JoinForm({ code: codeBox.value, token: tokenBox.value });
+  if (!parsed.ok) { showOpMsg({ text: parsed.error, kind: "err" }); return; }
+  clearDirty(byId("s1-join-form"));
+  void connRun(submitter(e), () => window.admin.connS1Join(parsed.value), () => { tokenBox.value = ""; codeBox.value = ""; return tr("s1_join_ok"); });
+});
 
 function submitter(e: SubmitEvent): HTMLButtonElement | null {
   return e.submitter instanceof HTMLButtonElement ? e.submitter : null;

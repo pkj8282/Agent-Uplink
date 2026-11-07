@@ -1,5 +1,5 @@
 // 렌더러의 순수 로직(DOM 없음 → Node에서 테스트).
-import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, StorageInput, StorageStatus, SupabaseInput, VerifyResult, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
+import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, StorageInput, StorageStatus, SupabaseInput, VerifyResult, Space1CreateInput, Space1JoinInput, Space1Status, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
 import { oneLine } from "../text.js";
 import type { AdminKey } from "../messages.js";
 import { getLang, tr } from "./lang.js";
@@ -290,6 +290,10 @@ export function connEventLine(e: ConnEvent): string {
   if (e.code === "member_revoked") return tr("ev_member_revoked", { name: s(d.userName) });
   if (e.code === "remote_text_too_long") return tr("ev_remote_text_too_long");
   if (e.code === "unclean_shutdown_detected") return tr("ev_unclean");
+  if (e.code === "space1_member_joined") return tr("ev_s1_joined", { name: s(d.userName) });
+  if (e.code === "space1_member_revoked") return tr("ev_s1_revoked", { name: s(d.userName) });
+  if (e.code === "space1_sync_failed") return tr("ev_s1_sync_failed", { detail: connErrorMessage(typeof d.code === "string" ? d.code : undefined, s(d.code)) });
+  if (e.code === "space1_fragment_rejected" || e.code === "space1_roster_rejected" || e.code === "space1_request_rejected") return tr("ev_s1_rejected");
   if (e.code === "prune_done") return tr("ev_prune_done", { removed: Number(d.removed) || 0 });
   if (e.code === "prune_skipped") return tr("ev_prune_skipped");
   if (e.code === "storage_uploaded") return tr("ev_storage_uploaded", { fragments: Number(d.fragments) || 0, messages: Number(d.messages) || 0 });
@@ -312,6 +316,8 @@ const CONN_CODE_KEY: Record<string, AdminKey> = {
   storage_auth_failed: "ce_storage_auth_failed", storage_forbidden: "ce_storage_forbidden", storage_repo_not_found: "ce_storage_repo_not_found",
   storage_rate_limited: "ce_storage_rate_limited", storage_unreachable: "ce_storage_unreachable", storage_bad_response: "ce_storage_bad_response",
   storage_not_configured: "ce_storage_not_configured", storage_config_invalid: "ce_storage_config_invalid",
+  space1_config_invalid: "ce_space1_config_invalid", space1_not_found: "ce_space1_not_found", space_not_found: "ce_space_not_found",
+  invite_not_space: "ce_invite_not_space", space1_not_owner: "ce_space1_not_owner",
 };
 
 /** 통신 op 오류 코드 → 문구. 모르는 코드는 Hub 원문. */
@@ -397,4 +403,42 @@ export function parseSupabaseForm(i: { url: string; key: string; bucket: string;
   const n = posInt(i.intervalMin);
   if (n === null || n > 60) return { ok: false, error: tr("form_interval_invalid") };
   return { ok: true, value: { url, key, bucket, intervalMin: n } };
+}
+
+// ───── 공간(방식 1, v3.0 4단계 — GitHub만) ─────
+
+export function parseS1CreateForm(i: { spaceName: string; localServerId: string; repo: string; token: string; intervalSec: string }): { ok: true; value: Space1CreateInput } | { ok: false; error: string } {
+  const spaceName = i.spaceName.trim();
+  if (!spaceName) return { ok: false, error: tr("form_space_invalid") };
+  const localServerId = i.localServerId.trim();
+  if (!localServerId) return { ok: false, error: tr("form_s1_server_invalid") };
+  const repo = i.repo.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/.test(repo) || repo.endsWith("/.") || repo.endsWith("/..")) return { ok: false, error: tr("form_repo_invalid") };
+  const ghToken = i.token.trim();
+  if (!ghToken || /\s/.test(ghToken)) return { ok: false, error: tr("form_token_invalid") };
+  const n = posInt(i.intervalSec);
+  if (n === null || n < 10 || n > 600) return { ok: false, error: tr("form_s1_interval_invalid") };
+  return { ok: true, value: { spaceName, localServerId, repo, ghToken, intervalSec: n } };
+}
+
+export function parseS1JoinForm(i: { code: string; token: string }): { ok: true; value: Space1JoinInput } | { ok: false; error: string } {
+  const code = i.code.trim();
+  if (!code) return { ok: false, error: tr("form_code_empty") };
+  const ghToken = i.token.trim();
+  if (!ghToken || /\s/.test(ghToken)) return { ok: false, error: tr("form_token_invalid") };
+  return { ok: true, value: { code, ghToken } };
+}
+
+export function space1StateLabel(role: Space1Status["role"], state: Space1Status["state"]): string {
+  const r = tr(role === "owner" ? "s1_role_owner" : "s1_role_member");
+  const st = tr(state === "active" ? "s1_state_active" : state === "pending" ? "s1_state_pending" : "s1_state_revoked");
+  return `${r} · ${st}`;
+}
+
+export function space1RevokeConfirm(name: string): string {
+  return tr("s1_revoke_confirm", { name: displayName(name) });
+}
+
+export function space1LeaveConfirm(name: string): string {
+  return tr("s1_leave_confirm", { name: displayName(name) });
 }

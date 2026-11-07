@@ -473,3 +473,38 @@ test("저장소 오류 문구는 GitHub 전용이 아니다(Supabase에서도 �
     setLang("ko");
   }
 });
+
+// ── 4단계: 공간(방식 1) ──
+import { parseS1CreateForm, parseS1JoinForm, space1StateLabel, space1RevokeConfirm, space1LeaveConfirm } from "./view.js";
+
+test("parseS1CreateForm·parseS1JoinForm: 이름·로컬 서버·GitHub 저장소·토큰·주기 10~600초 / 코드·토큰", () => {
+  const base = { spaceName: "공간", localServerId: "srv-1", repo: "me/space", token: "ghp_x", intervalSec: "30" };
+  assert.deepEqual(parseS1CreateForm(base), { ok: true, value: { spaceName: "공간", localServerId: "srv-1", repo: "me/space", ghToken: "ghp_x", intervalSec: 30 } });
+  for (const k of ["spaceName", "localServerId", "token"] as const) assert.equal(parseS1CreateForm({ ...base, [k]: " " }).ok, false, k);
+  for (const repo of ["me", "a/b/c", "../x"]) assert.equal(parseS1CreateForm({ ...base, repo }).ok, false, repo);
+  for (const intervalSec of ["9", "601", "x"]) assert.equal(parseS1CreateForm({ ...base, intervalSec }).ok, false, intervalSec);
+  assert.deepEqual(parseS1JoinForm({ code: " UPLINKS1-AB\n ", token: " ghp_y " }), { ok: true, value: { code: "UPLINKS1-AB", ghToken: "ghp_y" } });
+  assert.equal(parseS1JoinForm({ code: "", token: "t" }).ok, false);
+  assert.equal(parseS1JoinForm({ code: "UPLINKS1-A", token: "a b" }).ok, false);
+});
+
+test("공간 상태·확인창·사건·오류 문구, 영어 한글 없음", () => {
+  assert.match(space1StateLabel("owner", "active"), /관리자/);
+  assert.match(space1StateLabel("member", "pending"), /승인 대기/);
+  assert.match(space1StateLabel("member", "revoked"), /퇴출/);
+  assert.match(space1RevokeConfirm("씨"), /되돌릴 수 없습니다/);
+  assert.match(space1RevokeConfirm("씨"), /협력자/);
+  assert.match(space1LeaveConfirm("공간"), /저장소의 파일은 그대로/);
+  assert.match(connEventLine({ ts: 1, code: "space1_member_joined", detail: { userName: "비" } }), /비/);
+  assert.match(connErrorMessage("invite_not_space", ""), /방식 2/);
+  setLang("en");
+  try {
+    for (const t of [space1StateLabel("owner", "active"), space1StateLabel("member", "pending"), space1RevokeConfirm("a"), space1LeaveConfirm("a"),
+      connEventLine({ ts: 1, code: "space1_member_revoked", detail: { userName: "a" } }), connEventLine({ ts: 1, code: "space1_fragment_rejected", detail: {} }),
+      connErrorMessage("space_not_found", ""), connErrorMessage("space1_config_invalid", "")]) assert.equal(hasHangul(t), false, t);
+    const bad = parseS1CreateForm({ spaceName: "", localServerId: "", repo: "", token: "", intervalSec: "" });
+    assert.equal(!bad.ok && hasHangul(bad.error), false);
+  } finally {
+    setLang("ko");
+  }
+});

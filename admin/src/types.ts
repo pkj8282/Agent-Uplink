@@ -48,7 +48,15 @@ export interface ConnStatus {
   events: ConnEvent[];
   /** 저장소(백업) 상태. 3a 이전 Hub는 없음 → null. */
   storage: StorageStatus | null;
+  /** 방식 1 공간(v3.0 4단계). 이전 Hub는 없음 → []. */
+  spaces1: Space1Status[];
 }
+export interface Space1Status {
+  spaceId: string; spaceName: string; role: "owner" | "member"; state: "pending" | "active" | "revoked"; repo: string; epoch: number;
+  members: { hubId: string; userName: string; revoked: boolean; me: boolean }[]; lastSyncAt: number | null; lastError: string | null;
+}
+export interface Space1CreateInput { spaceName: string; localServerId: string; repo: string; ghToken: string; intervalSec: number; }
+export interface Space1JoinInput { code: string; ghToken: string; }
 export interface StorageStatus { configured: boolean; kind?: "github" | "supabase"; repo?: string; url?: string; bucket?: string; intervalMin?: number; lastUploadAt: number | null; lastError: string | null; nextIndex: number; prune?: { enabled: boolean; days: number; lastPruneAt: number | null }; }
 export interface StorageInput { repo: string; token: string; intervalMin: number; }
 export interface SupabaseInput { url: string; key: string; bucket: string; intervalMin: number; }
@@ -127,6 +135,13 @@ export interface AdminApi {
   connStorageUploadNow(): Promise<IpcResult<{ fragments: number; messages: number }>>;
   connStorageVerify(): Promise<IpcResult<VerifyResult>>;
   connStorageClear(): Promise<IpcResult<void>>;
+  // 공간(방식 1, v3.0 4단계)
+  connS1Create(o: Space1CreateInput): Promise<IpcResult<string>>;
+  connS1Invite(spaceId: string, label: string, expiresInMs: number): Promise<IpcResult<string>>;
+  connS1Join(o: Space1JoinInput): Promise<IpcResult<string>>;
+  connS1Revoke(spaceId: string, hubId: string): Promise<IpcResult<void>>;
+  connS1SyncNow(spaceId: string): Promise<IpcResult<void>>;
+  connS1Leave(spaceId: string): Promise<IpcResult<void>>;
   connStoragePruneSet(o: { enabled: boolean; days: number }): Promise<IpcResult<void>>;
   // 통신 서버·채널 삭제(휴지통으로)
   connDeleteServer(serverId: string): Promise<IpcResult<void>>;

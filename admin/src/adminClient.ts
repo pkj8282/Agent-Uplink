@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { encodeFrame, FrameDecoder } from "./framing.js";
 import { newNonce, isNonce, clientProof, hubProof, proofEquals, readClientKeyFile } from "./auth.js";
-import type { AdminConfig, ConfigPatch, ConnProfile, ConnStatus, IpcResult, StorageInput, SupabaseInput, VerifyResult, NameConflict, RestoreReport, Snapshot } from "./types.js";
+import type { AdminConfig, ConfigPatch, ConnProfile, ConnStatus, IpcResult, StorageInput, SupabaseInput, VerifyResult, Space1CreateInput, Space1JoinInput, NameConflict, RestoreReport, Snapshot } from "./types.js";
 import { effectiveLang, type Lang } from "./i18n.js";
 import { readLanguageFile } from "./langFile.js";
 import { adminMsg, LEGACY_UNKNOWN_OP, type AdminKey } from "./messages.js";
@@ -140,7 +140,7 @@ export class AdminClient {
   // ───── 통신(v3.0) ─────
   async connStatus(): Promise<ConnStatus> {
     const r = await this.call("admin_conn_status", {});
-    return { server: r.server ?? null, members: r.members ?? [], joined: r.joined ?? [], userName: r.userName ?? null, comms: r.comms ?? [], events: r.events ?? [], storage: r.storage ?? null };
+    return { server: r.server ?? null, members: r.members ?? [], joined: r.joined ?? [], userName: r.userName ?? null, comms: r.comms ?? [], events: r.events ?? [], storage: r.storage ?? null, spaces1: r.spaces1 ?? [] };
   }
   async connSetUser(name: string): Promise<string> { return (await this.call("admin_conn_set_user", { name })).name; }
   async connEnableServer(o: { port: number; bindHost?: string; profile: ConnProfile; spaceName: string; burnOnJoin: boolean }): Promise<number> {
@@ -165,6 +165,13 @@ export class AdminClient {
   async connStorageSetSupabase(o: SupabaseInput): Promise<{ recoveryKey: string }> {
     return { recoveryKey: (await this.call("admin_conn_storage_set", { kind: "supabase", url: o.url, key: o.key, bucket: o.bucket, intervalMin: o.intervalMin })).recoveryKey };
   }
+  // ───── 공간(방식 1) ─────
+  async connS1Create(o: Space1CreateInput): Promise<string> { return (await this.call("admin_conn_s1_create", { ...o })).spaceId; }
+  async connS1Invite(spaceId: string, label: string, expiresInMs: number): Promise<string> { return (await this.call("admin_conn_s1_invite", { spaceId, label, expiresInMs })).code; }
+  async connS1Join(o: Space1JoinInput): Promise<string> { return (await this.call("admin_conn_s1_join", { ...o })).spaceId; }
+  async connS1Revoke(spaceId: string, hubId: string): Promise<void> { await this.call("admin_conn_s1_revoke", { spaceId, hubId }); }
+  async connS1SyncNow(spaceId: string): Promise<void> { await this.call("admin_conn_s1_sync_now", { spaceId }); }
+  async connS1Leave(spaceId: string): Promise<void> { await this.call("admin_conn_s1_leave", { spaceId }); }
   async connStorageUploadNow(): Promise<{ fragments: number; messages: number }> {
     const r = await this.call("admin_conn_storage_upload_now", {});
     return { fragments: r.fragments, messages: r.messages };

@@ -757,6 +757,7 @@ export class ConnectionManager implements ConnStatusSource {
     joined: { spaceId: string; spaceName: string; hostUser: string; connected: boolean }[];
     userName: string | null;
     storage: ReturnType<Uploader["status"]>;
+    spaces1: ReturnType<SpaceSync["status"]>[];
     comms: { serverId: string; name: string; channels: { channelId: string; name: string }[] }[];
     events: { ts: number; code: string; detail: object }[];
   } {
@@ -768,6 +769,7 @@ export class ConnectionManager implements ConnStatusSource {
       joined: this.store.joined().map((j) => ({ spaceId: j.spaceId, spaceName: j.spaceName, hostUser: j.hostUser, connected: !!this.spaces.get(j.spaceId)?.client.connected })),
       userName: this.store.userName(),
       storage: this.uploader.status(),
+      spaces1: this.space1Status(),
       comms: this.comms.servers().map((s) => ({ serverId: s.id, name: s.name, channels: s.channels.map((c) => ({ channelId: c.id, name: c.name })) })),
       events: this.events.slice(-50),
     };
