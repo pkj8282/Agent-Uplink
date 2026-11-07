@@ -93,3 +93,15 @@ test("relay_unknown_channel: 망 거울이 아닌 채널은 channel_not_found", 
   const { a } = await line();
   assert.deepEqual(await a.mesh.relayWrite({ mirrorId: "m.spD.nope", from: "b1", fromName: "비AI", hubUser: "비", text: "x" }), { ok: false, code: "channel_not_found" });
 });
+
+test("relay_flood_limited: 이어진 서버 하나가 중계 쓰기를 쏟아부어도 대상 채널에는 10초에 60개까지만", async () => {
+  const { d, dch } = await line();
+  const m = intruder(d);
+  m.send({ event: "cat", c: signMesh("cat", { origin: "spM", spaceName: "엠", ver: 1, channels: [] }, m.keys) });
+  await settle();
+  for (let i = 0; i < 150; i++) m.send({ event: "relay", q: signMesh("relay", relayBody({ entry: "spM", entryName: "엠", ch: dch, reqId: `flood-${i}`, text: `도배 ${i}` }), m.keys), ttl: 8 });
+  await settle(300);
+  const n = d.channels.recent(dch, 1000).length;
+  assert.ok(n <= 60, `저장된 중계 쓰기 ${n}개`);
+  assert.ok(d.logs.includes("mesh_drop_relay_rate"));
+});

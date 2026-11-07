@@ -127,6 +127,7 @@ const REC_PER_SECOND = 200;
 const RELAY_TTL = 8;
 const RELAY_MAX_AGE_MS = 10 * 60_000;
 const SEEN_MAX = 5000;
+const RELAY_PER_10S = 60;
 
 export class Mesh {
   readonly links = new Set<MeshLink>();
@@ -136,6 +137,7 @@ export class Mesh {
   private selfCat: { ver: number; key: string; signed: Signed<CatalogBody> | null } = { ver: 0, key: "", signed: null };
   private pulling = new Set<string>();
   private seen = new Map<string, number>();
+  private relayTimes = new Map<string, number[]>();
   private pendingRelay = new Map<string, (r: { ok: true; seq: number } | { ok: false; code: string }) => void>();
 
   constructor(private readonly deps: MeshDeps) {
@@ -627,6 +629,16 @@ export class Mesh {
       this.flood({ event: "ack", a: signMesh<AckBody>("ack", body, self.keys) });
     };
     if (!this.ownListed(b.ch)) { this.deps.log("mesh_reject_relay_unshared", { entry: b.entry }); return ack({ ok: false, code: "channel_forbidden" }); }
+    // 진입 서버마다 10초에 60개(방식 2 구성원과 같은 기준) — 이어진 서버 하나가 채널을 도배하지 못하게
+    const now = this.now;
+    const times = (this.relayTimes.get(b.entry) ?? []).filter((t) => now - t < 10_000);
+    if (times.length >= RELAY_PER_10S) {
+      this.relayTimes.set(b.entry, times);
+      this.deps.log("mesh_drop_relay_rate", { entry: b.entry });
+      return ack({ ok: false, code: "rate_limited" });
+    }
+    times.push(now);
+    this.relayTimes.set(b.entry, times);
     if (this.deps.policy?.noWrite?.(b.entry, b.hubUser)) { this.deps.log("mesh_reject_relay_nowrite", { entry: b.entry }); return ack({ ok: false, code: "relay_write_blocked" }); }
     if (b.text.length === 0 || b.text.length > MAX_TEXT_LENGTH) return ack({ ok: false, code: "text_invalid" });
     const g = this.deps.guard;
