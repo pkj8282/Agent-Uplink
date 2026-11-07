@@ -5,11 +5,12 @@
 //   같은 연결에서 3번 거부하면 그 연결을 끊는다. 받아들인 기록은 거울 채널 m.<출처>.<채널>에 넣고 받은 곳을 뺀 연결로 민다.
 // - 다른 서버를 믿지 않는다: 모든 문자열은 감독(guard)을 다시 거친다.
 import fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { writeFileAtomic } from "../../fsutil.js";
 import { validateName } from "../../names.js";
 import type { ChannelStore } from "../../channels.js";
-import type { Channel, Message } from "../../../shared/protocol.js";
+import { MAX_STORED_TEXT_LENGTH, MAX_TEXT_LENGTH, type Channel, type Message, type MessageOrigin } from "../../../shared/protocol.js";
 import type { SigningKeys } from "../../../shared/connCrypto.js";
 import { checkChain, openMesh, recordHash, signMesh, validRecordBody, type RecordBody, type Signed } from "../../../shared/meshRecord.js";
 import type { LinkChannel } from "./link.js";
@@ -27,6 +28,31 @@ export interface MeshPolicy {
   blocked(spaceId: string): boolean;
   /** 망 공유에서 내린 채널(총괄 unshare) — 그 채널 기록을 받지·전달하지 않는다. */
   channelBlocked(origin: string, ch: string): boolean;
+  /** 그 서버(또는 그 서버의 그 Hub 사용자)를 거친 중계 쓰기를 막았나(총괄 noWrite). */
+  noWrite?(entry: string, hubUser: string): boolean;
+}
+
+/** 중계 쓰기 요청(진입 서버가 서명). ttl은 서명 밖(전달할 때마다 줄임) — 부풀려도 reqId 중복 제거가 막는다. */
+export interface RelayBody {
+  reqId: string;
+  entry: string;
+  entryName: string;
+  target: string;
+  ch: string;
+  from: string;
+  fromName: string;
+  hubUser: string;
+  text: string;
+  ts: number;
+}
+
+export interface AckBody {
+  reqId: string;
+  entry: string;
+  target: string;
+  ok: boolean;
+  seq?: number;
+  code?: string;
 }
 
 export interface MeshDeps {
@@ -44,7 +70,10 @@ export interface MeshDeps {
   policy?: MeshPolicy;
   /** 기록을 받아들인 뒤(거버넌스·중계가 쓴다). */
   onRecord?(body: RecordBody): void;
-  /** 다른 이벤트(중계·명령 등) — 처리했으면 true. */
+  /** 중계 쓰기를 받아 내 채널에 저장(로컬 전달·구성원 알림까지). 망 기록은 Mesh가 만든다. */
+  appendOwn?(ch: string, from: string, fromName: string, text: string, origin: MessageOrigin): Message | null;
+  relayTimeoutMs?: number;
+  /** 다른 이벤트(명령 등) — 처리했으면 true. */
   onOtherEvent?(e: { event: string; [k: string]: unknown }, from: MeshLink): boolean;
 }
 
@@ -82,6 +111,9 @@ const MAX_CHANNELS = 100;
 const PULL_BATCH = 500;
 const STRIKES_TO_DROP = 3;
 const REC_PER_SECOND = 200;
+const RELAY_TTL = 8;
+const RELAY_MAX_AGE_MS = 10 * 60_000;
+const SEEN_MAX = 5000;
 
 export class Mesh {
   readonly links = new Set<MeshLink>();
@@ -90,6 +122,8 @@ export class Mesh {
   private chains = new Map<string, Chain>();
   private selfCat: { ver: number; key: string; signed: Signed<CatalogBody> | null } = { ver: 0, key: "", signed: null };
   private pulling = new Set<string>();
+  private seen = new Map<string, number>();
+  private pendingRelay = new Map<string, (r: { ok: true; seq: number } | { ok: false; code: string }) => void>();
 
   constructor(private readonly deps: MeshDeps) {
     this.load();
@@ -420,6 +454,8 @@ export class Mesh {
 
   private onEvent(l: MeshLink, e: { event: string; [k: string]: unknown }): void {
     if (e.event === "cat") return this.onCatalog(e.c, l);
+    if (e.event === "relay") return this.onRelay(e, l);
+    if (e.event === "ack") return this.onAck(e, l);
     if (e.event === "rec") {
       const now = this.now;
       l.recTimes = l.recTimes.filter((t) => now - t < 1000);
@@ -486,5 +522,88 @@ export class Mesh {
     const signed = signMesh<RecordBody>("rec", body, self.keys);
     this.appendRecord(self.spaceId, chId, signed);
     for (const l of this.links) l.ch.event({ event: "rec", r: signed });
+  }
+
+  // ───────── 중계 쓰기 ─────────
+
+  /** 처음 보는 것만 true(중복 제거 기억, 상한 SEEN_MAX). */
+  private firstSeen(key: string): boolean {
+    if (this.seen.has(key)) return false;
+    this.seen.set(key, this.now);
+    if (this.seen.size > SEEN_MAX) this.seen.delete(this.seen.keys().next().value as string);
+    return true;
+  }
+
+  private flood(e: { event: string; [k: string]: unknown }, except?: MeshLink): void {
+    for (const l of this.links) if (l !== except) l.ch.event(e);
+  }
+
+  /** 망 거울 채널(m.<대상>.<채널>)에 쓴다: 이 서버가 서명해 망으로 보내고, 대상 서버의 응답(seq)을 기다린다. */
+  relayWrite(o: { mirrorId: string; from: string; fromName: string; hubUser: string; text: string }): Promise<{ ok: true; seq: number } | { ok: false; code: string }> {
+    const p = this.parseMirror(o.mirrorId);
+    if (!p || this.deps.policy?.blocked(p.origin) || this.deps.policy?.channelBlocked(p.origin, p.ch)) return Promise.resolve({ ok: false, code: "channel_not_found" });
+    const self = this.deps.self();
+    if (this.deps.policy?.noWrite?.(self.spaceId, o.hubUser)) return Promise.resolve({ ok: false, code: "relay_write_blocked" });
+    const body: RelayBody = { reqId: randomUUID(), entry: self.spaceId, entryName: self.spaceName, target: p.origin, ch: p.ch, from: o.from, fromName: o.fromName, hubUser: o.hubUser, text: o.text, ts: this.now };
+    const q = signMesh<RelayBody>("relay", body, self.keys);
+    this.firstSeen(`relay:${body.reqId}`);
+    return new Promise((resolve) => {
+      const t = setTimeout(() => { if (this.pendingRelay.delete(body.reqId)) resolve({ ok: false, code: "relay_timeout" }); }, this.deps.relayTimeoutMs ?? 15_000);
+      t.unref?.();
+      this.pendingRelay.set(body.reqId, (r) => { clearTimeout(t); resolve(r); });
+      this.flood({ event: "relay", q, ttl: RELAY_TTL });
+    });
+  }
+
+  private onRelay(e: { [k: string]: unknown }, from: MeshLink): void {
+    const b = openMesh<RelayBody>("relay", e.q);
+    const isS = (x: unknown, max: number) => typeof x === "string" && x.length > 0 && x.length <= max;
+    if (!b || !isS(b.reqId, 64) || !isS(b.entry, 64) || !isS(b.entryName, 256) || !isS(b.target, 64) || !isS(b.ch, 128) || !isS(b.from, 300)
+      || !isS(b.fromName, 256) || !isS(b.hubUser, 256) || typeof b.text !== "string" || typeof b.ts !== "number") return this.strike(from, "relay_bad");
+    const self = this.deps.self();
+    if (b.entry === self.spaceId) return; // 내 요청이 돌아옴
+    const key = this.pins[b.entry];
+    if (!key) { this.deps.log("mesh_drop_relay_unknown_entry", { entry: b.entry }); return; }
+    if ((e.q as Signed).signer !== key) return this.strike(from, "relay_forged");
+    if (Math.abs(this.now - b.ts) > RELAY_MAX_AGE_MS) { this.deps.log("mesh_drop_relay_stale", { entry: b.entry }); return; }
+    if (this.deps.policy?.blocked(b.entry)) return;
+    if (!this.firstSeen(`relay:${b.reqId}`)) return;
+    if (b.target !== self.spaceId) {
+      const ttl = typeof e.ttl === "number" ? Math.min(e.ttl, RELAY_TTL) - 1 : 0;
+      if (ttl > 0) this.flood({ event: "relay", q: e.q, ttl }, from);
+      return;
+    }
+    const ack = (r: { ok: true; seq: number } | { ok: false; code: string }) => {
+      const body: AckBody = { reqId: b.reqId, entry: b.entry, target: self.spaceId, ...r };
+      this.firstSeen(`ack:${b.reqId}`);
+      this.flood({ event: "ack", a: signMesh<AckBody>("ack", body, self.keys) });
+    };
+    if (!this.ownListed(b.ch)) { this.deps.log("mesh_reject_relay_unshared", { entry: b.entry }); return ack({ ok: false, code: "channel_forbidden" }); }
+    if (this.deps.policy?.noWrite?.(b.entry, b.hubUser)) { this.deps.log("mesh_reject_relay_nowrite", { entry: b.entry }); return ack({ ok: false, code: "relay_write_blocked" }); }
+    if (b.text.length === 0 || b.text.length > MAX_TEXT_LENGTH) return ack({ ok: false, code: "text_invalid" });
+    const g = this.deps.guard;
+    const text = g(b.text, "text", true);
+    if (text.length > MAX_STORED_TEXT_LENGTH) return ack({ ok: false, code: "text_hidden_too_long" });
+    const entryName = this.cats.get(b.entry)?.body.spaceName ?? g(b.entryName, "spaceName");
+    const msg = this.deps.appendOwn?.(b.ch, g(`${b.entry}/${b.from}`, "from"), g(b.fromName, "fromName"), text, { scope: "remote", spaceName: entryName, hubUser: g(b.hubUser, "hubUser") });
+    if (!msg) return ack({ ok: false, code: "channel_forbidden" });
+    this.onOwnMessage(b.ch, msg, [entryName]);
+    ack({ ok: true, seq: msg.seq });
+  }
+
+  private onAck(e: { [k: string]: unknown }, from: MeshLink): void {
+    const b = openMesh<AckBody>("ack", e.a);
+    if (!b || typeof b.reqId !== "string" || typeof b.target !== "string" || typeof b.entry !== "string") return this.strike(from, "ack_bad");
+    const key = this.pins[b.target];
+    if (!key || (e.a as Signed).signer !== key) return this.strike(from, "ack_forged");
+    if (!this.firstSeen(`ack:${b.reqId}`)) return;
+    if (b.entry === this.deps.self().spaceId) {
+      const p = this.pendingRelay.get(b.reqId);
+      if (!p) return;
+      this.pendingRelay.delete(b.reqId);
+      p(b.ok && typeof b.seq === "number" ? { ok: true, seq: b.seq } : { ok: false, code: typeof b.code === "string" ? b.code.slice(0, 64) : "relay_failed" });
+      return;
+    }
+    this.flood({ event: "ack", a: e.a }, from);
   }
 }

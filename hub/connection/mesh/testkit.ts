@@ -41,6 +41,7 @@ export function node(name: string, spaceId: string, extra: Partial<MeshDeps> = {
     guard: (s) => s,
     log: (code) => n.logs.push(code),
     deliver: (_ch: Channel, m: Message) => n.delivered.push(m),
+    appendOwn: (ch, from, fromName, text, origin) => (n.channels.getChannel(ch) ? n.channels.append(ch, from, fromName, text, origin) : null),
     ...extra,
   });
   n.mesh = make();
