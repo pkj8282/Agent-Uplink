@@ -5,6 +5,7 @@ import { generateSigningKeys } from "../../../shared/connCrypto.js";
 import { signMesh, recordHash, type RecordBody } from "../../../shared/meshRecord.js";
 import { LinkChannel } from "./link.js";
 import { connect, node, settle, until, type Node } from "./testkit.js";
+import { registerKey } from "./testkit.js";
 
 function intruder(target: Node) {
   const keys = generateSigningKeys();
@@ -12,6 +13,7 @@ function intruder(target: Node) {
   let closed = false;
   x.onClose(() => { closed = true; });
   x.setHandlers({ onRequest: (_r, reply) => reply({ ok: true, heads: [], records: [] }), onEvent: () => {} });
+  registerKey("spM", keys.publicKeyB64);
   target.mesh.attach({ spaceId: "spM", spaceName: "엠", serverKey: keys.publicKeyB64 }, y);
   const send = (e: object) => x.event(e as { event: string });
   const ch = "mch";
@@ -140,4 +142,18 @@ test("unknown_origin_dropped: 목록이 없는 출처의 기록은 받지 않음
   await settle();
   assert.ok(d.logs.includes("mesh_drop_unknown_origin"));
   assert.equal(d.channels.ids().some((id) => id.startsWith("m.spGhost.")), false);
+});
+
+test("catalog_race_impersonation_blocked: 진짜 A 목록보다 먼저 온 가짜 'A' 목록(M 키)은 받지 않고, 나중에 온 진짜 A를 받으며 정상 이웃을 끊지 않음", async () => {
+  const a = node("에이", "spA"), c = node("씨", "spC"), d = node("디", "spD");
+  a.addChannel("일반");
+  connect(a, c);
+  await until(() => c.mesh.servers().some((s) => s.spaceId === "spA"));
+  const m = intruder(d); // D는 아직 A를 모름
+  for (let v = 1; v <= 3; v++) m.send({ event: "cat", c: signMesh("cat", { origin: "spA", spaceName: "가짜 에이", ver: 100 + v, channels: [] }, m.keys) });
+  await settle();
+  connect(c, d); // 이제 진짜 A 목록이 C를 거쳐 옴
+  await until(() => d.mesh.servers().some((s) => s.spaceId === "spA" && s.spaceName === "에이"));
+  assert.equal(d.mesh.keyOf("spA"), a.keys.publicKeyB64);
+  assert.equal([...d.mesh.links].some((l) => l.info.spaceId === "spC"), true); // 정상 이웃 C 연결 유지
 });

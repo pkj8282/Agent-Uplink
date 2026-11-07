@@ -4,11 +4,13 @@ import { generateSigningKeys } from "../../../shared/connCrypto.js";
 import { signMesh } from "../../../shared/meshRecord.js";
 import { LinkChannel } from "./link.js";
 import { connect, node, settle, until, type Node } from "./testkit.js";
+import { registerKey } from "./testkit.js";
 
 /** 악의 서버 M: D에 직접 붙어 프레임을 마음대로 보낸다. */
 function intruder(target: Node) {
   const keys = generateSigningKeys();
   const [x, y] = LinkChannel.memoryPair();
+  registerKey("spM", keys.publicKeyB64);
   target.mesh.attach({ spaceId: "spM", spaceName: "엠", serverKey: keys.publicKeyB64 }, y);
   x.setHandlers({ onRequest: (_r, reply) => reply({ ok: true, heads: [], records: [] }), onEvent: () => {} });
   return { keys, send: (e: object) => x.event(e as { event: string }) };

@@ -11,9 +11,14 @@ import { writeFileAtomic } from "../../fsutil.js";
 import { validateName } from "../../names.js";
 import type { ChannelStore } from "../../channels.js";
 import { MAX_STORED_TEXT_LENGTH, MAX_TEXT_LENGTH, type Channel, type Message, type MessageOrigin } from "../../../shared/protocol.js";
-import type { SigningKeys } from "../../../shared/connCrypto.js";
+import { spkiFingerprint, type SigningKeys } from "../../../shared/connCrypto.js";
 import { checkChain, openMesh, recordHash, signMesh, validRecordBody, type RecordBody, type Signed } from "../../../shared/meshRecord.js";
 import type { LinkChannel } from "./link.js";
+
+/** 망 ID = 서버 공개키 지문(SPKI SHA-256) 앞 32자 — 키에서 나오므로 남이 같은 ID를 주장할 수 없다. */
+export function meshIdOf(serverKeyB64: string): string {
+  return spkiFingerprint(serverKeyB64).slice(0, 32);
+}
 
 export interface MeshSelf {
   spaceId: string;
@@ -68,6 +73,8 @@ export interface MeshDeps {
   /** 처음 받는 사슬은 최근 몇 개부터 당길지(기본 500, Infinity = 전부). */
   initialWindow?(): number;
   policy?: MeshPolicy;
+  /** 서버 키 → 그 키의 망 ID. 주면 목록·직접 연결의 공간 ID가 키에서 나온 값과 같아야 한다(남의 ID를 다른 키로 주장하는 사칭·선점 차단). */
+  originOf?(serverKeyB64: string): string | undefined;
   /** 기록을 받아들인 뒤(거버넌스·중계가 쓴다). */
   onRecord?(body: RecordBody): void;
   /** 중계 쓰기를 받아 내 채널에 저장(로컬 전달·구성원 알림까지). 망 기록은 Mesh가 만든다. */
@@ -350,6 +357,7 @@ export class Mesh {
     }
     if (this.deps.policy?.blocked(b.origin)) return;
     const pin = this.pins[b.origin];
+    if (this.deps.originOf && this.deps.originOf(signer) !== b.origin) return this.strike(from, "key_conflict");
     if (pin && pin !== signer) return this.strike(from, "key_conflict");
     const known = this.cats.get(b.origin);
     if (known && known.body.ver >= b.ver) return; // 같은 것·되돌리기
@@ -376,6 +384,11 @@ export class Mesh {
   // ───────── 연결 ─────────
 
   attach(info: PeerInfo, ch: LinkChannel): MeshLink {
+    if (this.deps.originOf && this.deps.originOf(info.serverKey) !== info.spaceId) {
+      this.deps.log("mesh_reject_origin_mismatch", { spaceId: info.spaceId });
+      ch.close();
+      return { info, ch, strikes: 0, recTimes: [] };
+    }
     if (this.pins[info.spaceId] && this.pins[info.spaceId] !== info.serverKey) {
       this.deps.log("mesh_key_conflict_direct_wins", { spaceId: info.spaceId });
       this.cats.delete(info.spaceId);

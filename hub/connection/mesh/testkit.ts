@@ -9,6 +9,10 @@ import { LinkChannel } from "./link.js";
 import { Mesh, type MeshDeps } from "./mesh.js";
 import { Governance } from "./governance.js";
 
+/** 시험 키 → 공간 ID(실제 Hub는 키 지문에서 뽑는다). 악의 서버 시험은 자기 키를 자기 ID로 등록한다. */
+export const KEY_IDS = new Map<string, string>();
+export function registerKey(spaceId: string, keyB64: string): void { KEY_IDS.set(keyB64, spaceId); }
+
 export interface Node {
   name: string;
   spaceId: string;
@@ -30,6 +34,7 @@ export interface Node {
 export function node(name: string, spaceId: string, extra: Partial<MeshDeps> = {}, opts: { gov?: boolean } = {}): Node {
   const dataDir = tempDir(`mesh-${spaceId}-`);
   const keys = generateSigningKeys();
+  registerKey(spaceId, keys.publicKeyB64);
   const n = {} as Node;
   Object.assign(n, {
     name, spaceId, keys, dataDir, own: [], delivered: [], logs: [],
@@ -49,6 +54,7 @@ export function node(name: string, spaceId: string, extra: Partial<MeshDeps> = {
     channels: n.channels,
     guard: (s) => s,
     log: (code) => n.logs.push(code),
+    originOf: (k: string) => KEY_IDS.get(k),
     deliver: (_ch: Channel, m: Message) => n.delivered.push(m),
     appendOwn: (ch, from, fromName, text, origin) => (n.channels.getChannel(ch) ? n.channels.append(ch, from, fromName, text, origin) : null),
     ...(opts.gov ? {

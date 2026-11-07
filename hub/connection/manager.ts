@@ -28,7 +28,7 @@ import { SpaceSync, type SpaceChannel, type SpaceDeps } from "./space1/sync.js";
 import type { StorageBackend } from "./storage/backend.js";
 import { parseRecoveryKey, restoreBackup, scanBackups, type BackupCandidate } from "./storage/restore.js";
 import { DEFAULT_PROFILE } from "../../shared/cryptoProfile.js";
-import { Mesh, type MeshSelf } from "./mesh/mesh.js";
+import { Mesh, meshIdOf, type MeshSelf } from "./mesh/mesh.js";
 import { Governance, RELAY_WINDOW, type CaseChoice, type GovCommand } from "./mesh/governance.js";
 import { LinkDialer, joinLink, type LinkSelf } from "./mesh/link.js";
 import type { LinkRecord } from "./store.js";
@@ -419,7 +419,7 @@ export class ConnectionManager implements ConnStatusSource {
       log: (code, detail) => this.log(code, detail),
       onLink: (rec, ch) => {
         const mesh = this.ensureMesh();
-        if (mesh) mesh.attach({ spaceId: rec.spaceId, spaceName: rec.spaceName, serverKey: rec.serverKey }, ch);
+        if (mesh) mesh.attach({ spaceId: meshIdOf(rec.serverKey), spaceName: rec.spaceName, serverKey: rec.serverKey }, ch);
         else ch.close();
       },
     });
@@ -905,7 +905,9 @@ export class ConnectionManager implements ConnStatusSource {
 
   private meshSelf(): MeshSelf {
     const c = this.store.serverConfig()!;
-    return { spaceId: c.spaceId, spaceName: c.spaceName, userName: this.userName(), keys: this.store.identity() };
+    // 망 안의 ID는 설정의 공간 ID가 아니라 서버 키 지문(사칭·선점 차단 — 검증 2026-11-08)
+    const keys = this.store.identity();
+    return { spaceId: meshIdOf(keys.publicKeyB64), spaceName: c.spaceName, userName: this.userName(), keys };
   }
 
   /** 망 엔진(통신 서버 설정이 있을 때만). 만들 때 파일을 쓰지 않는다 — 실제로 쓸 일이 생길 때 쓴다. */
@@ -942,6 +944,7 @@ export class ConnectionManager implements ConnStatusSource {
         return msg;
       },
       onServersChanged: () => this.broadcastShared(),
+      originOf: (k) => meshIdOf(k),
     });
     const t1 = setInterval(() => { if (this.mesh && this.mesh.links.size > 0) gov.tick(); }, 30_000);
     const t2 = setInterval(() => this.trimMirrors(), 10 * 60_000);
@@ -1018,7 +1021,7 @@ export class ConnectionManager implements ConnStatusSource {
     this.ensureMesh();
     this.startDialer(link);
     this.log("link_added", { spaceId: link.spaceId, spaceName: link.spaceName });
-    return { ok: true, spaceId: link.spaceId };
+    return { ok: true, spaceId: meshIdOf(link.serverKey) };
   }
 
   private startDialer(link: LinkRecord): void {
@@ -1030,7 +1033,7 @@ export class ConnectionManager implements ConnStatusSource {
       self: linkSelf,
       onUp: (ch) => {
         const mesh = this.ensureMesh();
-        if (mesh) mesh.attach({ spaceId: link.spaceId, spaceName: link.spaceName, serverKey: link.serverKey }, ch);
+        if (mesh) mesh.attach({ spaceId: meshIdOf(link.serverKey), spaceName: link.spaceName, serverKey: link.serverKey }, ch);
         else ch.close();
       },
       onDown: () => this.log("link_down", { spaceId: link.spaceId }),
@@ -1042,13 +1045,16 @@ export class ConnectionManager implements ConnStatusSource {
   }
 
   /** 서버 연결 끊기(그 서버의 키로는 다시 인증 못 함). */
-  meshRemove(spaceId: string): boolean {
-    const ok = this.store.removeLink(spaceId);
-    this.dialers.get(spaceId)?.stop();
-    this.dialers.delete(spaceId);
-    this.listener?.disconnectLink(spaceId);
-    this.mesh?.dropLinksTo(spaceId);
-    if (ok) this.log("link_removed", { spaceId });
+  /** id = 망 ID(화면이 주는 값) 또는 연결 기록의 공간 ID. */
+  meshRemove(id: string): boolean {
+    const link = this.store.links().find((l) => !l.removed && (l.spaceId === id || meshIdOf(l.serverKey) === id));
+    if (!link) return false;
+    const ok = this.store.removeLink(link.spaceId);
+    this.dialers.get(link.spaceId)?.stop();
+    this.dialers.delete(link.spaceId);
+    this.listener?.disconnectLink(link.spaceId);
+    this.mesh?.dropLinksTo(meshIdOf(link.serverKey));
+    if (ok) this.log("link_removed", { spaceId: link.spaceId });
     return ok;
   }
 
@@ -1094,12 +1100,12 @@ export class ConnectionManager implements ConnStatusSource {
     const live = new Set([...(this.mesh?.links ?? [])].map((l) => l.info.spaceId));
     const links = this.store.links().filter((l) => !l.removed);
     return {
-      self: cfg.spaceId,
+      self: meshIdOf(this.store.identity().publicKeyB64),
       shared: cfg.meshShared ?? [],
       excluded: cfg.meshExcluded ?? [],
-      links: links.map((l) => ({ spaceId: l.spaceId, spaceName: l.spaceName, dir: l.dir, fingerprint: spkiFingerprint(l.serverKey).slice(0, 16), connected: live.has(l.spaceId) })),
-      servers: (this.mesh?.servers() ?? []).map((s) => ({ spaceId: s.spaceId, spaceName: s.spaceName, channelCount: s.channels.length, direct: links.some((l) => l.spaceId === s.spaceId) })),
-      channels: [{ spaceId: cfg.spaceId, channels: this.meshOwnChannels() }, ...(this.mesh?.servers() ?? []).map((s) => ({ spaceId: s.spaceId, channels: s.channels }))],
+      links: links.map((l) => ({ spaceId: meshIdOf(l.serverKey), spaceName: l.spaceName, dir: l.dir, fingerprint: spkiFingerprint(l.serverKey).slice(0, 16), connected: live.has(meshIdOf(l.serverKey)) })),
+      servers: (this.mesh?.servers() ?? []).map((s) => ({ spaceId: s.spaceId, spaceName: s.spaceName, channelCount: s.channels.length, direct: links.some((l) => meshIdOf(l.serverKey) === s.spaceId) })),
+      channels: [{ spaceId: meshIdOf(this.store.identity().publicKeyB64), channels: this.meshOwnChannels() }, ...(this.mesh?.servers() ?? []).map((s) => ({ spaceId: s.spaceId, channels: s.channels }))],
       gov: this.gov?.status() ?? null,
     };
   }

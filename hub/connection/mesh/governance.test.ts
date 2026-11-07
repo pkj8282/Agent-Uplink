@@ -4,6 +4,7 @@ import { generateSigningKeys } from "../../../shared/connCrypto.js";
 import { signMesh } from "../../../shared/meshRecord.js";
 import { LinkChannel } from "./link.js";
 import { connect, node, settle, until, type Node } from "./testkit.js";
+import { registerKey } from "./testkit.js";
 
 const G = (n: Node) => n.gov!;
 
@@ -75,6 +76,7 @@ function intruder(target: Node) {
   const keys = generateSigningKeys();
   const [x, y] = LinkChannel.memoryPair();
   x.setHandlers({ onRequest: (_r, reply) => reply({ ok: true, heads: [], records: [] }), onEvent: () => {} });
+  registerKey("spM", keys.publicKeyB64);
   target.mesh.attach({ spaceId: "spM", spaceName: "엠", serverKey: keys.publicKeyB64 }, y);
   return { keys, send: (e: object) => x.event(e as { event: string }) };
 }
