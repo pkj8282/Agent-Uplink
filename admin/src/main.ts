@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { AdminClient, HubNotRunningError, resolveAdminTarget, toResult } from "./adminClient.js";
 import { isTrustedFrame } from "./ipcGuard.js";
 import { isViewerUrl } from "./auth.js";
-import type { ConfigPatch, IpcResult, MeshCaseChoice, MeshCommand } from "./types.js";
+import type { ConfigPatch, IpcResult, MeshCaseChoice, MeshCommand, RestoreInput } from "./types.js";
 import { effectiveLang, type Lang } from "./i18n.js";
 import { readLanguageFile, writeLanguageFile } from "./langFile.js";
 import { adminMsg, type AdminKey } from "./messages.js";
@@ -111,6 +111,18 @@ handle("admin:connCreateServer", (name) => toResult(() => client.connCreateServe
 handle("admin:connCreateChannel", (arg) => toResult(() => {
   const o = asObj(arg);
   return client.connCreateChannel(asId(o.serverId), asStr(o.name, 200));
+}));
+// 다른 PC 백업 가져오기: 모양만 보고 Hub가 검사한다(토큰·복구 키는 이 호출에서만 쓰고 저장하지 않음).
+function restoreInput(arg: unknown): Record<string, unknown> {
+  const o = asObj(arg);
+  const base = { recoveryKey: asStr(o.recoveryKey, 200), serverName: asStr(o.serverName, 200) };
+  if (o.kind === "supabase") return { kind: "supabase", url: asStr(o.url, 200), key: asStr(o.key, 1000), bucket: asStr(o.bucket, 63), ...base };
+  return { kind: "github", repo: asStr(o.repo, 200), ghToken: asStr(o.ghToken, 500), ...base };
+}
+handle("admin:connRestoreScan", (arg) => toResult(() => client.connRestoreScan(restoreInput(arg) as unknown as RestoreInput)));
+handle("admin:connRestore", (arg) => toResult(() => {
+  const o = asObj(arg);
+  return client.connRestore({ ...(restoreInput(arg) as unknown as RestoreInput), spaceId: asId(o.spaceId), hubId: asId(o.hubId) });
 }));
 // 서버 연결(방식 3): 판단(경우·명령 형식 검사)은 Hub가 한다 — 여기서는 모양만 본다.
 handle("admin:connMeshInvite", (arg) => toResult(() => {

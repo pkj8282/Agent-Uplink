@@ -1,5 +1,5 @@
 // 렌더러의 순수 로직(DOM 없음 → Node에서 테스트).
-import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, StorageInput, StorageStatus, SupabaseInput, VerifyResult, Space1CreateInput, Space1JoinInput, Space1Status, MeshCaseChoice, MeshCommand, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
+import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, StorageInput, StorageStatus, SupabaseInput, VerifyResult, Space1CreateInput, Space1JoinInput, Space1Status, MeshCaseChoice, MeshCommand, RestoreInput, BackupCandidate, RestoreResult, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
 import { oneLine } from "../text.js";
 import type { AdminKey } from "../messages.js";
 import { getLang, tr } from "./lang.js";
@@ -294,6 +294,7 @@ export function connEventLine(e: ConnEvent): string {
   if (e.code === "space1_member_revoked") return tr("ev_s1_revoked", { name: s(d.userName) });
   if (e.code === "space1_sync_failed") return tr("ev_s1_sync_failed", { detail: connErrorMessage(typeof d.code === "string" ? d.code : undefined, s(d.code)) });
   if (e.code === "space1_fragment_rejected" || e.code === "space1_roster_rejected" || e.code === "space1_request_rejected") return tr("ev_s1_rejected");
+  if (e.code === "storage_restored") return tr("ev_storage_restored", { messages: s(d.messages) });
   if (e.code === "link_added") return tr("ev_link_added", { name: s(d.spaceName) });
   if (e.code === "link_joined") return tr("ev_link_joined", { name: s(d.spaceName) });
   if (e.code === "link_removed") return tr("ev_link_removed");
@@ -314,6 +315,7 @@ export function connEventLine(e: ConnEvent): string {
 }
 
 const CONN_CODE_KEY: Record<string, AdminKey> = {
+  recovery_key_invalid: "ce_recovery_key_invalid", restore_empty: "ce_restore_empty",
   not_link_invite: "ce_not_link_invite", link_self: "ce_link_self", link_join_failed: "ce_link_join_failed", link_not_found: "ce_link_not_found",
   not_coordinator: "ce_not_coordinator", relay_timeout: "ce_relay_timeout", relay_write_blocked: "ce_relay_write_blocked",
   server_not_enabled: "ce_server_not_enabled", server_not_found: "ce_server_not_found", port_invalid: "ce_port_invalid",
@@ -501,4 +503,37 @@ export function meshCommandWhat(cmd: MeshCommand, nameOf: (id: string) => string
 
 export function meshCommandConfirm(what: string): string {
   return tr("mesh_cmd_confirm", { what });
+}
+
+// ───── 다른 PC 백업 가져오기(v3.0 7단계) ─────
+
+export function parseRestoreForm(i: { kind: string; repo: string; token: string; url: string; key: string; bucket: string; recoveryKey: string; serverName: string }):
+  { ok: true; value: RestoreInput } | { ok: false; error: string } {
+  const recoveryKey = i.recoveryKey.trim();
+  if (!recoveryKey || !/^[A-Za-z2-7\-\s]+$/.test(recoveryKey)) return { ok: false, error: tr("form_recovery_invalid") };
+  const serverName = i.serverName.trim();
+  if (!serverName) return { ok: false, error: tr("form_brestore_name_invalid") };
+  if (i.kind === "supabase") {
+    const s = parseSupabaseForm({ url: i.url, key: i.key, bucket: i.bucket, intervalMin: "5" });
+    if (!s.ok) return s;
+    return { ok: true, value: { kind: "supabase", url: s.value.url, key: s.value.key, bucket: s.value.bucket, recoveryKey, serverName } };
+  }
+  const g = parseStorageForm({ repo: i.repo, token: i.token, intervalMin: "5" });
+  if (!g.ok) return g;
+  return { ok: true, value: { kind: "github", repo: g.value.repo, ghToken: g.value.token, recoveryKey, serverName } };
+}
+
+export function backupCandidateLine(c: BackupCandidate): string {
+  return tr("brestore_candidate", { first: c.firstDay, last: c.lastDay, n: c.fragments });
+}
+
+export function backupRestoreConfirm(serverName: string, c: BackupCandidate): string {
+  return tr("brestore_confirm", { name: displayName(serverName), first: c.firstDay, last: c.lastDay });
+}
+
+export function backupRestoreDone(r: Pick<RestoreResult, "channelCount" | "messageCount" | "breaks" | "bad">): string {
+  const parts = [tr("brestore_done", { channels: r.channelCount, messages: r.messageCount })];
+  if (r.breaks.length > 0) parts.push(tr("brestore_breaks", { n: r.breaks.length }));
+  if (r.bad.length > 0) parts.push(tr("brestore_bad", { n: r.bad.length }));
+  return parts.join(" · ");
 }

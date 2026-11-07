@@ -554,3 +554,36 @@ test("망 문구: 경우·올리기·확인창·명령(한국어), 영어엔 한
     setLang("ko");
   }
 });
+
+// ── 7단계: 다른 PC 백업 가져오기 ──
+import { parseRestoreForm, backupCandidateLine, backupRestoreConfirm, backupRestoreDone } from "./view.js";
+
+test("parseRestoreForm: GitHub(저장소·토큰)·Supabase(주소·키·버킷) + 복구 키·서버 이름", () => {
+  const base = { kind: "github", repo: "me/backup", token: " ghp_x ", url: "", key: "", bucket: "", recoveryKey: " abcd-efgh \n", serverName: " 복원 " };
+  assert.deepEqual(parseRestoreForm(base), { ok: true, value: { kind: "github", repo: "me/backup", ghToken: "ghp_x", recoveryKey: "abcd-efgh", serverName: "복원" } });
+  assert.deepEqual(parseRestoreForm({ ...base, kind: "supabase", url: "https://abc.supabase.co/", key: "sb_secret_x", bucket: "" }),
+    { ok: true, value: { kind: "supabase", url: "https://abc.supabase.co", key: "sb_secret_x", bucket: "agent-uplink", recoveryKey: "abcd-efgh", serverName: "복원" } });
+  assert.equal(parseRestoreForm({ ...base, repo: "me" }).ok, false);
+  assert.equal(parseRestoreForm({ ...base, token: "" }).ok, false);
+  assert.equal(parseRestoreForm({ ...base, recoveryKey: "" }).ok, false);
+  assert.equal(parseRestoreForm({ ...base, recoveryKey: "ab!cd" }).ok, false);
+  assert.equal(parseRestoreForm({ ...base, serverName: " " }).ok, false);
+});
+
+test("복원 문구: 후보·확인창·결과(끊김·거부 조각), 영어엔 한글 없음", () => {
+  const c = { spaceId: "s", hubId: "h", fragments: 3, firstDay: "2026-11-01", lastDay: "2026-11-07" };
+  assert.match(backupCandidateLine(c), /2026-11-01/);
+  assert.match(backupRestoreConfirm("복원", c), /저장하지 않습니다/);
+  assert.match(backupRestoreDone({ channelCount: 2, messageCount: 10, breaks: [], bad: [] }), /10/);
+  assert.match(backupRestoreDone({ channelCount: 1, messageCount: 1, breaks: [3], bad: [{ path: "p", code: "frag_bad_signature" }] }), /끊긴/);
+  assert.match(connErrorMessage("recovery_key_invalid", ""), /복구 키/);
+  setLang("en");
+  try {
+    for (const t of [backupCandidateLine(c), backupRestoreConfirm("x", c), backupRestoreDone({ channelCount: 1, messageCount: 1, breaks: [1], bad: [{ path: "p", code: "x" }] }),
+      connErrorMessage("recovery_key_invalid", ""), connErrorMessage("restore_empty", ""), connEventLine({ ts: 1, code: "storage_restored", detail: { messages: 3 } })]) assert.equal(hasHangul(t), false, t);
+    const bad = parseRestoreForm({ kind: "github", repo: "", token: "", url: "", key: "", bucket: "", recoveryKey: "", serverName: "" });
+    assert.equal(!bad.ok && hasHangul(bad.error), false);
+  } finally {
+    setLang("ko");
+  }
+});

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { encodeFrame, FrameDecoder } from "./framing.js";
 import { newNonce, isNonce, clientProof, hubProof, proofEquals, readClientKeyFile } from "./auth.js";
-import type { MeshCaseChoice, MeshCommand } from "./types.js";
+import type { MeshCaseChoice, MeshCommand, RestoreInput, BackupCandidate, RestoreResult } from "./types.js";
 import type { AdminConfig, ConfigPatch, ConnProfile, ConnStatus, IpcResult, StorageInput, SupabaseInput, VerifyResult, Space1CreateInput, Space1JoinInput, NameConflict, RestoreReport, Snapshot } from "./types.js";
 import { effectiveLang, type Lang } from "./i18n.js";
 import { readLanguageFile } from "./langFile.js";
@@ -166,6 +166,13 @@ export class AdminClient {
   async connStorageSetSupabase(o: SupabaseInput): Promise<{ recoveryKey: string }> {
     return { recoveryKey: (await this.call("admin_conn_storage_set", { kind: "supabase", url: o.url, key: o.key, bucket: o.bucket, intervalMin: o.intervalMin })).recoveryKey };
   }
+  // ───── 다른 PC 백업 가져오기 ─────
+  async connRestoreScan(o: RestoreInput): Promise<BackupCandidate[]> { return (await this.call("admin_conn_storage_restore_scan", { ...o })).candidates; }
+  async connRestore(o: RestoreInput & { spaceId: string; hubId: string }): Promise<RestoreResult> {
+    const r = await this.call("admin_conn_storage_restore", { ...o });
+    return { serverId: r.serverId, channelCount: r.channelCount, messageCount: r.messageCount, breaks: r.breaks ?? [], bad: r.bad ?? [] };
+  }
+
   // ───── 서버 연결(방식 3) ─────
   async connMeshInvite(label: string, host: string, expiresInMs: number): Promise<{ code: string; ipWarning: boolean }> {
     const r = await this.call("admin_conn_mesh_invite", { label, host, expiresInMs });

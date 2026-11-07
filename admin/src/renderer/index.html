@@ -143,6 +143,26 @@
           <label><span data-i18n="prune_days"></span> <input id="prune-days" type="text" inputmode="numeric" autocomplete="off" value="30"></label>
           <div class="actions"><button type="submit" data-i18n="btn_prune_save"></button></div>
         </form>
+        <h2 data-i18n="brestore_heading"></h2>
+        <p class="hint" data-i18n="brestore_hint"></p>
+        <form id="restore-form" class="form">
+          <label><span data-i18n="storage_kind"></span> <select id="restore-kind"><option value="github" data-i18n="storage_kind_github"></option><option value="supabase" data-i18n="storage_kind_supabase"></option></select></label>
+          <div id="restore-gh" class="form">
+            <label><span data-i18n="storage_repo"></span> <input id="restore-repo" type="text" autocomplete="off" maxlength="141" class="wide"></label>
+            <label><span data-i18n="storage_token"></span> <input id="restore-token" type="password" autocomplete="off" maxlength="500" class="wide"></label>
+          </div>
+          <div id="restore-sb" class="form" hidden>
+            <label><span data-i18n="supabase_url"></span> <input id="restore-url" type="text" autocomplete="off" maxlength="200" class="wide"></label>
+            <label><span data-i18n="supabase_key"></span> <input id="restore-key" type="password" autocomplete="off" maxlength="1000" class="wide"></label>
+            <label><span data-i18n="supabase_bucket"></span> <input id="restore-bucket" type="text" autocomplete="off" maxlength="63"></label>
+          </div>
+          <label><span data-i18n="brestore_recovery"></span> <textarea id="restore-recovery" rows="2" spellcheck="false" autocomplete="off"></textarea></label>
+          <label><span data-i18n="brestore_name"></span> <input id="restore-name" type="text" autocomplete="off" maxlength="64"></label>
+          <div class="actions"><button type="submit" data-i18n="btn_brestore_scan"></button></div>
+        </form>
+        <ul id="restore-candidates" class="list"></ul>
+        <p id="restore-result" class="meta"></p>
+
 
         <h2 data-i18n="conn_members_heading"></h2>
         <ul id="conn-members" class="list"></ul>

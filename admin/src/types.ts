@@ -57,6 +57,9 @@ export interface Space1Status {
   spaceId: string; spaceName: string; role: "owner" | "member"; state: "pending" | "active" | "revoked"; repo: string; epoch: number;
   members: { hubId: string; userName: string; revoked: boolean; me: boolean }[]; lastSyncAt: number | null; lastError: string | null;
 }
+export type RestoreInput = ({ kind: "github"; repo: string; ghToken: string } | { kind: "supabase"; url: string; key: string; bucket: string }) & { recoveryKey: string; serverName: string };
+export interface BackupCandidate { spaceId: string; hubId: string; fragments: number; firstDay: string; lastDay: string; }
+export interface RestoreResult { serverId: string; channelCount: number; messageCount: number; breaks: number[]; bad: { path: string; code: string }[]; }
 export interface MeshCaseChoice { case: "distributed" | "main" | "single"; main?: string; standby: string[]; }
 export type MeshCommand =
   | { type: "case"; choice: MeshCaseChoice }
@@ -163,6 +166,9 @@ export interface AdminApi {
   connS1Revoke(spaceId: string, hubId: string): Promise<IpcResult<void>>;
   connS1SyncNow(spaceId: string): Promise<IpcResult<void>>;
   connS1Leave(spaceId: string): Promise<IpcResult<void>>;
+  // 다른 PC 백업 가져오기(v3.0 7단계)
+  connRestoreScan(o: RestoreInput): Promise<IpcResult<BackupCandidate[]>>;
+  connRestore(o: RestoreInput & { spaceId: string; hubId: string }): Promise<IpcResult<RestoreResult>>;
   // 서버 연결(방식 3, v3.0 5단계)
   connMeshInvite(label: string, host: string, expiresInMs: number): Promise<IpcResult<{ code: string; ipWarning: boolean }>>;
   connMeshJoin(code: string): Promise<IpcResult<string>>;

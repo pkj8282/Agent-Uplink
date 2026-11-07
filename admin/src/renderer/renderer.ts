@@ -6,6 +6,7 @@ import {
   parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage,
   connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, parseSupabaseForm, parseS1CreateForm, parseS1JoinForm, space1StateLabel, space1RevokeConfirm, space1LeaveConfirm, storageStatusLine, verifyResultMessage, parsePruneForm,
   parseMeshCaseForm, meshCaseLabel, meshUploadLine, meshInviteConfirm, meshRemoveConfirm, meshAcceptConfirm, meshUnacceptConfirm, meshCommandWhat, meshCommandConfirm,
+  parseRestoreForm, backupCandidateLine, backupRestoreConfirm, backupRestoreDone,
 } from "./view.js";
 import type { FormMessage } from "./view.js";
 import { getLang, setLang, tr } from "./lang.js";
@@ -851,6 +852,8 @@ function applyStatic(): void {
   for (const e of document.querySelectorAll<HTMLElement>("[data-i18n-aria]")) e.setAttribute("aria-label", tr(e.dataset.i18nAria as AdminKey));
   for (const e of document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-i18n-ph]")) e.placeholder = tr(e.dataset.i18nPh as AdminKey);
   document.title = tr("window_title");
+  const rn = document.getElementById("restore-name") as HTMLInputElement | null;
+  if (rn && (!rn.value || rn.dataset.auto === "1")) { rn.value = tr("brestore_default_name"); rn.dataset.auto = "1"; }
   document.documentElement.lang = getLang();
   const sel = byId<HTMLSelectElement>("cfg-lang");
   for (const o of sel.options) o.textContent = o.value === "ko" ? PICKER.ko : PICKER.en;
@@ -1157,3 +1160,60 @@ byId("mesh-declare").addEventListener("click", () => {
   if (!window.confirm(tr(on ? "mesh_declare_confirm" : "mesh_undeclare_confirm"))) return;
   void connRun(byId<HTMLButtonElement>("mesh-declare"), () => window.admin.connMeshCoordinator(on));
 });
+
+// --- 다른 PC 백업 가져오기(v3.0 7단계) ---
+
+function restoreFormValue(): ReturnType<typeof parseRestoreForm> {
+  return parseRestoreForm({
+    kind: byId<HTMLSelectElement>("restore-kind").value,
+    repo: byId<HTMLInputElement>("restore-repo").value, token: byId<HTMLInputElement>("restore-token").value,
+    url: byId<HTMLInputElement>("restore-url").value, key: byId<HTMLInputElement>("restore-key").value, bucket: byId<HTMLInputElement>("restore-bucket").value,
+    recoveryKey: byId<HTMLTextAreaElement>("restore-recovery").value, serverName: byId<HTMLInputElement>("restore-name").value,
+  });
+}
+
+/** 토큰·복구 키 입력을 비운다(이 화면도 값을 오래 들고 있지 않게). */
+function clearRestoreSecrets(): void {
+  for (const id of ["restore-token", "restore-key"]) byId<HTMLInputElement>(id).value = "";
+  byId<HTMLTextAreaElement>("restore-recovery").value = "";
+}
+
+byId("restore-kind").addEventListener("change", () => {
+  const sb = byId<HTMLSelectElement>("restore-kind").value === "supabase";
+  byId("restore-gh").hidden = sb;
+  byId("restore-sb").hidden = !sb;
+});
+
+byId<HTMLFormElement>("restore-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const parsed = restoreFormValue();
+  if (!parsed.ok) { showOpMsg({ text: parsed.error, kind: "err" }); return; }
+  const input = parsed.value;
+  const list = byId("restore-candidates");
+  byId("restore-result").textContent = "";
+  void connRun(submitter(e), () => window.admin.connRestoreScan(input), (cands) => {
+    list.replaceChildren();
+    if (cands.length === 0) list.append(el("li", tr("brestore_none"), "empty"));
+    for (const c of cands) {
+      const li = el("li", undefined, "row");
+      li.append(el("span", backupCandidateLine(c), "name"), el("span", c.hubId, "id"));
+      const b = el("button", tr("btn_brestore_import"));
+      b.type = "button";
+      b.addEventListener("click", () => {
+        if (!window.confirm(backupRestoreConfirm(input.serverName, c))) return;
+        void connRun(b, () => window.admin.connRestore({ ...input, spaceId: c.spaceId, hubId: c.hubId }), (r) => {
+          const text = backupRestoreDone(r);
+          byId("restore-result").textContent = text;
+          list.replaceChildren();
+          clearRestoreSecrets();
+          return text;
+        });
+      });
+      li.append(b);
+      list.append(li);
+    }
+  });
+});
+
+// 사용자가 이름을 고치면 언어를 바꿔도 덮어쓰지 않는다.
+byId("restore-name").addEventListener("input", () => { delete byId("restore-name").dataset.auto; });

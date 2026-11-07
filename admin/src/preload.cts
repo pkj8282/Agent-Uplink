@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld("admin", {
   connCreateServer: (name: string) => ipcRenderer.invoke("admin:connCreateServer", name),
   connCreateChannel: (serverId: string, name: string) => ipcRenderer.invoke("admin:connCreateChannel", { serverId, name }),
   connSetShared: (serverIds: string[]) => ipcRenderer.invoke("admin:connSetShared", serverIds),
+  connRestoreScan: (o: unknown) => ipcRenderer.invoke("admin:connRestoreScan", o),
+  connRestore: (o: unknown) => ipcRenderer.invoke("admin:connRestore", o),
   connMeshInvite: (label: string, host: string, expiresInMs: number) => ipcRenderer.invoke("admin:connMeshInvite", { label, host, expiresInMs }),
   connMeshJoin: (code: string) => ipcRenderer.invoke("admin:connMeshJoin", code),
   connMeshRemove: (spaceId: string) => ipcRenderer.invoke("admin:connMeshRemove", spaceId),
