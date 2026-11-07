@@ -56,7 +56,7 @@ export function seedLanguage(dataDir: string, language: LangSetting): void {
 }
 
 /** language 기본값 "ko": 기존 테스트의 한국어 문구 단정을 유지한다. 영어·N/A 경로는 명시해서 시험한다. */
-export async function startTestHub(opts: { dataDir?: string; http?: boolean; limits?: Partial<HubLimits>; language?: LangSetting; connBackoffMs?: number[]; storageApiBase?: string; supabaseInsecureForTest?: boolean } = {}): Promise<{ hub: Hub; port: number; dataDir: string }> {
+export async function startTestHub(opts: { dataDir?: string; http?: boolean; limits?: Partial<HubLimits>; language?: LangSetting; connBackoffMs?: number[]; storageApiBase?: string; supabaseInsecureForTest?: boolean; space1BackendForTest?: (repo: string) => import("./connection/storage/backend.js").StorageBackend } = {}): Promise<{ hub: Hub; port: number; dataDir: string }> {
   const dataDir = opts.dataDir ?? tempDir("uplink-t-");
   seedLanguage(dataDir, opts.language ?? "ko");
   const hub = new Hub({
@@ -65,6 +65,7 @@ export async function startTestHub(opts: { dataDir?: string; http?: boolean; lim
     ...(opts.connBackoffMs ? { connBackoffMs: opts.connBackoffMs } : {}),
     ...(opts.storageApiBase ? { storageApiBase: opts.storageApiBase } : {}),
     ...(opts.supabaseInsecureForTest ? { supabaseInsecureForTest: true } : {}),
+    ...(opts.space1BackendForTest ? { space1BackendForTest: opts.space1BackendForTest } : {}),
   });
   await hub.startTcp();
   if (opts.http) await hub.startHttp();

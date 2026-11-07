@@ -67,6 +67,8 @@ export interface HubOptions {
   storageApiBase?: string;
   /** 시험 전용: Supabase 주소로 http 가짜 서버를 허용. */
   supabaseInsecureForTest?: boolean;
+  /** 시험 전용: 방식 1 공간 저장소(가짜). */
+  space1BackendForTest?: (repo: string) => import("./connection/storage/backend.js").StorageBackend;
 }
 
 interface Waiter {
@@ -207,6 +209,11 @@ export class Hub {
       ...(this.opts.connBackoffMs ? { backoffMs: this.opts.connBackoffMs } : {}),
       ...(this.opts.storageApiBase ? { storageApiBase: this.opts.storageApiBase } : {}),
       ...(this.opts.supabaseInsecureForTest ? { supabaseInsecureForTest: true } : {}),
+      ...(this.opts.space1BackendForTest ? { space1BackendForTest: this.opts.space1BackendForTest } : {}),
+      localServer: (id) => {
+        const s = this.servers.getServer(id);
+        return s ? { name: s.name, channels: s.channels.map((c) => ({ channelId: c.id, name: c.name })) } : null;
+      },
     });
     this.trash = new TrashStore({ dir: this.opts.dataDir });
     this.trashOps = new TrashOps({
@@ -250,6 +257,7 @@ export class Hub {
       if (code === "server_not_configured") return fail("server_not_enabled", "server_not_enabled");
       if (e instanceof StorageError) return fail(e.code, "storage_failed", { code: e.code });
       if (code === "storage_not_configured") return fail(code, "storage_not_configured");
+      if (/^(invite_|space1_|space_not_found)/.test(code)) return fail(code, "conn_op_failed", { code });
       return fail("conn_op_failed", "conn_op_failed", { code: (e as NodeJS.ErrnoException).code ?? code });
     };
     try {
@@ -337,6 +345,38 @@ export class Hub {
           return this.trashOps.deleteCommsChannel(String(q.channelId ?? ""), "admin") ? { ok: true } : fail("channel_not_found", "channel_not_found", { id: q.channelId });
         case "admin_conn_delete_server":
           return this.trashOps.deleteCommsServer(String(q.serverId ?? ""), "admin") ? { ok: true } : fail("server_not_found", "server_not_found", { id: q.serverId });
+        // ───── 방식 1 공간(v3.0 4단계, GitHub만) ─────
+        case "admin_conn_s1_create": {
+          const repo = q.repo;
+          const tok = q.ghToken;
+          const interval = q.intervalSec ?? 30;
+          const branch = q.branch;
+          const ok = typeof repo === "string" && parseRepo(repo) !== null && typeof tok === "string" && tok.length > 0 && tok.length <= 500 && !/\s/.test(tok)
+            && typeof q.localServerId === "string" && typeof interval === "number" && Number.isInteger(interval) && interval >= 10 && interval <= 600
+            && (branch === undefined || (typeof branch === "string" && /^[\w./-]{1,255}$/.test(branch)));
+          if (!ok) return fail("space1_config_invalid", "conn_op_failed", { code: "space1_config_invalid" });
+          const id = await c.space1Create({ spaceName: String(q.spaceName ?? ""), localServerId: q.localServerId as string, repo: repo as string, ...(branch ? { branch: branch as string } : {}), token: tok as string, intervalSec: interval as number });
+          return { ok: true, spaceId: id };
+        }
+        case "admin_conn_s1_invite": {
+          const ms = q.expiresInMs;
+          if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 1 || ms > 30 * 24 * 3600_000) return fail("expires_invalid", "expires_invalid");
+          return { ok: true, code: c.space1Invite(String(q.spaceId ?? ""), String(q.label ?? ""), ms) };
+        }
+        case "admin_conn_s1_join": {
+          const tok = q.ghToken;
+          if (typeof q.code !== "string" || q.code.length > 8192 || typeof tok !== "string" || tok.length === 0 || tok.length > 500 || /\s/.test(tok)) return fail("space1_config_invalid", "conn_op_failed", { code: "space1_config_invalid" });
+          return { ok: true, spaceId: await c.space1Join(q.code, tok) };
+        }
+        case "admin_conn_s1_revoke":
+          return (await c.space1Revoke(String(q.spaceId ?? ""), String(q.hubId ?? ""))) ? { ok: true } : fail("member_not_found", "member_not_found");
+        case "admin_conn_s1_status":
+          return { ok: true, spaces: c.space1Status() };
+        case "admin_conn_s1_sync_now":
+          return { ok: true, space: await c.space1SyncNow(String(q.spaceId ?? "")) };
+        case "admin_conn_s1_leave":
+          c.space1Leave(String(q.spaceId ?? ""));
+          return { ok: true };
         case "admin_conn_revoke":
           return c.revoke(String(q.memberId ?? "")) ? { ok: true } : fail("member_not_found", "member_not_found");
         default:
@@ -770,7 +810,9 @@ export class Hub {
         const localServers = this.servers.listServers().map((s) => ({ serverId: s.id, name: s.name, channelCount: s.channels.length }));
         // 연결 계정(v3.0)에게는 통신 서버(Connection Communications)와 원격 공유 서버도.
         const meIsConn = this.accounts.get(me)?.area === "connection";
-        reply({ ok: true, servers: meIsConn ? [...localServers, ...this.conn.serversFor()] : localServers });
+        // 방식 1 공간(v3.0 4단계)은 로컬 영역이라 모든 계정에게 보인다.
+        const space1 = this.conn.space1ServersFor();
+        reply({ ok: true, servers: meIsConn ? [...localServers, ...space1, ...this.conn.serversFor()] : [...localServers, ...space1] });
         return;
       }
 
@@ -829,6 +871,11 @@ export class Hub {
         if (!me) return;
         const srv = this.servers.getServer(req.serverId);
         if (!srv) {
+          const s1 = typeof req.serverId === "string" ? this.conn.space1ChannelsFor(req.serverId) : null;
+          if (s1) {
+            reply({ ok: true, channels: s1 });
+            return;
+          }
           const connChannels = this.accounts.get(me)?.area === "connection" && typeof req.serverId === "string" ? this.conn.channelsFor(req.serverId) : null;
           if (connChannels) {
             reply({ ok: true, channels: connChannels });

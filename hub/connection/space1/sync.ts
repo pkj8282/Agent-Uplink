@@ -540,6 +540,15 @@ export class SpaceSync {
     return { spaceId: this.cfg.spaceId, spaceName: this.st.plain?.spaceName ?? this.cfg.spaceName, role: this.cfg.role, state: this.st.state, repo: this.cfg.repo, epoch: r?.epoch ?? 0, members, lastSyncAt: this.st.lastSyncAt, lastError: this.st.lastError };
   }
 
+  /** 구성원: 세션이 찾을 수 있게 목록에 보일 공간 서버·거울 채널(관리자 쪽은 원래 로컬 서버라 필요 없음). */
+  listing(): { serverId: string; name: string; channelCount: number; remote: { spaceName: string; hubUser: string }; channels: { channelId: string; name: string }[] } | null {
+    const plain = this.st.plain;
+    if (this.cfg.role !== "member" || this.st.state !== "active" || !plain) return null;
+    const host = plain.names[hubIdOf(this.cfg.ownerKey)] ?? "?";
+    const channels = plain.channels.map((c) => ({ channelId: this.mirrorId(c.channelId), name: c.name }));
+    return { serverId: `s1:${this.cfg.spaceId}`, name: plain.spaceName, channelCount: channels.length, remote: { spaceName: plain.spaceName, hubUser: host }, channels };
+  }
+
   /** 이 PC에서 공간을 빼고(거울 채널 해제) 로컬 상태를 지운다. 저장소의 파일은 그대로 둔다. */
   leave(): void {
     const prefix = this.mirrorId("");

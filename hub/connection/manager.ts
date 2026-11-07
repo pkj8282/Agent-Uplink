@@ -24,6 +24,8 @@ import { Uploader, type StorageConfig } from "./storage/uploader.js";
 import { GitHubBackend } from "./storage/github.js";
 import { SupabaseBackend } from "./storage/supabase.js";
 import { Lifecycle } from "./lifecycle.js";
+import { SpaceSync, type SpaceChannel, type SpaceDeps } from "./space1/sync.js";
+import type { StorageBackend } from "./storage/backend.js";
 import { DEFAULT_PROFILE } from "../../shared/cryptoProfile.js";
 
 export interface ManagerDeps {
@@ -38,6 +40,10 @@ export interface ManagerDeps {
   storageApiBase?: string;
   /** 시험 전용: Supabase http 가짜 서버 허용. */
   supabaseInsecureForTest?: boolean;
+  /** 시험 전용: 방식 1 공간 저장소(가짜). */
+  space1BackendForTest?: (repo: string) => StorageBackend;
+  /** 방식 1 관리자: 로컬 서버(채널 묶음) 정보. */
+  localServer?: (serverId: string) => { name: string; channels: SpaceChannel[] } | null;
 }
 
 interface SpaceState {
@@ -98,6 +104,109 @@ export class ConnectionManager implements ConnStatusSource {
 
   readonly uploader: Uploader;
   private lifecycle: Lifecycle | null = null;
+  /** 방식 1 공간들(v3.0 4단계)과 동기화 타이머. */
+  private spaces1 = new Map<string, { sync: SpaceSync; timer: NodeJS.Timeout | null }>();
+
+  private space1Deps(): SpaceDeps {
+    return {
+      spacesDir: path.join(this.store.dir, "spaces1"),
+      keys: this.store.identity(),
+      channels: this.deps.channels,
+      makeBackend: (repo, branch, token) => this.deps.space1BackendForTest?.(repo) ?? new GitHubBackend({ token, repo, ...(branch ? { branch } : {}), ...(this.deps.storageApiBase ? { apiBase: this.deps.storageApiBase } : {}) }),
+      deliver: (ch, msg) => this.deps.deliver(ch, msg),
+      guard: (s, field) => this.g(s, "space1", field, field === "text"),
+      log: (code, detail) => this.log(code, detail),
+      userName: () => this.userName(),
+    };
+  }
+
+  private ownerChannelsOf(serverId: string | undefined): () => SpaceChannel[] {
+    return () => (serverId ? this.deps.localServer?.(serverId)?.channels ?? [] : []);
+  }
+
+  private runSpace1(sync: SpaceSync): void {
+    this.spaces1.get(sync.spaceId)?.timer && clearInterval(this.spaces1.get(sync.spaceId)!.timer!);
+    const timer = setInterval(() => { void sync.tick(); }, Math.max(10, sync.intervalSec) * 1000);
+    timer.unref();
+    this.spaces1.set(sync.spaceId, { sync, timer });
+  }
+
+  private loadSpaces1(): void {
+    const dir = path.join(this.store.dir, "spaces1");
+    let ids: string[] = [];
+    try { ids = fs.readdirSync(dir); } catch { return; }
+    for (const id of ids) {
+      const cfg = (() => { try { return JSON.parse(fs.readFileSync(path.join(dir, id, "config.json"), "utf8")) as { localServerId?: string }; } catch { return null; } })();
+      const s = cfg ? SpaceSync.load(this.space1Deps(), id, this.ownerChannelsOf(cfg.localServerId)) : null;
+      if (s) { this.runSpace1(s); void s.tick(); }
+    }
+  }
+
+  private space1(spaceId: string): SpaceSync {
+    const s = this.spaces1.get(spaceId)?.sync;
+    if (!s) throw new Error("space1_not_found");
+    return s;
+  }
+
+  /** 방식 1 공간 만들기(관리자). 고른 로컬 서버의 채널이 공간 채널이 된다. */
+  async space1Create(o: { spaceName: string; localServerId: string; repo: string; branch?: string; token: string; intervalSec: number }): Promise<string> {
+    const name = validateName(o.spaceName, "server", (s) => this.g(s, "s1_create", "spaceName"));
+    if (!name.ok) throw new Error("name_invalid");
+    if (!this.deps.localServer?.(o.localServerId)) throw new Error("server_not_found");
+    const s = await SpaceSync.createAsOwner(this.space1Deps(), { spaceName: name.name, repo: o.repo, ...(o.branch ? { branch: o.branch } : {}), token: o.token, intervalSec: o.intervalSec, localServerId: o.localServerId, ownerChannels: this.ownerChannelsOf(o.localServerId) });
+    this.ensureStarted();
+    this.runSpace1(s);
+    return s.spaceId;
+  }
+
+  space1Invite(spaceId: string, label: string, expiresInMs: number): string {
+    const n = this.nameOf(label, "s1_invite");
+    if (!n) throw new Error("name_invalid");
+    return this.space1(spaceId).invite(n, expiresInMs);
+  }
+
+  async space1Join(code: string, token: string): Promise<string> {
+    const s = await SpaceSync.join(this.space1Deps(), code, token);
+    this.ensureStarted();
+    this.runSpace1(s);
+    void s.tick();
+    return s.spaceId;
+  }
+
+  space1Revoke(spaceId: string, hubId: string): Promise<boolean> {
+    return this.space1(spaceId).revoke(hubId);
+  }
+
+  /** list_servers에 붙는 방식 1 공간(구성원 쪽, 로컬·연결 계정 모두). */
+  space1ServersFor(): { serverId: string; name: string; channelCount: number; remote: { spaceName: string; hubUser: string } }[] {
+    return [...this.spaces1.values()].map((x) => x.sync.listing()).filter((l) => l !== null).map(({ channels: _c, ...rest }) => rest);
+  }
+
+  space1ChannelsFor(serverId: string): { channelId: string; name: string }[] | null {
+    for (const x of this.spaces1.values()) {
+      const l = x.sync.listing();
+      if (l && l.serverId === serverId) return l.channels;
+    }
+    return null;
+  }
+
+  space1Status(): ReturnType<SpaceSync["status"]>[] {
+    return [...this.spaces1.values()].map((x) => x.sync.status());
+  }
+
+  async space1SyncNow(spaceId: string): Promise<ReturnType<SpaceSync["status"]>> {
+    const s = this.space1(spaceId);
+    await s.tick();
+    return s.status();
+  }
+
+  space1Leave(spaceId: string): void {
+    const x = this.spaces1.get(spaceId);
+    if (!x) throw new Error("space1_not_found");
+    if (x.timer) clearInterval(x.timer);
+    x.sync.leave();
+    this.spaces1.delete(spaceId);
+  }
 
   /** 이번 실행의 시작 사건을 한 번 기록한다(통신을 처음 켠 실행 포함). 이미 기록했으면 아무것도 안 함. */
   private ensureStarted(): void {
@@ -141,6 +250,7 @@ export class ConnectionManager implements ConnStatusSource {
       }
     }
     for (const j of this.store.joined()) this.startSpace(j);
+    this.loadSpaces1();
     // 가동 사건 기록(사용자 설계): 지난 실행이 정상 종료 보고 없이 끝났으면 비정상 종료 — 밀린 백업을 바로 올린다.
     const clean = new Lifecycle(path.join(this.store.dir, "lifecycle.jsonl")).lastRunClean();
     this.ensureStarted();
@@ -153,6 +263,11 @@ export class ConnectionManager implements ConnStatusSource {
 
   async stop(): Promise<void> {
     await this.uploader.stop(); // 정상 종료 직전 마지막 업로드(설계 4.2)
+    // 방식 1 공간: 타이머를 멈추고 마지막으로 한 번 동기화(최대 5초)
+    const last: Promise<void>[] = [];
+    for (const x of this.spaces1.values()) { if (x.timer) clearInterval(x.timer); last.push(x.sync.tick()); }
+    await Promise.race([Promise.all(last), new Promise((r) => setTimeout(r, 5000).unref())]);
+    this.spaces1.clear();
     // 정상 종료 보고는 마지막 업로드를 끝낸 뒤에(Hub가 직접 쓴다).
     if (this.lifecycle) {
       this.lifecycle.recordCleanStop(Date.now(), this.uploader.chainHead());
