@@ -49,8 +49,9 @@ export interface ConnStatus {
   /** 저장소(백업) 상태. 3a 이전 Hub는 없음 → null. */
   storage: StorageStatus | null;
 }
-export interface StorageStatus { configured: boolean; kind?: "github"; repo?: string; intervalMin?: number; lastUploadAt: number | null; lastError: string | null; nextIndex: number; prune?: { enabled: boolean; days: number; lastPruneAt: number | null }; }
+export interface StorageStatus { configured: boolean; kind?: "github" | "supabase"; repo?: string; url?: string; bucket?: string; intervalMin?: number; lastUploadAt: number | null; lastError: string | null; nextIndex: number; prune?: { enabled: boolean; days: number; lastPruneAt: number | null }; }
 export interface StorageInput { repo: string; token: string; intervalMin: number; }
+export interface SupabaseInput { url: string; key: string; bucket: string; intervalMin: number; }
 export interface VerifyResult { fragments: number; messages: number; breaks: number[]; missing: number[]; bad: { path: string; code: string }[]; }
 export interface ConnCommsServer { serverId: string; name: string; channels: { channelId: string; name: string }[]; }
 export interface ConnEvent { ts: number; code: string; detail: Record<string, unknown>; }
@@ -122,6 +123,7 @@ export interface AdminApi {
   connRevoke(memberId: string): Promise<IpcResult<void>>;
   // 저장소(백업, v3.0 3a)
   connStorageSet(o: StorageInput): Promise<IpcResult<{ recoveryKey: string }>>;
+  connStorageSetSupabase(o: SupabaseInput): Promise<IpcResult<{ recoveryKey: string }>>;
   connStorageUploadNow(): Promise<IpcResult<{ fragments: number; messages: number }>>;
   connStorageVerify(): Promise<IpcResult<VerifyResult>>;
   connStorageClear(): Promise<IpcResult<void>>;

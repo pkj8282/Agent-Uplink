@@ -126,6 +126,10 @@ handle("admin:connStorageSet", (arg) => toResult(() => {
   const o = asObj(arg);
   return client.connStorageSet({ repo: asStr(o.repo, 200), token: asStr(o.token, 500), intervalMin: asNum(o.intervalMin) });
 }));
+handle("admin:connStorageSetSupabase", (arg) => toResult(() => {
+  const o = asObj(arg);
+  return client.connStorageSetSupabase({ url: asStr(o.url, 200), key: asStr(o.key, 1000), bucket: asStr(o.bucket, 63), intervalMin: asNum(o.intervalMin) });
+}));
 handle("admin:connStorageUploadNow", () => toResult(() => client.connStorageUploadNow()));
 handle("admin:connStorageVerify", () => toResult(() => client.connStorageVerify()));
 handle("admin:connStorageClear", () => toResult(() => client.connStorageClear()));

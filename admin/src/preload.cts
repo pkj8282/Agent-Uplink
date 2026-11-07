@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld("admin", {
   connJoin: (code: string) => ipcRenderer.invoke("admin:connJoin", code),
   connRevoke: (memberId: string) => ipcRenderer.invoke("admin:connRevoke", memberId),
   connStorageSet: (o: unknown) => ipcRenderer.invoke("admin:connStorageSet", o),
+  connStorageSetSupabase: (o: unknown) => ipcRenderer.invoke("admin:connStorageSetSupabase", o),
   connStorageUploadNow: () => ipcRenderer.invoke("admin:connStorageUploadNow"),
   connStorageVerify: () => ipcRenderer.invoke("admin:connStorageVerify"),
   connStorageClear: () => ipcRenderer.invoke("admin:connStorageClear"),

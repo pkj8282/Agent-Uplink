@@ -1,5 +1,5 @@
 // 렌더러의 순수 로직(DOM 없음 → Node에서 테스트).
-import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, StorageInput, StorageStatus, VerifyResult, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
+import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, StorageInput, StorageStatus, SupabaseInput, VerifyResult, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
 import { oneLine } from "../text.js";
 import type { AdminKey } from "../messages.js";
 import { getLang, tr } from "./lang.js";
@@ -357,9 +357,11 @@ export function parseStorageForm(i: { repo: string; token: string; intervalMin: 
 
 export function storageStatusLine(st: StorageStatus): string {
   if (!st.configured) return tr("storage_off");
-  const parts = [tr("storage_on", { repo: displayName(st.repo ?? ""), min: st.intervalMin ?? 5 })];
+  const ref = /^https?:\/\/([^./]+)/.exec(st.url ?? "")?.[1] ?? "";
+  const parts = [st.kind === "supabase" ? tr("storage_on_supabase", { ref: displayName(ref, 63), min: st.intervalMin ?? 5 }) : tr("storage_on", { repo: displayName(st.repo ?? ""), min: st.intervalMin ?? 5 })];
   parts.push(st.lastUploadAt ? tr("storage_last", { at: new Date(st.lastUploadAt).toLocaleString(localeOf(getLang())) }) : tr("storage_never"));
   if (st.lastError) parts.push(tr("storage_last_error", { detail: connErrorMessage(st.lastError, st.lastError) }));
+  if (st.kind === "supabase" && st.lastError === "storage_unreachable") parts.push(tr("supabase_paused_hint"));
   if (st.prune?.enabled) parts.push(tr("prune_on", { days: st.prune.days }));
   return parts.join(" · ");
 }
@@ -380,4 +382,19 @@ export function parsePruneForm(i: { enabled: boolean; days: string }): { ok: tru
   const n = posInt(i.days);
   if (n === null || n < 7 || n > 365) return { ok: false, error: tr("form_prune_days_invalid") };
   return { ok: true, value: { enabled: i.enabled, days: n } };
+}
+
+// ───── Supabase(2026-11-07, Google Drive 대신) ─────
+
+/** Supabase 연결 폼. 주소는 Hub와 같은 규칙(https://<ref>.supabase.co), 버킷은 비우면 agent-uplink. */
+export function parseSupabaseForm(i: { url: string; key: string; bucket: string; intervalMin: string }): { ok: true; value: SupabaseInput } | { ok: false; error: string } {
+  const url = i.url.trim().replace(/\/+$/, "");
+  if (!/^https:\/\/[a-z0-9]{1,63}\.supabase\.co$/.test(url)) return { ok: false, error: tr("form_supabase_url_invalid") };
+  const key = i.key.trim();
+  if (!key || /\s/.test(key)) return { ok: false, error: tr("form_token_invalid") };
+  const bucket = i.bucket.trim() || "agent-uplink";
+  if (!/^[a-z0-9][a-z0-9._-]{0,62}$/.test(bucket)) return { ok: false, error: tr("form_bucket_invalid") };
+  const n = posInt(i.intervalMin);
+  if (n === null || n > 60) return { ok: false, error: tr("form_interval_invalid") };
+  return { ok: true, value: { url, key, bucket, intervalMin: n } };
 }

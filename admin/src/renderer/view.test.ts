@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount, parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage, connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, storageStatusLine, verifyResultMessage, parsePruneForm } from "./view.js";
+import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount, parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage, connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, storageStatusLine, verifyResultMessage, parsePruneForm, parseSupabaseForm } from "./view.js";
 import { setLang, tr } from "./lang.js";
 import { hasHangul } from "../../../hub/testing.js";
 
@@ -427,6 +427,32 @@ test("로컬 정리 확인창: 정리 뒤 저장소 백업이 유일한 사본�
   setLang("en");
   try {
     assert.match(tr("prune_confirm", { days: 30 }), /the only copy/);
+  } finally {
+    setLang("ko");
+  }
+});
+
+// ── Supabase(2026-11-07, Google Drive 대신) ──
+test("parseSupabaseForm: https://<ref>.supabase.co·secret key·버킷(기본 agent-uplink)·주기", () => {
+  const base = { url: "https://abcdefghijklmnopqrst.supabase.co", key: "sb_secret_x", bucket: "", intervalMin: "5" };
+  assert.deepEqual(parseSupabaseForm(base), { ok: true, value: { url: "https://abcdefghijklmnopqrst.supabase.co", key: "sb_secret_x", bucket: "agent-uplink", intervalMin: 5 } });
+  assert.deepEqual(parseSupabaseForm({ ...base, url: " https://abcdefghijklmnopqrst.supabase.co/ ", bucket: " my-backup " }).ok, true);
+  for (const url of ["http://abc.supabase.co", "https://abc.supabase.co.evil.com", "https://evil.com", ""]) assert.equal(parseSupabaseForm({ ...base, url }).ok, false, url);
+  for (const key of ["", " ", "a b"]) assert.equal(parseSupabaseForm({ ...base, key }).ok, false, key);
+  for (const bucket of ["Bad", "a/b", "-x"]) assert.equal(parseSupabaseForm({ ...base, bucket }).ok, false, bucket);
+  assert.equal(parseSupabaseForm({ ...base, intervalMin: "0" }).ok, false);
+});
+
+test("Supabase 상태 줄: 프로젝트 이름·주기, 닿지 못하면 일시정지 안내, 영어 한글 없음", () => {
+  const st = { configured: true, kind: "supabase" as const, url: "https://abcdefghijklmnopqrst.supabase.co", bucket: "agent-uplink", intervalMin: 5, lastUploadAt: null, lastError: null, nextIndex: 0 };
+  assert.match(storageStatusLine(st), /Supabase abcdefghijklmnopqrst · 5분마다/);
+  assert.match(storageStatusLine({ ...st, lastError: "storage_unreachable" }), /일시정지/);
+  assert.doesNotMatch(storageStatusLine({ ...st, kind: "github" as const, repo: "o/r", lastError: "storage_unreachable" }), /일시정지/);
+  setLang("en");
+  try {
+    for (const t of [storageStatusLine({ ...st, lastError: "storage_unreachable" }), parseSupabaseForm({ url: "", key: "", bucket: "", intervalMin: "" }).ok ? "" : (parseSupabaseForm({ url: "", key: "", bucket: "", intervalMin: "" }) as any).error]) {
+      assert.equal(hasHangul(t), false, t);
+    }
   } finally {
     setLang("ko");
   }

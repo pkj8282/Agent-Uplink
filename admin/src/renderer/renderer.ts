@@ -4,7 +4,7 @@ import {
   emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage,
   restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount,
   parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage,
-  connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, storageStatusLine, verifyResultMessage, parsePruneForm,
+  connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, parseSupabaseForm, storageStatusLine, verifyResultMessage, parsePruneForm,
 } from "./view.js";
 import type { FormMessage } from "./view.js";
 import { getLang, setLang, tr } from "./lang.js";
@@ -258,7 +258,7 @@ const connGate = new ChangeGate();
 /** 공유 체크를 바꿨지만 저장하지 않은 상태(null = Hub 값대로). */
 let pendingShared: Set<string> | null = null;
 
-for (const id of ["conn-user-form", "conn-server-form", "conn-invite-form", "storage-form", "prune-form"]) {
+for (const id of ["conn-user-form", "conn-server-form", "conn-invite-form", "storage-form", "supabase-form", "storage-kind-form", "prune-form"]) {
   byId(id).addEventListener("input", (e) => { if (e.target instanceof Element) connDirty.add(e.target); });
   byId(id).addEventListener("change", (e) => { if (e.target instanceof Element) connDirty.add(e.target); });
 }
@@ -329,7 +329,18 @@ function renderConn(c: IpcResult<ConnStatus>): void {
     if (!connDirty.has(pe)) pe.checked = sto.prune.enabled;
     setIfClean(byId<HTMLInputElement>("prune-days"), String(sto.prune.days));
   }
-  if (sto?.configured) {
+  // 연결된 종류를 선택 상자에 반영(사용자가 바꾸는 중이면 그대로).
+  const kindSel = byId<HTMLSelectElement>("storage-kind");
+  if (sto?.configured && sto.kind && !connDirty.has(kindSel) && kindSel.value !== sto.kind) {
+    kindSel.value = sto.kind;
+    showStorageKind(sto.kind);
+  }
+  if (sto?.configured && sto.kind === "supabase") {
+    setIfClean(byId<HTMLInputElement>("supabase-url"), sto.url ?? "");
+    setIfClean(byId<HTMLInputElement>("supabase-bucket"), sto.bucket ?? "");
+    setIfClean(byId<HTMLInputElement>("supabase-interval"), String(sto.intervalMin ?? 5));
+  }
+  if (sto?.configured && sto.kind !== "supabase") {
     setIfClean(byId<HTMLInputElement>("storage-repo"), sto.repo ?? "");
     setIfClean(byId<HTMLInputElement>("storage-interval"), String(sto.intervalMin ?? 5));
   }
@@ -551,6 +562,32 @@ byId<HTMLFormElement>("prune-form").addEventListener("submit", (e) => {
   if (parsed.value.enabled && !window.confirm(tr("prune_confirm", { days: parsed.value.days }))) return;
   clearDirty(byId("prune-form"));
   void connRun(submitter(e), () => window.admin.connStoragePruneSet(parsed.value));
+});
+
+/** 저장소 종류에 맞는 입력만 보여 준다(GitHub: 저장소·토큰·주기 / Supabase: 별도 폼). 지금 올리기·검증·해제 버튼은 공통. */
+function showStorageKind(kind: string): void {
+  const supa = kind === "supabase";
+  byId("supabase-form").hidden = !supa;
+  byId("storage-form").querySelectorAll<HTMLElement>("label").forEach((l) => { l.hidden = supa; });
+  byId("storage-form").querySelector<HTMLButtonElement>("button[type=submit]")!.hidden = supa;
+}
+
+byId<HTMLSelectElement>("storage-kind").addEventListener("change", (e) => showStorageKind((e.target as HTMLSelectElement).value));
+
+byId<HTMLFormElement>("supabase-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const keyBox = byId<HTMLInputElement>("supabase-key");
+  const parsed = parseSupabaseForm({
+    url: byId<HTMLInputElement>("supabase-url").value, key: keyBox.value,
+    bucket: byId<HTMLInputElement>("supabase-bucket").value, intervalMin: byId<HTMLInputElement>("supabase-interval").value,
+  });
+  if (!parsed.ok) { showOpMsg({ text: parsed.error, kind: "err" }); return; }
+  clearDirty(byId("supabase-form"));
+  clearDirty(byId("storage-kind-form"));
+  void connRun(submitter(e), () => window.admin.connStorageSetSupabase(parsed.value), (d) => {
+    keyBox.value = ""; // 키는 화면에 남기지 않는다
+    showRecoveryKey(d.recoveryKey);
+  });
 });
 
 byId<HTMLFormElement>("storage-form").addEventListener("submit", (e) => {

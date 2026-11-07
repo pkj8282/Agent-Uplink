@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { encodeFrame, FrameDecoder } from "./framing.js";
 import { newNonce, isNonce, clientProof, hubProof, proofEquals, readClientKeyFile } from "./auth.js";
-import type { AdminConfig, ConfigPatch, ConnProfile, ConnStatus, IpcResult, StorageInput, VerifyResult, NameConflict, RestoreReport, Snapshot } from "./types.js";
+import type { AdminConfig, ConfigPatch, ConnProfile, ConnStatus, IpcResult, StorageInput, SupabaseInput, VerifyResult, NameConflict, RestoreReport, Snapshot } from "./types.js";
 import { effectiveLang, type Lang } from "./i18n.js";
 import { readLanguageFile } from "./langFile.js";
 import { adminMsg, LEGACY_UNKNOWN_OP, type AdminKey } from "./messages.js";
@@ -160,6 +160,10 @@ export class AdminClient {
   /** 저장소 연결. 토큰은 Hub로만 보내고 여기서 기억하지 않는다. 복구 키는 이 응답에서만 온다. */
   async connStorageSet(o: StorageInput): Promise<{ recoveryKey: string }> {
     return { recoveryKey: (await this.call("admin_conn_storage_set", { kind: "github", repo: o.repo, ghToken: o.token, intervalMin: o.intervalMin })).recoveryKey };
+  }
+  /** Supabase 연결. secret key는 Hub로만 보내고 여기서 기억하지 않는다. */
+  async connStorageSetSupabase(o: SupabaseInput): Promise<{ recoveryKey: string }> {
+    return { recoveryKey: (await this.call("admin_conn_storage_set", { kind: "supabase", url: o.url, key: o.key, bucket: o.bucket, intervalMin: o.intervalMin })).recoveryKey };
   }
   async connStorageUploadNow(): Promise<{ fragments: number; messages: number }> {
     const r = await this.call("admin_conn_storage_upload_now", {});
