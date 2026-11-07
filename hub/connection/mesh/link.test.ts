@@ -192,3 +192,13 @@ test("link_channel_memory_pair: 메모리로 이은 두 채널이 요청·응답
   y.close();
   assert.equal((await x.request({ op: "l_heads" })).code, "connection_lost");
 });
+
+test("mesh_join_relay_unsupported: 중계 끝점 인증서는 풀리지만 접속은 relay_unsupported(중계는 다음 — 유료 서비스 때)", async () => {
+  const a = await setupA();
+  try {
+    const { invite } = a.linkInvite();
+    const r = await joinLink({ ...invite, endpoint: { type: "relay", relay: "relay.example", serverId: "spA" } }, selfC());
+    assert.deepEqual(r, { ok: false, code: "relay_unsupported" });
+    assert.equal(a.store.links().length, 0);
+  } finally { await a.listener.close(); }
+});
