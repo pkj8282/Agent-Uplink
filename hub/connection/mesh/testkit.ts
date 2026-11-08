@@ -99,7 +99,7 @@ export function connect(a: Node, b: Node, tap?: (from: "a" | "b", obj: any) => b
   return () => x.close();
 }
 
-export async function until(cond: () => boolean, ms = 3000): Promise<void> {
+export async function until(cond: () => boolean, ms = 10_000): Promise<void> { // CI 러너는 느리다 — 조건이 맞으면 바로 끝나므로 넉넉히
   const end = Date.now() + ms;
   while (!cond()) {
     if (Date.now() > end) throw new Error("until: timeout");

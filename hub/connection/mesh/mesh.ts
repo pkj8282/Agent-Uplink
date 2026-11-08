@@ -1110,7 +1110,7 @@ export class Mesh {
     this.firstSeen(self.spaceId, `relay:${body.reqId}`);
     return new Promise((resolve) => {
       const t = setTimeout(() => { if (this.pendingRelay.delete(body.reqId)) resolve({ ok: false, code: "relay_timeout" }); }, this.deps.relayTimeoutMs ?? 15_000);
-      t.unref?.();
+      // unref 하지 않는다: 이 타이머가 응답을 기다리는 쪽의 유일한 할 일일 수 있다(최대 15초, Node 22는 비면 기다리던 쪽을 취소)
       this.pendingRelay.set(body.reqId, (r) => { clearTimeout(t); resolve(r); });
       this.flood({ event: "relay", q, ttl: RELAY_TTL });
     });
