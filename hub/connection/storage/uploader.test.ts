@@ -7,7 +7,7 @@ import { decodeFragment } from "../../../shared/archive.js";
 import { openEnvelope } from "../../../shared/signed.js";
 import { tempDir } from "../../testing.js";
 import { MemoryBackend, StorageError } from "./backend.js";
-import { Uploader, type StorageConfig } from "./uploader.js";
+import { storageIdOf, Uploader, type StorageConfig } from "./uploader.js";
 
 const SPACE = "11111111-2222-3333-4444-555555555555";
 const TOKEN = "github_pat_UPLOADER_SECRET";
@@ -356,4 +356,12 @@ test("head_failure_does_not_fail_upload: 마지막 번호 파일 쓰기가 실�
   fail = false;
   await s.up.uploadNow();
   assert.equal([...be.files.keys()].some((k) => k.endsWith("/head.json")), true);
+});
+
+
+test("storageIdOf: 저장소마다 다르고 값이 드러나지 않는다", () => {
+  const a = storageIdOf({ kind: "github", repo: "o/r", intervalMin: 5 });
+  assert.notEqual(a, storageIdOf({ kind: "github", repo: "o/other", intervalMin: 5 }));
+  assert.equal(a, storageIdOf({ kind: "github", repo: "o/r", intervalMin: 60 }));
+  assert.equal(a.includes("o/r"), false);
 });

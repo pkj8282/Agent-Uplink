@@ -39,13 +39,19 @@ export interface UploaderDeps {
   makeBackend: (cfg: StorageConfig, token: string) => StorageBackend;
   log: (code: string, detail?: object) => void;
   /** 새 조각을 올린 뒤(망에 최고 번호를 알린다). */
-  onHead?: (index: number, hash: string) => void;
+  onHead?: (index: number, hash: string, store: string) => void;
   /** 로컬 정리: 채널 로그에서 keep이 false인 메시지를 지우고 개수를 돌려준다. */
   prune?: (channelId: string, keep: (m: Message) => boolean) => number;
   now?: () => number;
 }
 
 export interface VerifyResult { fragments: number; messages: number; breaks: number[]; missing: number[]; bad: { path: string; code: string }[] }
+
+/** 저장소를 구분하는 값(주소를 드러내지 않는 해시). 저장소를 바꾸면 번호가 다시 시작한다. */
+export function storageIdOf(cfg: StorageConfig): string {
+  const id = cfg.kind === "supabase" ? `supabase|${cfg.url}|${cfg.bucket}` : `github|${cfg.repo}`;
+  return createHash("sha256").update(id).digest("hex").slice(0, 32);
+}
 
 const STOP_WAIT_MS = 5000;
 /** 저장소에서 자리를 뺏긴 번호를 한 번 올릴 때 건너뛰는 최대 횟수. */
@@ -339,7 +345,8 @@ export class Uploader {
       st.headPending = true;
       this.d.log("storage_head_failed", {});
     }
-    this.d.onHead?.(index, st.lastHash);
+    const cfg = this.config();
+    if (cfg) this.d.onHead?.(index, st.lastHash, storageIdOf(cfg));
   }
 
   /** 이어받은 조각의 메시지 수(맞지 않으면 0). */

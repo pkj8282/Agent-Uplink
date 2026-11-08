@@ -110,17 +110,20 @@ interface Candidate {
   signer: string;
   /** 이 후보를 알려 준 연결(망 ID). */
   via: string;
+  /** 이 후보를 아는 연결 전부 — 하나가 끊겨도 다른 연결이 알고 있으면 남는다. */
+  vias: string[];
   at: number;
   /** 코드 답이 틀렸음 — 자동 인정 안 함, 주인에게 경고. */
   warning: boolean;
 }
 
-interface BHeadBody { origin: string; index: number; hash: string; ts: number }
+interface BHeadBody { origin: string; index: number; hash: string; ts: number; /** 어느 저장소의 번호인지(저장소 정보의 해시). */ store: string }
 
 export interface RestoredBackup {
   origin: string;
   hubKey: string;
   index: number;
+  store?: string;
   /** 이미 경고한 번호(같은 경고를 되풀이하지 않게). */
   warned?: number;
 }
@@ -150,6 +153,8 @@ export interface MeshLink {
   strikes: number;
   recTimes: number[];
   otherTimes: number[];
+  verifyTimes: number[];
+  attachedAt: number;
 }
 
 export interface CatalogBody {
@@ -184,6 +189,15 @@ const STRIKES_TO_DROP = 3;
 const REC_PER_SECOND = 200;
 /** 한 연결의 기록 외 이벤트(목록·중계·확인·총괄 등) 초당 상한 — 넘으면 버린다. */
 const OTHER_PER_SECOND = 100;
+/** 연결 직후에는 목록·보고를 묶어서 받으므로 예산을 넓게. */
+const ATTACH_WINDOW_MS = 5_000;
+const ATTACH_PER_SECOND = 1000;
+/** 인증 질문·답: 별도 예산과 크기 상한(발신자를 몰라도 전달되므로 작게). */
+const VERIFY_PER_SECOND = 100;
+const VERIFY_MAX_BYTES = 4096;
+/** 갈라짐 알림은 서버당 이 시간에 이 개수까지. */
+const FORK_ALERT_WINDOW_MS = 10 * 60_000;
+const FORK_ALERTS_PER_WINDOW = 5;
 const RELAY_TTL = 8;
 const RELAY_MAX_AGE_MS = 10 * 60_000;
 /** 서버(중계 시작·확인 서명자)별 중복 제거 기억 상한 — 10분 안 정상 최대(3600)보다 크고, 다른 서버 몫을 밀어내지 못한다. */
@@ -204,6 +218,7 @@ export class Mesh {
   private pulling = new Set<string>();
   private seen = new Map<string, Map<string, number>>();
   private forksSeen = new Set<string>();
+  private forkTimes = new Map<string, number[]>();
   private backupHeads: Record<string, Signed<BHeadBody>> = {};
   private beaconDirty = false;
   private lastBeaconAt = 0;
@@ -475,18 +490,31 @@ export class Mesh {
     const origin = body.origin;
     if (this.rejected.has(origin)) return;
     const had = this.cands.get(origin);
-    if (had && had.body.ver >= body.ver) return;
     const via = from.info.spaceId;
+    if (had && !had.vias.includes(via)) had.vias.push(via);
+    if (had && had.body.ver >= body.ver) return;
     if (!had) {
       const mine = [...this.cands.values()].filter((c) => c.via === via);
       if (mine.length >= MAX_CANDIDATES_PER_LINK) this.cands.delete(mine[0].body.origin);
-      else if (this.cands.size >= MAX_CANDIDATES) { this.deps.log("mesh_drop_too_many_candidates", { origin }); return; }
+      else if (this.cands.size >= MAX_CANDIDATES && !this.evictBusiestCandidate(mine.length)) { this.deps.log("mesh_drop_too_many_candidates", { origin }); return; }
     }
-    this.cands.set(origin, { signed: raw, body, signer, via: had?.via ?? via, at: had?.at ?? this.now, warning: had?.warning ?? false });
+    this.cands.set(origin, { signed: raw, body, signer, via: had?.via ?? via, vias: had?.vias ?? [via], at: had?.at ?? this.now, warning: had?.warning ?? false });
     if (had) return;
     this.deps.log("mesh_candidate", { origin, via });
     this.deps.onCandidate?.(origin);
     this.challenge(origin);
+  }
+
+  /** 후보가 가득 찼을 때, 새 후보를 알린 연결보다 후보가 많은 연결의 가장 오래된 후보를 내보낸다. */
+  private evictBusiestCandidate(mine: number): boolean {
+    const counts = new Map<string, number>();
+    for (const c of this.cands.values()) counts.set(c.via, (counts.get(c.via) ?? 0) + 1);
+    let busiest: string | null = null;
+    let most = mine;
+    for (const [via, n] of counts) if (n > most) { busiest = via; most = n; }
+    if (busiest === null) return false;
+    for (const c of this.cands.values()) if (c.via === busiest) { this.cands.delete(c.body.origin); return true; }
+    return false;
   }
 
   candidates(): { origin: string; spaceName: string; via: string; warning: boolean; at: number }[] {
@@ -541,7 +569,7 @@ export class Mesh {
     delete this.accepted[origin];
     delete this.pins[origin];
     this.cats.delete(origin);
-    if (cat && key && backToCandidate) this.cands.set(origin, { signed: cat.signed, body: cat.body, signer: key, via: "", at: this.now, warning: false });
+    if (cat && key && backToCandidate) this.cands.set(origin, { signed: cat.signed, body: cat.body, signer: key, via: "", vias: [], at: this.now, warning: false });
     this.saveDir();
     this.applyMirrors(origin);
     this.deps.onServersChanged?.();
@@ -577,7 +605,7 @@ export class Mesh {
   /** 후보에게 코드를 답할 수 있는지 묻는다. 내가 낸 코드가 없으면 물을 이유가 없다. */
   private challenge(origin: string): void {
     const c = this.cands.get(origin);
-    if (!c || c.warning || !this.verify.hasManaged) return;
+    if (!c || !this.verify.hasManaged) return; // 틀렸어도 다시 묻는다 — 새 코드를 넣으면 맞을 수 있다
     const now = this.now;
     for (const [k, p] of this.pendingVerify) if (p.expires <= now) this.pendingVerify.delete(k);
     if ([...this.pendingVerify.values()].some((p) => p.origin === origin)) return;
@@ -594,8 +622,15 @@ export class Mesh {
     if (ttl > 0) this.flood({ event: e.event, m, ttl }, from);
   }
 
-  private onVerifyChallenge(e: { event: string; [k: string]: unknown }, from: MeshLink): void {
+  /** 인증 질문·답을 꺼낸다(서명 밖 필드 제거, 크기 상한). */
+  private verifyMessage(e: { [k: string]: unknown }): unknown | null {
     const m = this.sanitize(e.m);
+    if (m === null) return null;
+    return Buffer.byteLength(JSON.stringify(m)) > VERIFY_MAX_BYTES ? null : m;
+  }
+
+  private onVerifyChallenge(e: { event: string; [k: string]: unknown }, from: MeshLink): void {
+    const m = this.verifyMessage(e);
     if (m === null) return;
     const b = openMesh<VChalBody>("vchal", m);
     const signer = (m as Signed).signer;
@@ -609,18 +644,18 @@ export class Mesh {
     if (!held) return; // 코드를 준 서버의 질문에만 답한다
     const sealed = sealVerifyAnswer(held, { verifierId: b.verifier, proverId: self.spaceId, proverKey: self.keys.publicKeyB64, challenge: b.challenge });
     const body: VRespBody = { verifier: b.verifier, prover: self.spaceId, cid: held.cid, challenge: b.challenge, sealed, ts: this.now };
-    this.firstSeen("v", `vresp:${b.challenge}`);
+    this.firstSeen("v", `vresp:${b.challenge}:${self.keys.publicKeyB64}`);
     this.flood({ event: "v_resp", m: signMesh<VRespBody>("vresp", body, self.keys), ttl: RELAY_TTL });
   }
 
   private onVerifyResponse(e: { event: string; [k: string]: unknown }, from: MeshLink): void {
-    const m = this.sanitize(e.m);
+    const m = this.verifyMessage(e);
     if (m === null) return;
     const b = openMesh<VRespBody>("vresp", m);
     const signer = (m as Signed).signer;
     if (!b || typeof b.verifier !== "string" || typeof b.prover !== "string" || typeof b.cid !== "string" || typeof b.challenge !== "string" || b.challenge.length > 128 || !b.sealed || typeof b.sealed !== "object") return;
     if (this.deps.originOf && this.deps.originOf(signer) !== b.prover) return;
-    if (!this.firstSeen("v", `vresp:${b.challenge}`)) return;
+    if (!this.firstSeen("v", `vresp:${b.challenge}:${signer}`)) return; // 서명자별 — 다른 서버의 가짜 답이 진짜 답을 태우지 못하게
     if (b.verifier !== this.deps.self().spaceId) return this.forwardVerify(e, m, from);
     const pending = this.pendingVerify.get(b.challenge);
     if (!pending || pending.origin !== b.prover || pending.expires <= this.now) return;
@@ -631,8 +666,8 @@ export class Mesh {
     const ok = !!issued && (!issued.boundTo || issued.boundTo === b.prover)
       && openVerifyAnswer(issued, { verifierId: b.verifier, proverId: b.prover, proverKey: signer, challenge: b.challenge }, b.sealed);
     if (!ok) {
+      if (!cand.warning) this.deps.log("mesh_verify_failed", { origin: b.prover });
       cand.warning = true;
-      this.deps.log("mesh_verify_failed", { origin: b.prover });
       return;
     }
     this.verify.bind(b.cid, b.prover);
@@ -654,11 +689,11 @@ export class Mesh {
   }
 
   /** 내 백업의 최고 번호를 망에 알린다(바뀌었을 때만, 간격을 지켜서). */
-  setBackupHead(index: number, hash: string): void {
+  setBackupHead(index: number, hash: string, store = ""): void {
     const self = this.deps.self();
     const old = this.backupHeads[self.spaceId];
-    if (old && old.body.index >= index) return;
-    this.rememberHead(signMesh<BHeadBody>("bhead", { origin: self.spaceId, index, hash, ts: this.now }, self.keys));
+    if (old && old.body.store === store && old.body.index >= index) return;
+    this.rememberHead(signMesh<BHeadBody>("bhead", { origin: self.spaceId, index, hash, ts: this.now, store }, self.keys));
     this.beaconDirty = true;
     this.flushBeacon();
   }
@@ -687,10 +722,10 @@ export class Mesh {
     if (!h) return;
     const b = openMesh<BHeadBody>("bhead", h);
     if (!b || typeof b.origin !== "string" || !SPACE_ID_RE.test(b.origin) || !Number.isSafeInteger(b.index) || b.index < 0
-      || typeof b.hash !== "string" || !/^[0-9a-f]{64}$/.test(b.hash) || typeof b.ts !== "number" || b.ts > this.now + BEACON_FUTURE_MS) return;
+      || typeof b.hash !== "string" || !/^[0-9a-f]{64}$/.test(b.hash) || typeof b.ts !== "number" || b.ts > this.now + BEACON_FUTURE_MS || typeof b.store !== "string" || b.store.length > 64) return;
     if (!this.accepted[b.origin] || h.signer !== this.pins[b.origin]) return; // 인정한 서버가 직접 서명한 것만 — 이웃이 숫자를 부풀릴 수 없다
     const old = this.backupHeads[b.origin];
-    if (old && old.body.index >= b.index) return;
+    if (old && (old.body.store === b.store ? old.body.index >= b.index : old.body.ts >= b.ts)) return; // 저장소를 바꾸면 번호가 다시 시작한다
     this.rememberHead(h);
     this.flood({ event: "bhead", h }, from);
   }
@@ -707,7 +742,7 @@ export class Mesh {
       const r = await l.ch.request({ op: "l_backup_head", origin: rec.origin });
       const h = cleanSigned<BHeadBody>(r?.head);
       const b = h ? openMesh<BHeadBody>("bhead", h, rec.hubKey) : null;
-      if (!b || b.origin !== rec.origin || !Number.isSafeInteger(b.index) || b.index <= rec.index || (rec.warned ?? -1) >= b.index) continue;
+      if (!b || b.origin !== rec.origin || !Number.isSafeInteger(b.index) || b.store !== (rec.store ?? "") || b.index <= rec.index || (rec.warned ?? -1) >= b.index) continue;
       rec.warned = b.index;
       writeFileAtomic(path.join(this.deps.dir, "restored.json"), JSON.stringify(this.restored));
       this.deps.log("storage_restore_behind_mesh", { origin: rec.origin, restoredIndex: rec.index, knownIndex: b.index });
@@ -758,7 +793,7 @@ export class Mesh {
     if (this.deps.originOf && this.deps.originOf(info.serverKey) !== info.spaceId) {
       this.deps.log("mesh_reject_origin_mismatch", { spaceId: info.spaceId });
       ch.close();
-      return { info, ch, strikes: 0, recTimes: [], otherTimes: [] };
+      return { info, ch, strikes: 0, recTimes: [], otherTimes: [], verifyTimes: [], attachedAt: this.now };
     }
     if (this.pins[info.spaceId] && this.pins[info.spaceId] !== info.serverKey) {
       this.deps.log("mesh_key_conflict_direct_wins", { spaceId: info.spaceId });
@@ -771,7 +806,7 @@ export class Mesh {
     }
     this.cands.delete(info.spaceId);
     this.rejected.delete(info.spaceId);
-    const l: MeshLink = { info, ch, strikes: 0, recTimes: [], otherTimes: [] };
+    const l: MeshLink = { info, ch, strikes: 0, recTimes: [], otherTimes: [], verifyTimes: [], attachedAt: this.now };
     if (this.deps.policy?.blocked(info.spaceId)) {
       this.deps.log("mesh_blocked_link", { spaceId: info.spaceId });
       ch.close();
@@ -781,7 +816,12 @@ export class Mesh {
     ch.onClose(() => {
       this.links.delete(l);
       if ([...this.links].some((x) => x.info.spaceId === info.spaceId)) return;
-      for (const [o, c] of this.cands) if (c.via === info.spaceId) this.cands.delete(o);
+      for (const [o, c] of this.cands) {
+        if (!c.vias.includes(info.spaceId)) continue;
+        c.vias = c.vias.filter((v) => v !== info.spaceId);
+        if (c.vias.length === 0) this.cands.delete(o);
+        else if (c.via === info.spaceId) c.via = c.vias[0];
+      }
     });
     ch.setHandlers({
       onRequest: (req, reply) => this.onRequest(l, req, reply),
@@ -886,10 +926,15 @@ export class Mesh {
   }
 
   private onEvent(l: MeshLink, e: { event: string; [k: string]: unknown }): void {
-    if (e.event !== "rec") {
+    if (e.event === "v_chal" || e.event === "v_resp") {
+      const now = this.now;
+      l.verifyTimes = l.verifyTimes.filter((t) => now - t < 1000);
+      if (l.verifyTimes.length >= VERIFY_PER_SECOND) { this.deps.log("mesh_drop_verify_rate", { spaceId: l.info.spaceId }); return; }
+      l.verifyTimes.push(now);
+    } else if (e.event !== "rec") {
       const now = this.now;
       l.otherTimes = l.otherTimes.filter((t) => now - t < 1000);
-      if (l.otherTimes.length >= OTHER_PER_SECOND) { this.deps.log("mesh_drop_other_rate", { spaceId: l.info.spaceId }); return; }
+      if (l.otherTimes.length >= (now - l.attachedAt < ATTACH_WINDOW_MS ? ATTACH_PER_SECOND : OTHER_PER_SECOND)) { this.deps.log("mesh_drop_other_rate", { spaceId: l.info.spaceId }); return; }
       l.otherTimes.push(now);
     }
     if (e.event === "cat") return this.onCatalog(e.c, l);
@@ -946,8 +991,14 @@ export class Mesh {
     return this.cats.get(id)?.body.spaceName ?? id.slice(0, 16);
   }
 
-  private firstFork(key: string): boolean {
+  private firstFork(origin: string, ch: string, n: number): boolean {
+    const key = `${origin}/${ch}/${n}`;
     if (this.forksSeen.has(key)) return false;
+    const now = this.now;
+    const times = (this.forkTimes.get(origin) ?? []).filter((t) => now - t < FORK_ALERT_WINDOW_MS);
+    if (times.length >= FORK_ALERTS_PER_WINDOW) { this.forkTimes.set(origin, times); return false; }
+    times.push(now);
+    this.forkTimes.set(origin, times);
     this.forksSeen.add(key);
     if (this.forksSeen.size > MAX_FORKS_SEEN) this.forksSeen.delete(this.forksSeen.values().next().value as string);
     return true;
@@ -956,11 +1007,11 @@ export class Mesh {
   /** 같은 번호의 다른 내용을 내가 직접 발견했다: 알리고, 내게 준 이웃에게 증거와 함께 한 번 전한다. */
   private onFork(other: Signed<RecordBody>, from: MeshLink, tagIn: unknown): void {
     const b = other.body;
-    if (!this.firstFork(`${b.origin}/${b.ch}`)) return;
+    if (!this.firstFork(b.origin, b.ch, b.n)) return;
     const otherVia = typeof tagIn === "string" && SPACE_ID_RE.test(tagIn) ? tagIn : from.info.spaceId;
     const mine = this.recordAt(b.origin, b.ch, b.n) ?? this.recordAt(b.origin, b.ch, b.n - 1);
     const mineVia = mine?.rf ?? "";
-    this.deps.log("mesh_fork_detected", { origin: b.origin, originName: this.nameOf(b.origin), ch: b.ch, n: b.n, mineVia: mineVia ? this.nameOf(mineVia) : "", otherVia: this.nameOf(otherVia) });
+    this.deps.log("mesh_fork_detected", { origin: b.origin, originName: this.nameOf(b.origin), ch: b.ch, n: b.n, mineVia: mineVia ? this.nameOf(mineVia) : "", otherVia: this.nameOf(from.info.spaceId) }); // 화면에는 검증된 이웃만(태그는 상대의 주장)
     if (!mine) return;
     for (const l of this.links) {
       if (l.info.spaceId === mine.rf && mine.rf !== this.deps.self().spaceId) { l.ch.event({ event: "fork", a: mine.signed, b: other, tagA: mine.rf, tagB: otherVia }); break; }
@@ -981,7 +1032,7 @@ export class Mesh {
     const sameNumber = ab.n === bb.n && ha !== hb;
     const brokenLink = (bb.n === ab.n + 1 && bb.prev !== ha) || (ab.n === bb.n + 1 && ab.prev !== hb);
     if (!sameNumber && !brokenLink) return;
-    if (!this.firstFork(`${ab.origin}/${ab.ch}`)) return;
+    if (!this.firstFork(ab.origin, ab.ch, Math.min(ab.n, bb.n))) return;
     if (ab.origin === self.spaceId) {
       const c = this.chain(ab.origin, ab.ch);
       const mineA = c?.hashes.get(ab.n), mineB = c?.hashes.get(bb.n);

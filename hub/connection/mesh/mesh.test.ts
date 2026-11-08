@@ -153,11 +153,13 @@ test("pull_reply_fits_frame: 긴 기록이 많아도 당기기 응답 프레임 
 
 
 test("mesh_other_events_over_budget_dropped: 한 연결의 기록 외 이벤트는 초당 상한까지만, 연결은 유지", async () => {
-  const c = node("씨", "spC");
+  let t = Date.now();
+  const c = node("씨", "spC", { now: () => t });
   const [x, y] = LinkChannel.memoryPair();
   const atk = generateSigningKeys();
   registerKey("spX", atk.publicKeyB64);
   c.mesh.attach({ spaceId: "spX", spaceName: "엑스", serverKey: atk.publicKeyB64 }, y);
+  t += 6000; // 연결 직후 구간을 지난 뒤
   for (let i = 0; i < 150; i++) x.event({ event: "zz", i });
   await until(() => c.logs.includes("mesh_drop_other_rate"));
   assert.equal(y.isClosed, false);
@@ -189,7 +191,7 @@ test("beacon_unsigned_or_wrong_key_ignored: 이웃이 숫자를 부풀릴 수 �
   const atk = generateSigningKeys();
   registerKey("spX", atk.publicKeyB64);
   c.mesh.attach({ spaceId: "spX", spaceName: "엑스", serverKey: atk.publicKeyB64 }, y);
-  const body = { origin: "spA", index: 999, hash: HASH, ts: Date.now() };
+  const body = { origin: "spA", index: 999, hash: HASH, ts: Date.now(), store: "" };
   x.event({ event: "bhead", h: signMesh("bhead", body, atk) });
   x.event({ event: "bhead", h: { body: { ...body, k: "bhead" }, signer: a.keys.publicKeyB64, sig: "AAAA" } });
   await settle();
@@ -204,7 +206,7 @@ test("beacon_only_for_accepted_servers: 인정하지 않은 서버의 보고는 
   c.mesh.attach({ spaceId: "spX", spaceName: "엑스", serverKey: atk.publicKeyB64 }, y);
   const other = generateSigningKeys();
   registerKey("spFake", other.publicKeyB64);
-  x.event({ event: "bhead", h: signMesh("bhead", { origin: "spFake", index: 1, hash: HASH, ts: Date.now() }, other) });
+  x.event({ event: "bhead", h: signMesh("bhead", { origin: "spFake", index: 1, hash: HASH, ts: Date.now(), store: "" }, other) });
   await settle();
   assert.equal(c.mesh.backupHeadOf("spFake"), null);
 });
@@ -214,7 +216,7 @@ test("beacon_future_ts_or_bad_index_ignored: 미래 시각·잘못된 번호는 
   connect(a, c);
   await until(() => c.mesh.servers().some((s) => s.spaceId === "spA"));
   for (const over of [{ ts: Date.now() + 3_600_000 }, { index: -1 }, { index: 1.5 }, { hash: "짧음" }]) {
-    a.mesh.sendRawBeaconForTest({ origin: "spA", index: 7, hash: HASH, ts: Date.now(), ...over });
+    a.mesh.sendRawBeaconForTest({ origin: "spA", index: 7, hash: HASH, ts: Date.now(), store: "", ...over });
   }
   await settle();
   assert.equal(c.mesh.backupHeadOf("spA"), null);
@@ -239,7 +241,7 @@ test("beacon_has_no_channel_or_address_info: 보고에는 번호·해시·시각
   await until(() => c.mesh.servers().some((s) => s.spaceId === "spA"));
   a.mesh.setBackupHead(1, HASH);
   await until(() => frames.length > 0);
-  assert.deepEqual(Object.keys(frames[0].h.body).sort(), ["hash", "index", "k", "origin", "ts"]);
+  assert.deepEqual(Object.keys(frames[0].h.body).sort(), ["hash", "index", "k", "origin", "store", "ts"]);
 });
 
 test("rollback_of_head_and_fragments_detected_via_peer: 저장소를 8번으로 되돌려도 이웃이 10번을 기억하면 경고", async () => {
@@ -278,6 +280,52 @@ test("peer_withholding_still_uses_highest_from_others: 한 이웃이 숨겨도 �
   x.setHandlers({ onRequest: (_r, reply) => reply({ ok: true, head: null, heads: [], records: [] }), onEvent: () => {} });
   y.mesh.attach({ spaceId: "spL", spaceName: "거짓", serverKey: liar.publicKeyB64 }, yEnd);
   y.mesh.addRestored({ origin: "spA", hubKey: a.keys.publicKeyB64, index: 8 });
+  connect(y, b);
+  await until(() => y.logs.includes("storage_restore_behind_mesh"));
+});
+
+
+test("attach_burst_not_dropped: 연결 직후 묶음 전송은 이벤트 예산에 걸리지 않는다", async () => {
+  const c = node("씨", "spC");
+  const [x, y] = LinkChannel.memoryPair();
+  const atk = generateSigningKeys();
+  registerKey("spX", atk.publicKeyB64);
+  c.mesh.attach({ spaceId: "spX", spaceName: "엑스", serverKey: atk.publicKeyB64 }, y);
+  for (let i = 0; i < 150; i++) x.event({ event: "zz", i });
+  await settle();
+  assert.equal(c.logs.includes("mesh_drop_other_rate"), false);
+});
+
+test("beacon_new_storage_replaces_old: 저장소를 바꿔 번호가 0부터 시작해도 멈추지 않는다", async () => {
+  const a = node("에이", "spA", beaconFast), c = node("씨", "spC", beaconFast);
+  connect(a, c);
+  await until(() => c.mesh.servers().some((s) => s.spaceId === "spA"));
+  a.mesh.setBackupHead(10, HASH, "store1");
+  await until(() => c.mesh.backupHeadOf("spA") === 10);
+  await settle(5);
+  a.mesh.setBackupHead(0, HASH, "store2");
+  await until(() => c.mesh.backupHeadOf("spA") === 0);
+});
+
+test("restored_other_storage_no_warning: 다른 저장소의 번호와는 비교하지 않는다", async () => {
+  const a = node("에이", "spA", beaconFast), b = node("비", "spB", beaconFast), y = node("와이", "spY", beaconFast);
+  connect(a, b);
+  await until(() => b.mesh.servers().some((s) => s.spaceId === "spA"));
+  a.mesh.setBackupHead(10, HASH, "store1");
+  await until(() => b.mesh.backupHeadOf("spA") === 10);
+  y.mesh.addRestored({ origin: "spA", hubKey: a.keys.publicKeyB64, index: 2, store: "store2" });
+  connect(y, b);
+  await settle(100);
+  assert.equal(y.logs.includes("storage_restore_behind_mesh"), false);
+});
+
+test("restored_same_storage_warns: 같은 저장소면 경고한다", async () => {
+  const a = node("에이", "spA", beaconFast), b = node("비", "spB", beaconFast), y = node("와이", "spY", beaconFast);
+  connect(a, b);
+  await until(() => b.mesh.servers().some((s) => s.spaceId === "spA"));
+  a.mesh.setBackupHead(10, HASH, "store1");
+  await until(() => b.mesh.backupHeadOf("spA") === 10);
+  y.mesh.addRestored({ origin: "spA", hubKey: a.keys.publicKeyB64, index: 2, store: "store1" });
   connect(y, b);
   await until(() => y.logs.includes("storage_restore_behind_mesh"));
 });

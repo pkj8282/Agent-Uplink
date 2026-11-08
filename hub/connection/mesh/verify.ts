@@ -136,7 +136,7 @@ export class VerifyStore {
   }
 
   heldFor(issuer: string): Held | undefined {
-    return this.held.find((h) => h.issuer === issuer);
+    return [...this.held].reverse().find((h) => h.issuer === issuer); // 가장 최근에 받은 코드
   }
 
   findManaged(cid: string): Managed | undefined {

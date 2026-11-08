@@ -238,3 +238,86 @@ test("verify_secrets_stay_out_of_logs: 코드와 비밀은 기록에 남지 않�
   for (const n of [a, c]) assert.equal(n.logs.some((l) => l.includes(d.enc) || l.includes(d.check)), false);
   for (const row of [...c.mesh.listVerifyCodes().managed, ...a.mesh.listVerifyCodes().held]) assert.equal(JSON.stringify(row).includes(d.enc), false);
 });
+
+
+// ── 재공격 Minor ──
+
+test("fake_answer_does_not_burn_real_answer: 이웃이 가짜 답을 먼저 보내도 진짜 코드 답은 살아 있다", async () => {
+  const { a, c } = line();
+  await until(() => !!candidate(c, "spA"));
+  const keys = generateSigningKeys();
+  registerKey("spM", keys.publicKeyB64);
+  const [x, y] = LinkChannel.memoryPair();
+  x.setHandlers({
+    onRequest: (_r, reply) => reply({ ok: true, heads: [], records: [] }),
+    onEvent: (e: any) => {
+      if (e.event !== "v_chal") return;
+      x.event({ event: "v_resp", ttl: 1, m: signMesh("vresp", { verifier: "spC", prover: "spM", cid: "x", challenge: e.m.body.challenge, sealed: { nonce: "AAAA", ct: "AAAA" }, ts: Date.now() }, keys) });
+    },
+  });
+  c.mesh.attach({ spaceId: "spM", spaceName: "엠", serverKey: keys.publicKeyB64 }, y);
+  a.mesh.registerVerifyCode(c.mesh.issueVerifyCode("에이용"));
+  await until(() => known(c, "spA"));
+});
+
+test("reissued_code_recovers_after_wrong_answer: 틀린 답 뒤에 새 코드를 넣으면 자동 인정된다", async () => {
+  const { a, c } = line();
+  await until(() => !!candidate(c, "spA"));
+  const good = decodeVerifyCode(c.mesh.issueVerifyCode("옛 코드"))!;
+  a.mesh.registerVerifyCode(encodeVerifyCode({ ...good, ...newVerifySecrets() })); // 잘못된 값
+  await until(() => candidate(c, "spA")?.warning === true);
+  a.mesh.registerVerifyCode(c.mesh.issueVerifyCode("새 코드"));
+  await until(() => known(c, "spA"));
+});
+
+test("full_candidates_evict_busiest_link: 후보가 가득 차도 다른 연결이 알린 서버는 들어온다", async () => {
+  const d = node("디", "spD", fast, manual);
+  for (let n = 1; n <= 4; n++) {
+    const m = intruder(d, `spM${n}`);
+    for (let i = 0; i < 16; i++) m.send({ event: "cat", c: fakeCat(`f${n}x${i}`).c });
+  }
+  await until(() => d.mesh.candidates().length === 64);
+  const honest = intruder(d, "spH");
+  honest.send({ event: "cat", c: fakeCat("real1").c });
+  await until(() => !!candidate(d, "real1"));
+  assert.ok(d.mesh.candidates().length <= 64);
+});
+
+test("candidate_survives_while_another_link_knows_it: 먼저 알린 연결이 끊겨도 다른 연결이 알고 있으면 후보로 남는다", async () => {
+  const d = node("디", "spD", {}, manual);
+  const m1 = intruder(d, "spM1"), m2 = intruder(d, "spM2");
+  const f = fakeCat("real1");
+  m1.send({ event: "cat", c: f.c });
+  await until(() => !!candidate(d, "real1"));
+  m2.send({ event: "cat", c: f.c });
+  await settle();
+  m1.close();
+  await settle();
+  assert.equal(candidate(d, "real1")?.via, "spM2");
+  m2.close();
+  await until(() => !candidate(d, "real1"));
+});
+
+test("verify_event_size_limit: 인증 질문·답은 작은 크기만 전달한다", async () => {
+  const d = node("디", "spD", {}, manual), obs = node("관찰", "spO", {}, manual);
+  const out: any[] = [];
+  connect(d, obs, (from, o) => { if (from === "a") out.push(o); return true; });
+  const m = intruder(d);
+  const k = generateSigningKeys();
+  registerKey("spBig", k.publicKeyB64);
+  m.send({ event: "v_chal", ttl: 5, m: signMesh("vchal", { verifier: "spBig", prover: "spZ", challenge: "c1", ts: Date.now(), blob: "x".repeat(400_000) }, k) });
+  await settle();
+  assert.equal(out.some((o) => o.event === "v_chal"), false);
+});
+
+test("verify_flood_keeps_other_events_flowing: 인증 질문이 쏟아져도 다른 이벤트 예산을 먹지 않는다", async () => {
+  let t = Date.now();
+  const d = node("디", "spD", { now: () => t }, manual);
+  const m = intruder(d);
+  m.send({ event: "cat", c: signMesh("cat", { origin: "spM", spaceName: "엠", ver: 1, channels: [] }, m.keys) });
+  await until(() => known(d, "spM"));
+  t += 6000; // 연결 직후 구간을 지난다
+  for (let i = 0; i < 150; i++) m.send({ event: "v_chal", m: {} });
+  m.send({ event: "cat", c: signMesh("cat", { origin: "spM", spaceName: "엠2", ver: 2, channels: [] }, m.keys) });
+  await until(() => d.mesh.servers().some((s) => s.spaceName === "엠2"));
+});

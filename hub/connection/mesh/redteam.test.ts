@@ -337,3 +337,35 @@ test("origin_with_pruned_hash_reports_unknown: 해시가 없으면 확인 불가
   send({ event: "fork", a: signMesh("rec", body, a.keys), b: signMesh("rec", { ...body, text: "2" }, a.keys), tagA: "spX", tagB: "spY" });
   await until(() => a.logs.includes("mesh_fork_own_unknown"));
 });
+
+
+test("new_fork_visible_after_old_one_and_rate_limited: 다른 번호의 갈라짐은 다시 알리되, 서버당 빈도는 제한한다", async () => {
+  const d = node("디", "spD");
+  const m = controlled("spM");
+  const send = m.attach(d);
+  send(m.cat());
+  await until(() => d.mesh.servers().some((s) => s.spaceId === "spM"));
+  let prev = "";
+  for (let n = 1; n <= 7; n++) { const r = m.rec(`정상${n}`, n, prev); send({ event: "rec", r }); prev = recordHash(r.body); }
+  await until(() => d.channels.recent(d.mesh.mirrorId("spM", "ch"), 10).length === 7);
+  send({ event: "rec", r: m.rec("갈래", 1) });
+  send({ event: "rec", r: m.rec("갈래", 2, "x".repeat(64)) });
+  await until(() => d.logs.filter((l) => l === "mesh_fork_detected").length === 2);
+  for (let n = 3; n <= 7; n++) send({ event: "rec", r: m.rec("갈래", n, "x".repeat(64)) });
+  await settle();
+  assert.equal(d.logs.filter((l) => l === "mesh_fork_detected").length, 5);
+});
+
+test("fork_log_shows_verified_neighbor: 경고의 전달자는 검증된 이웃이고, 상대가 주장한 태그를 믿지 않는다", async () => {
+  const details: any[] = [];
+  const d = node("디", "spD", { log: (code: string, detail?: object) => { if (code === "mesh_fork_detected") details.push(detail); } });
+  const m = controlled("spM"), other = controlled("spH");
+  const send = m.attach(d), sendH = other.attach(d);
+  send(m.cat());
+  await until(() => d.mesh.servers().some((s) => s.spaceId === "spM"));
+  send({ event: "rec", r: m.rec("내용1") });
+  await until(() => d.channels.recent(d.mesh.mirrorId("spM", "ch"), 10).length === 1);
+  sendH({ event: "rec", r: m.rec("내용2"), tag: { from: "innocentServer" } });
+  await until(() => details.length === 1);
+  assert.equal(details[0].otherVia, "spH");
+});

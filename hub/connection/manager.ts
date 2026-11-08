@@ -20,7 +20,7 @@ import { ConnectionStore, type JoinedSpace, type ServerConfig } from "./store.js
 import { ConnListener, type ConnPeer } from "./listener.js";
 import { ConnClient, joinSpace } from "./client.js";
 import { CommsStore } from "./comms.js";
-import { Uploader, type StorageConfig } from "./storage/uploader.js";
+import { storageIdOf, Uploader, type StorageConfig } from "./storage/uploader.js";
 import { GitHubBackend } from "./storage/github.js";
 import { SupabaseBackend } from "./storage/supabase.js";
 import { Lifecycle } from "./lifecycle.js";
@@ -122,7 +122,7 @@ export class ConnectionManager implements ConnStatusSource {
       spaceId: () => this.store.serverConfig()?.spaceId ?? null,
       profile: () => this.store.serverConfig()?.profile ?? DEFAULT_PROFILE,
       keys: () => this.store.identity(),
-      onHead: (index, hash) => this.mesh?.setBackupHead(index, hash),
+      onHead: (index, hash, store) => this.mesh?.setBackupHead(index, hash, store),
       // 방식 3: 망 경우에 따라 내 채널을 올릴지·거울도 올릴지(메인·지정 서버)
       channels: () => {
         const plan = this.gov?.uploadPlan() ?? { own: true, mirrors: [] };
@@ -192,7 +192,7 @@ export class ConnectionManager implements ConnStatusSource {
     this.log("storage_restored", { channels: r.channels.length, messages, breaks: r.breaks.length, bad: r.bad.length });
     if (r.hubKey && r.lastIndex >= 0) {
       // 망의 다른 서버가 더 높은 번호를 기억하면, 저장소가 되돌려졌거나 최근 조각이 사라진 것 — 이어지는 대로 확인한다
-      const rec = { origin: meshIdOf(r.hubKey), hubKey: r.hubKey, index: r.lastIndex };
+      const rec = { origin: meshIdOf(r.hubKey), hubKey: r.hubKey, index: r.lastIndex, store: storageIdOf(cfg) };
       const m = this.ensureMesh();
       if (m) m.addRestored(rec);
       else noteRestored(this.meshDir(), rec);
