@@ -106,3 +106,15 @@ test("parse_url: https://<ref>.supabase.co 만", () => {
   // 시험용 http 주소는 allowInsecureForTest일 때만
   assert.throws(() => new SupabaseBackend({ url: "http://127.0.0.1:1", key: "k", bucket: "b" }));
 });
+
+
+test("overwrite_replaces_object: 있어도 x-upsert로 덮어쓴다", async () => {
+  const f = await fakeSupabase();
+  try {
+    const b = make(f.url);
+    await b.check();
+    await b.overwrite("a/head.json", Buffer.from("1"));
+    await b.overwrite("a/head.json", Buffer.from("22"));
+    assert.equal((await b.get("a/head.json"))!.toString(), "22");
+  } finally { await f.close(); }
+});

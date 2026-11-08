@@ -1,6 +1,7 @@
 // 백업 업로더(v3.0 3단계): Connection Communications 채널 로그에서 아직 안 올린 메시지를 모아
 // 암호화·서명 조각(shared/archive.ts)으로 저장소에 올린다. 성공한 뒤에만 상태를 바꾼다(실패하면 다음에 같은 것을 다시).
 // 파일(connection/storage/): config.json(종류·저장소·주기), secrets.json(토큰·공간 열쇠 — 비밀 파일), state.json(채널별 마지막 seq·사슬).
+import { signEnvelope } from "../../../shared/signed.js";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
@@ -27,7 +28,7 @@ export interface StorageConfig {
 
 /** token = 저장소 자격 증명(불투명 문자열): GitHub PAT 또는 Supabase secret key. */
 interface Secrets { token?: string; spaceKey?: string }
-interface State { lastSeq: Record<string, number>; nextIndex: number; lastHash: string; lastUploadAt: number | null; lastError: string | null; lastPruneAt?: number | null; /** 이 진행 기록이 가리키는 저장소(종류·주소). */ target?: string }
+interface State { lastIndex?: number; headPending?: boolean; lastSeq: Record<string, number>; nextIndex: number; lastHash: string; lastUploadAt: number | null; lastError: string | null; lastPruneAt?: number | null; /** 이 진행 기록이 가리키는 저장소(종류·주소). */ target?: string }
 
 export interface UploaderDeps {
   dir: string;
@@ -37,6 +38,8 @@ export interface UploaderDeps {
   channels: () => { id: string; logFile: string; name?: string }[];
   makeBackend: (cfg: StorageConfig, token: string) => StorageBackend;
   log: (code: string, detail?: object) => void;
+  /** 새 조각을 올린 뒤(망에 최고 번호를 알린다). */
+  onHead?: (index: number, hash: string) => void;
   /** 로컬 정리: 채널 로그에서 keep이 false인 메시지를 지우고 개수를 돌려준다. */
   prune?: (channelId: string, keep: (m: Message) => boolean) => number;
   now?: () => number;
@@ -45,6 +48,8 @@ export interface UploaderDeps {
 export interface VerifyResult { fragments: number; messages: number; breaks: number[]; missing: number[]; bad: { path: string; code: string }[] }
 
 const STOP_WAIT_MS = 5000;
+/** 저장소에서 자리를 뺏긴 번호를 한 번 올릴 때 건너뛰는 최대 횟수. */
+const MAX_SQUATS = 20;
 const EPOCH = 1; // 열쇠 세대: 4단계(방식 1)에서 올린다
 
 function readJson<T>(file: string, fallback: T): T {
@@ -85,7 +90,7 @@ export class Uploader {
 
   private state(): State {
     const s = readJson<Partial<State>>(this.file("state.json"), {});
-    return { lastSeq: s.lastSeq ?? {}, nextIndex: s.nextIndex ?? 0, lastHash: s.lastHash ?? "", lastUploadAt: s.lastUploadAt ?? null, lastError: s.lastError ?? null, lastPruneAt: s.lastPruneAt ?? null, ...(s.target !== undefined ? { target: s.target } : {}) };
+    return { ...(s.lastIndex !== undefined ? { lastIndex: s.lastIndex } : {}), ...(s.headPending ? { headPending: true } : {}), lastSeq: s.lastSeq ?? {}, nextIndex: s.nextIndex ?? 0, lastHash: s.lastHash ?? "", lastUploadAt: s.lastUploadAt ?? null, lastError: s.lastError ?? null, lastPruneAt: s.lastPruneAt ?? null, ...(s.target !== undefined ? { target: s.target } : {}) };
   }
 
   private saveState(s: State): void {
@@ -268,6 +273,7 @@ export class Uploader {
     let fragments = 0;
     let messages = 0;
     try {
+      let squats = 0;
       for (let guard = 0; guard < 10_000; guard++) {
         const chunk = Uploader.chunk(this.pending(st))[0];
         if (!chunk) break;
@@ -276,7 +282,7 @@ export class Uploader {
         const day = new Date(createdAt).toISOString().slice(0, 10);
         const p = `${this.root(spaceId)}/${day}/${String(index).padStart(8, "0")}.frag`;
         const f = encodeFragment({
-          header: { spaceId, hubKey: keys.publicKeyB64, profile: this.d.profile(), epoch: EPOCH, index, prevHash: st.lastHash, createdAt },
+          header: { spaceId, hubKey: keys.publicKeyB64, profile: this.d.profile(), epoch: EPOCH, index, prevHash: st.lastHash, createdAt, ...((st.lastIndex ?? index - 1) !== index - 1 ? { prevIndex: st.lastIndex ?? -1 } : {}) },
           body: { messages: chunk, channels: this.namesOf(chunk) },
           spaceKey,
           privateKeyPem: keys.privateKeyPem,
@@ -284,17 +290,29 @@ export class Uploader {
         try {
           await backend.put(p, f.bytes);
           Uploader.advance(st, chunk, f.hash);
+          st.lastIndex = index;
           fragments++;
           messages += chunk.length;
         } catch (e) {
           // 올라갔는데 응답만 잃은 경우: 저장소의 그 조각이 내 서명·사슬과 맞으면 이어받는다.
           const adopted = await this.adopt(backend, p, spaceKey, keys.publicKeyB64, st).catch(() => 0);
-          if (!adopted) throw e;
+          if (!adopted) {
+            // 다른 파일이 이 번호를 차지함: 올라가지 않았으니 다음 번호로(건너뛴 사실은 다음 조각 머리에 남는다)
+            if (e instanceof StorageError && e.code === "storage_bad_response" && squats < MAX_SQUATS && await backend.get(p).catch(() => null)) {
+              squats++;
+              st.nextIndex++;
+              this.saveState(st);
+              continue;
+            }
+            throw e;
+          }
+          st.lastIndex = index;
           fragments++;
           messages += adopted;
         }
         this.saveState(st);
       }
+      if (fragments > 0 || st.headPending) await this.writeHead(backend, spaceId, st, keys);
       st.lastError = null;
       if (fragments > 0) st.lastUploadAt = this.now(); // 실제로 올렸을 때만(빈 주기는 시각을 바꾸지 않음)
       this.saveState(st);
@@ -308,6 +326,20 @@ export class Uploader {
       this.d.log("storage_upload_failed", { code });
       throw e;
     }
+  }
+
+  /** 서명한 마지막 번호 파일을 덮어쓴다. 실패해도 올리기는 성공이고, 다음 주기에 다시 한다. */
+  private async writeHead(backend: StorageBackend, spaceId: string, st: State, keys: SigningKeys): Promise<void> {
+    const index = st.lastIndex ?? st.nextIndex - 1;
+    if (index < 0) return;
+    try {
+      await backend.overwrite(`${this.root(spaceId)}/head.json`, Buffer.from(signEnvelope({ k: "backup-head", spaceId, hubKey: keys.publicKeyB64, index, hash: st.lastHash }, keys.privateKeyPem, keys.publicKeyB64)));
+      st.headPending = false;
+    } catch {
+      st.headPending = true;
+      this.d.log("storage_head_failed", {});
+    }
+    this.d.onHead?.(index, st.lastHash);
   }
 
   /** 이어받은 조각의 메시지 수(맞지 않으면 0). */
@@ -328,7 +360,7 @@ export class Uploader {
     const spaceKey = Buffer.from(this.secrets().spaceKey!, "base64");
     const hubKey = this.d.keys().publicKeyB64;
     const root = this.root(spaceId);
-    const good: { index: number; prevHash: string; hash: string }[] = [];
+    const good: { index: number; prevHash: string; hash: string; prevIndex?: number }[] = [];
     const bad: { path: string; code: string }[] = [];
     let messages = 0;
     for (const day of await backend.list(root)) {
@@ -338,13 +370,15 @@ export class Uploader {
         if (!bytes) continue;
         const d = decodeFragment(bytes, { spaceKey, expectHubKey: hubKey });
         if (!d.ok) { bad.push({ path: p, code: d.code }); continue; }
-        good.push({ index: d.header.index, prevHash: d.header.prevHash, hash: d.hash });
+        good.push({ index: d.header.index, prevHash: d.header.prevHash, hash: d.hash, ...(d.header.prevIndex !== undefined ? { prevIndex: d.header.prevIndex } : {}) });
         messages += d.body.messages.length;
       }
     }
     const have = new Set(good.map((g) => g.index));
     const missing: number[] = [];
-    for (let i = 0; i < this.state().nextIndex; i++) if (!have.has(i)) missing.push(i);
+    const skipped = new Set<number>();
+    for (const g of good) if (g.prevIndex !== undefined) for (let i = g.prevIndex + 1; i < g.index; i++) skipped.add(i);
+    for (let i = 0; i < this.state().nextIndex; i++) if (!have.has(i) && !skipped.has(i)) missing.push(i);
     return { fragments: good.length, messages, breaks: checkChain(good).breaks, missing, bad };
   }
 

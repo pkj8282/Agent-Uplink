@@ -96,10 +96,18 @@ export class SupabaseBackend implements StorageBackend {
   }
 
   put(path: string, bytes: Buffer): Promise<void> {
+    return this.write(path, bytes, false);
+  }
+
+  overwrite(path: string, bytes: Buffer): Promise<void> {
+    return this.write(path, bytes, true);
+  }
+
+  private write(path: string, bytes: Buffer, upsert: boolean): Promise<void> {
     const run = async () => {
       if (!this.bucketReady) await this.check();
       const res = await this.req("POST", `/object/${encodeURIComponent(this.o.bucket)}/${this.enc(path)}`, {
-        headers: { "Content-Type": "application/octet-stream", "x-upsert": "false", "cache-control": "max-age=0" },
+        headers: { "Content-Type": "application/octet-stream", "x-upsert": upsert ? "true" : "false", "cache-control": "max-age=0" },
         body: new Uint8Array(bytes),
       });
       if (!res.ok) throw new StorageError("storage_bad_response"); // 이미 있음(덮어쓰지 않음) 포함

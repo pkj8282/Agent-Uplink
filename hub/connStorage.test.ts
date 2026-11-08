@@ -131,7 +131,7 @@ test("stop_uploads_last: 정지하면 마지막으로 한 번 올린다", async 
     await t.req("admin_conn_storage_set", { kind: "github", repo: "o/r", ghToken: TOKEN, intervalMin: 60 });
     await say(t.port, t.channelId, ["마지막"]);
     await t.hub.conn.stop();
-    assert.equal(g.files.size, 1);
+    assert.equal([...g.files.keys()].filter((k) => k.endsWith(".frag")).length, 1);
     t.c.close();
   } finally { t.hub.stop(); await g.close(); }
 });
@@ -157,7 +157,7 @@ test("supabase_set_upload_verify_flow: Supabase로 연결 → 지금 올리기 �
     await say(t.port, ch, ["수파베이스로"]);
     const up = await req("admin_conn_storage_upload_now");
     assert.deepEqual([up.ok, up.fragments, up.messages], [true, 1, 1]);
-    assert.equal(sb.objects.size, 1);
+    assert.equal([...sb.objects.keys()].filter((k) => k.endsWith(".frag")).length, 1);
     const v = await req("admin_conn_storage_verify");
     assert.deepEqual([v.fragments, v.messages, v.breaks, v.missing, v.bad], [1, 1, [], [], []]);
     const st = (await req("admin_conn_storage_status")).storage;

@@ -18,6 +18,8 @@ export class StorageError extends Error {
 export interface StorageBackend {
   /** 새 파일로 쓴다. 이미 있으면 덮어쓰지 않고 storage_bad_response. */
   put(path: string, bytes: Buffer): Promise<void>;
+  /** 있으면 바꾸고 없으면 새로 쓴다(마지막 번호 파일 전용 — 조각은 put만 쓴다). */
+  overwrite(path: string, bytes: Buffer): Promise<void>;
   /** 없으면 null. */
   get(path: string): Promise<Buffer | null>;
   /** 폴더 바로 아래 이름(파일·폴더). 폴더가 없으면 []. */
@@ -42,6 +44,11 @@ export class MemoryBackend implements StorageBackend {
   async put(path: string, bytes: Buffer): Promise<void> {
     this.takeFail();
     if (this.files.has(path)) throw new StorageError("storage_bad_response");
+    this.files.set(path, Buffer.from(bytes));
+  }
+
+  async overwrite(path: string, bytes: Buffer): Promise<void> {
+    this.takeFail();
     this.files.set(path, Buffer.from(bytes));
   }
 

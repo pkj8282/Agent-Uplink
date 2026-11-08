@@ -28,7 +28,7 @@ import { SpaceSync, type SpaceChannel, type SpaceDeps } from "./space1/sync.js";
 import type { StorageBackend } from "./storage/backend.js";
 import { parseRecoveryKey, restoreBackup, scanBackups, type BackupCandidate } from "./storage/restore.js";
 import { DEFAULT_PROFILE } from "../../shared/cryptoProfile.js";
-import { Mesh, meshIdOf, type MeshSelf } from "./mesh/mesh.js";
+import { Mesh, meshIdOf, noteRestored, type MeshSelf } from "./mesh/mesh.js";
 import { Governance, RELAY_WINDOW, type CaseChoice, type GovCommand } from "./mesh/governance.js";
 import { LinkDialer, joinLink, type LinkSelf } from "./mesh/link.js";
 import type { LinkRecord } from "./store.js";
@@ -119,6 +119,7 @@ export class ConnectionManager implements ConnStatusSource {
       spaceId: () => this.store.serverConfig()?.spaceId ?? null,
       profile: () => this.store.serverConfig()?.profile ?? DEFAULT_PROFILE,
       keys: () => this.store.identity(),
+      onHead: (index, hash) => this.mesh?.setBackupHead(index, hash),
       // 방식 3: 망 경우에 따라 내 채널을 올릴지·거울도 올릴지(메인·지정 서버)
       channels: () => {
         const plan = this.gov?.uploadPlan() ?? { own: true, mirrors: [] };
@@ -159,7 +160,7 @@ export class ConnectionManager implements ConnStatusSource {
 
   /** 백업 하나를 새 통신 서버로 되살린다. 되살린 메시지는 인박스로 보내지 않는다(지난 대화). */
   async restore(cfg: StorageConfig, token: string, recoveryKey: string, target: { spaceId: string; hubId: string }, serverName: string):
-    Promise<{ serverId: string; channelCount: number; messageCount: number; breaks: number[]; bad: { path: string; code: string }[] }> {
+    Promise<{ serverId: string; channelCount: number; messageCount: number; breaks: number[]; bad: { path: string; code: string }[]; head: "ok" | "behind" | "missing" }> {
     const key = this.restoreKey(recoveryKey);
     const name = validateName(serverName, "server", (s) => this.g(s, "restore", "serverName"));
     if (!name.ok) throw new Error("name_invalid");
@@ -186,7 +187,14 @@ export class ConnectionManager implements ConnStatusSource {
       }
     });
     this.log("storage_restored", { channels: r.channels.length, messages, breaks: r.breaks.length, bad: r.bad.length });
-    return { serverId, channelCount: r.channels.length, messageCount: messages, breaks: r.breaks, bad: r.bad };
+    if (r.hubKey && r.lastIndex >= 0) {
+      // 망의 다른 서버가 더 높은 번호를 기억하면, 저장소가 되돌려졌거나 최근 조각이 사라진 것 — 이어지는 대로 확인한다
+      const rec = { origin: meshIdOf(r.hubKey), hubKey: r.hubKey, index: r.lastIndex };
+      const m = this.ensureMesh();
+      if (m) m.addRestored(rec);
+      else noteRestored(this.meshDir(), rec);
+    }
+    return { serverId, channelCount: r.channels.length, messageCount: messages, breaks: r.breaks, bad: r.bad, head: r.head };
   }
   private lifecycle: Lifecycle | null = null;
   /** 방식 1 공간들(v3.0 4단계)과 동기화 타이머. */

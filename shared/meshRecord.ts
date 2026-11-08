@@ -5,7 +5,7 @@ import { MAX_STORED_TEXT_LENGTH } from "./protocol.js";
 import { canonical, openEnvelope, signEnvelope } from "./signed.js";
 import type { SigningKeys } from "./connCrypto.js";
 
-export type MeshKind = "rec" | "cat" | "cmd" | "relay" | "ack" | "case" | "coord" | "vchal" | "vresp";
+export type MeshKind = "rec" | "cat" | "cmd" | "relay" | "ack" | "case" | "coord" | "vchal" | "vresp" | "bhead";
 
 export interface Signed<T = Record<string, unknown>> {
   body: T & { k: MeshKind };

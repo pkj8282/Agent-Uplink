@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { generateSigningKeys, fromBase32 } from "../../../shared/connCrypto.js";
 import { decodeFragment } from "../../../shared/archive.js";
+import { openEnvelope } from "../../../shared/signed.js";
 import { tempDir } from "../../testing.js";
 import { MemoryBackend, StorageError } from "./backend.js";
 import { Uploader, type StorageConfig } from "./uploader.js";
@@ -55,7 +56,7 @@ test("uploads_only_new: 새 메시지만 올리고, 둘째 조각은 첫 조각 
   assert.deepEqual(await t.up.uploadNow(), { fragments: 0, messages: 0 });
   t.add("c2", "d"); t.add("c1", "e");
   assert.deepEqual(await t.up.uploadNow(), { fragments: 1, messages: 2 });
-  const frags = [...t.backend.files.values()].map((b) => decodeFragment(b, { spaceKey: Buffer.alloc(32) }));
+  const frags = [...t.backend.files.entries()].filter(([k]) => k.endsWith(".frag")).map(([, b]) => decodeFragment(b, { spaceKey: Buffer.alloc(32) }));
   assert.equal(frags.length, 2);
   const v = await t.up.verify();
   assert.deepEqual({ ...v }, { fragments: 2, messages: 5, breaks: [], missing: [], bad: [] });
@@ -176,7 +177,7 @@ test("paths_have_no_names: 저장 경로는 ID·날짜·번호뿐", async () => 
   await t.up.configure(cfg, TOKEN);
   t.add("c1", "기획 회의");
   await t.up.uploadNow();
-  for (const p of t.backend.files.keys()) assert.match(p, /^agent-uplink\/[0-9a-f-]{36}\/[0-9a-f]{16}\/\d{4}-\d{2}-\d{2}\/\d{8}\.frag$/);
+  for (const p of t.backend.files.keys()) assert.match(p, /^agent-uplink\/[0-9a-f-]{36}\/[0-9a-f]{16}\/(\d{4}-\d{2}-\d{2}\/\d{8}\.frag|head\.json)$/);
 });
 
 test("upload_time_only_when_uploaded: 올린 게 없으면 마지막 업로드 시각을 바꾸지 않는다(사용자 GUI 지적)", async () => {
@@ -289,4 +290,70 @@ test("fragment_carries_channel_names_encrypted: 조각 암호문 안에 든 채�
   const d = decodeFragment(bytes, { spaceKey: fromBase32(recoveryKey)! });
   assert.ok(d.ok);
   if (d.ok) assert.deepEqual(d.body.channels, [{ id: "c1", name: "비밀팀/c1방" }]);
+});
+
+
+const fragKeys = (be: MemoryBackend) => [...be.files.keys()].filter((k) => k.endsWith(".frag")).sort();
+
+function squat(be: MemoryBackend, from: string, index: number): void {
+  be.files.set(from.replace(/\d{8}\.frag$/, `${String(index).padStart(8, "0")}.frag`), Buffer.from("가짜 조각"));
+}
+
+test("squatted_index_is_skipped: 다음 번호를 다른 파일이 차지해도 건너뛰어 계속 올리고, 건너뛴 곳은 사슬 끊김이 아니다", async () => {
+  const be = new MemoryBackend();
+  const s = setup(undefined, undefined, be);
+  await s.up.configure(cfg, TOKEN);
+  s.add("c1", "첫째");
+  await s.up.uploadNow();
+  squat(be, fragKeys(be)[0], 1);
+  s.add("c1", "둘째");
+  await s.up.uploadNow();
+  assert.ok(fragKeys(be).some((k) => k.endsWith("00000002.frag")));
+  const v = await s.up.verify();
+  assert.deepEqual(v.breaks, []);
+  assert.deepEqual(v.missing, []);
+  assert.equal(v.messages, 2);
+});
+
+test("squat_limit: 너무 많이 막혀 있으면 오류로 멈춘다", async () => {
+  const be = new MemoryBackend();
+  const s = setup(undefined, undefined, be);
+  await s.up.configure(cfg, TOKEN);
+  s.add("c1", "첫째");
+  await s.up.uploadNow();
+  const first = fragKeys(be)[0];
+  for (let i = 1; i <= 25; i++) squat(be, first, i);
+  s.add("c1", "둘째");
+  await assert.rejects(s.up.uploadNow());
+});
+
+test("head_written_after_upload: 올릴 때마다 서명한 마지막 번호 파일을 덮어쓴다", async () => {
+  const be = new MemoryBackend();
+  const keys = generateSigningKeys();
+  const s = setup(undefined, keys, be);
+  await s.up.configure(cfg, TOKEN);
+  const heads = () => [...be.files.keys()].filter((k) => k.endsWith("/head.json"));
+  s.add("c1", "하나");
+  await s.up.uploadNow();
+  assert.equal(heads().length, 1);
+  s.add("c1", "둘");
+  await s.up.uploadNow();
+  const env = openEnvelope(be.files.get(heads()[0])!.toString("utf8"), keys.publicKeyB64);
+  assert.ok(env.ok);
+  assert.equal(env.ok && env.body.index, 1);
+});
+
+test("head_failure_does_not_fail_upload: 마지막 번호 파일 쓰기가 실패해도 올리기는 성공, 다음 주기에 다시", async () => {
+  const be = new MemoryBackend();
+  const s = setup(undefined, undefined, be);
+  await s.up.configure(cfg, TOKEN);
+  const orig = be.overwrite.bind(be);
+  let fail = true;
+  be.overwrite = (async (p: string, b: Buffer) => { if (fail) throw new StorageError("storage_unreachable"); return orig(p, b); }) as typeof be.overwrite;
+  s.add("c1", "하나");
+  await s.up.uploadNow();
+  assert.equal([...be.files.keys()].some((k) => k.endsWith("/head.json")), false);
+  fail = false;
+  await s.up.uploadNow();
+  assert.equal([...be.files.keys()].some((k) => k.endsWith("/head.json")), true);
 });

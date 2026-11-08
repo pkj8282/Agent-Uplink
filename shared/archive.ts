@@ -22,6 +22,8 @@ export interface FragmentHeader {
   index: number;
   /** 직전 조각의 해시(SHA-256 hex). 첫 조각은 "". */
   prevHash: string;
+  /** 번호를 건너뛰었을 때 직전 조각의 번호(저장소에서 자리를 뺏긴 경우). 없으면 index - 1. */
+  prevIndex?: number;
   createdAt: number;
   /** AEAD nonce(12바이트, b64). */
   nonce: string;
@@ -69,7 +71,8 @@ function validHeader(h: unknown): h is Omit<FragmentHeader, "profile"> & { profi
   const x = h as Record<string, unknown>;
   return !!x && typeof x === "object" && x.v === 1 && typeof x.spaceId === "string" && typeof x.hubKey === "string"
     && Number.isSafeInteger(x.epoch) && Number.isSafeInteger(x.index) && (x.index as number) >= 0
-    && typeof x.prevHash === "string" && typeof x.createdAt === "number" && typeof x.nonce === "string";
+    && typeof x.prevHash === "string" && typeof x.createdAt === "number" && typeof x.nonce === "string"
+    && (x.prevIndex === undefined || (Number.isSafeInteger(x.prevIndex) && (x.prevIndex as number) >= -1 && (x.prevIndex as number) < (x.index as number)));
 }
 
 export function decodeFragment(bytes: Buffer, o: { spaceKey: Buffer; expectHubKey?: string }):
@@ -120,15 +123,17 @@ export function decodeFragment(bytes: Buffer, o: { spaceKey: Buffer; expectHubKe
  * 사슬 검사: 번호마다 이전 번호 조각이 있고 그 해시가 prevHash와 같아야 한다(0번은 prevHash ""). 순서는 상관없다.
  * breaks = 이어지지 않은 조각 번호. 같은 번호가 둘이면(갈라짐) ok:false.
  */
-export function checkChain(list: { index: number; prevHash: string; hash: string }[]): { ok: boolean; breaks: number[] } {
-  const byIndex = new Map<number, { prevHash: string; hash: string }[]>();
+export function checkChain(list: { index: number; prevHash: string; hash: string; prevIndex?: number }[]): { ok: boolean; breaks: number[] } {
+  const byIndex = new Map<number, { prevHash: string; hash: string; prevIndex?: number }[]>();
   for (const x of list) byIndex.set(x.index, [...(byIndex.get(x.index) ?? []), x]);
   const breaks: number[] = [];
   let forked = false;
   for (const [index, items] of [...byIndex].sort((a, b) => a[0] - b[0])) {
     if (items.length > 1) forked = true;
-    const prev = byIndex.get(index - 1);
-    const ok = items.every((it) => (index === 0 ? it.prevHash === "" : !!prev && prev.some((p) => p.hash === it.prevHash)));
+    const ok = items.every((it) => {
+      const pi = it.prevIndex ?? index - 1;
+      return pi < 0 ? it.prevHash === "" : !!byIndex.get(pi)?.some((p) => p.hash === it.prevHash);
+    });
     if (!ok || items.length > 1) breaks.push(index);
   }
   return { ok: breaks.length === 0 && !forked, breaks };

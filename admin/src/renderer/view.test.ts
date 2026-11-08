@@ -646,3 +646,18 @@ test("갈라진 사슬 경고는 단정하지 않는다(ko/en)", () => {
     setLang("ko");
   }
 });
+
+
+test("복원 결과의 최신 여부 경고(ko/en)", () => {
+  const base = { channelCount: 1, messageCount: 1, breaks: [], bad: [] };
+  assert.match(backupRestoreDone({ ...base, head: "behind" }), /최근 조각/);
+  assert.match(backupRestoreDone({ ...base, head: "missing" }), /확인할 수 없/);
+  assert.doesNotMatch(backupRestoreDone({ ...base, head: "ok" }), /최근 조각|확인할 수 없/);
+  assert.match(connEventLine({ ts: 1, code: "storage_restore_behind_mesh", detail: { restoredIndex: 8, knownIndex: 10 } }), /10/);
+  setLang("en");
+  try {
+    for (const t of [backupRestoreDone({ ...base, head: "behind" }), backupRestoreDone({ ...base, head: "missing" }), connEventLine({ ts: 1, code: "storage_restore_behind_mesh", detail: { restoredIndex: 8, knownIndex: 10 } })]) assert.equal(hasHangul(t), false, t);
+  } finally {
+    setLang("ko");
+  }
+});

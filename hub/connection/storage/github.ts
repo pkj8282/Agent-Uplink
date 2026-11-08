@@ -89,6 +89,22 @@ export class GitHubBackend implements StorageBackend {
     return p;
   }
 
+  overwrite(path: string, bytes: Buffer): Promise<void> {
+    const run = async () => {
+      const cur = await this.req("GET", this.url(path));
+      const sha = cur.ok ? ((await cur.json()) as { sha?: unknown }).sha : undefined;
+      const body: Record<string, string> = { message: "agent-uplink backup head", content: bytes.toString("base64") };
+      if (typeof sha === "string") body.sha = sha;
+      if (this.o.branch) body.branch = this.o.branch;
+      const res = await this.req("PUT", this.url(path).split("?")[0], body);
+      if (res.status === 404) throw new StorageError("storage_repo_not_found");
+      if (res.status !== 201 && res.status !== 200) throw new StorageError("storage_bad_response");
+    };
+    const p = this.writes.then(run, run);
+    this.writes = p.catch(() => undefined);
+    return p;
+  }
+
   async get(path: string): Promise<Buffer | null> {
     const res = await this.req("GET", this.url(path));
     if (res.status === 404) return null;

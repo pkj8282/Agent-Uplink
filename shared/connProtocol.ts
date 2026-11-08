@@ -25,7 +25,7 @@ export function linkAuthSigData(challengeB64: string, ekmB64: string, spaceId: s
 }
 
 /** 서버 연결로 인증된 연결에서만 받는 요청(이벤트는 망 엔진이 이름으로 거른다). */
-export const LINK_OPS_AFTER_AUTH = ["l_heads", "l_pull"] as const;
+export const LINK_OPS_AFTER_AUTH = ["l_heads", "l_pull", "l_backup_head"] as const;
 
 export const CONN_OPS_AFTER_AUTH = ["c_list", "c_send", "c_read", "c_accounts"] as const;
 

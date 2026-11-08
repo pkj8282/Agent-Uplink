@@ -82,6 +82,8 @@ export interface MeshDeps {
   onOtherEvent?(e: { event: string; [k: string]: unknown }, from: MeshLink): boolean;
   /** 새 후보가 생겼을 때. */
   onCandidate?(origin: string): void;
+  /** 백업 최고 번호를 알리는 최소 간격(기본 5분). */
+  beaconIntervalMs?: number;
   /** 답이 없는 후보에게 다시 묻는 간격(기본 60초). */
   verifyRetryMs?: number;
   /** 망 서버·채널 목록이 바뀌었을 때(구성원에게 공유 목록 다시 알리기). */
@@ -111,6 +113,32 @@ interface Candidate {
   at: number;
   /** 코드 답이 틀렸음 — 자동 인정 안 함, 주인에게 경고. */
   warning: boolean;
+}
+
+interface BHeadBody { origin: string; index: number; hash: string; ts: number }
+
+export interface RestoredBackup {
+  origin: string;
+  hubKey: string;
+  index: number;
+  /** 이미 경고한 번호(같은 경고를 되풀이하지 않게). */
+  warned?: number;
+}
+
+function readRestored(dir: string): RestoredBackup[] {
+  try {
+    const v = JSON.parse(fs.readFileSync(path.join(dir, "restored.json"), "utf8")) as RestoredBackup[];
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+/** 복원 기록을 남긴다(망이 아직 없어도 — 이어지면 확인한다). */
+export function noteRestored(dir: string, rec: RestoredBackup): void {
+  fs.mkdirSync(dir, { recursive: true });
+  const list = [...readRestored(dir).filter((r) => r.origin !== rec.origin), rec].slice(-32);
+  writeFileAtomic(path.join(dir, "restored.json"), JSON.stringify(list));
 }
 
 interface VChalBody { verifier: string; prover: string; challenge: string; ts: number }
@@ -161,6 +189,10 @@ const RELAY_MAX_AGE_MS = 10 * 60_000;
 /** 서버(중계 시작·확인 서명자)별 중복 제거 기억 상한 — 10분 안 정상 최대(3600)보다 크고, 다른 서버 몫을 밀어내지 못한다. */
 const SEEN_PER_ENTRY = 5000;
 const MAX_FORKS_SEEN = 4096;
+/** 백업 최고 번호 보고 간격·기억 상한·미래 시각 허용. */
+const BEACON_INTERVAL_MS = 5 * 60_000;
+const MAX_HEADS_KEPT = 256;
+const BEACON_FUTURE_MS = 5 * 60_000;
 const RELAY_PER_10S = 60;
 
 export class Mesh {
@@ -172,6 +204,10 @@ export class Mesh {
   private pulling = new Set<string>();
   private seen = new Map<string, Map<string, number>>();
   private forksSeen = new Set<string>();
+  private backupHeads: Record<string, Signed<BHeadBody>> = {};
+  private beaconDirty = false;
+  private lastBeaconAt = 0;
+  private restored: RestoredBackup[] = [];
   private relayTimes = new Map<string, number[]>();
   private accepted: Record<string, Accepted> = {};
   private cands = new Map<string, Candidate>();
@@ -184,7 +220,7 @@ export class Mesh {
   constructor(private readonly deps: MeshDeps) {
     this.verify = new VerifyStore(deps.dir);
     this.load();
-    this.verifyTimer = setInterval(() => { for (const o of this.cands.keys()) this.challenge(o); }, deps.verifyRetryMs ?? 60_000);
+    this.verifyTimer = setInterval(() => { for (const o of this.cands.keys()) this.challenge(o); this.flushBeacon(); }, deps.verifyRetryMs ?? 60_000);
     this.verifyTimer.unref?.();
   }
 
@@ -216,6 +252,13 @@ export class Mesh {
     } catch {
       // 처음
     }
+    try {
+      const h = JSON.parse(fs.readFileSync(this.file("backup-heads.json"), "utf8")) as Record<string, Signed<BHeadBody>>;
+      if (h && typeof h === "object") this.backupHeads = h;
+    } catch {
+      // 처음
+    }
+    this.restored = readRestored(this.deps.dir);
     const recDir = this.file("rec");
     let origins: string[] = [];
     try { origins = fs.readdirSync(recDir); } catch { /* 없음 */ }
@@ -596,6 +639,81 @@ export class Mesh {
     this.acceptServer(b.prover, "code");
   }
 
+  // ───────── 망 안의 최고 백업 번호 ─────────
+
+  private saveHeads(): void {
+    fs.mkdirSync(this.deps.dir, { recursive: true });
+    writeFileAtomic(this.file("backup-heads.json"), JSON.stringify(this.backupHeads));
+  }
+
+  private rememberHead(h: Signed<BHeadBody>): void {
+    this.backupHeads[h.body.origin] = h;
+    const ids = Object.keys(this.backupHeads);
+    if (ids.length > MAX_HEADS_KEPT) delete this.backupHeads[ids[0]];
+    this.saveHeads();
+  }
+
+  /** 내 백업의 최고 번호를 망에 알린다(바뀌었을 때만, 간격을 지켜서). */
+  setBackupHead(index: number, hash: string): void {
+    const self = this.deps.self();
+    const old = this.backupHeads[self.spaceId];
+    if (old && old.body.index >= index) return;
+    this.rememberHead(signMesh<BHeadBody>("bhead", { origin: self.spaceId, index, hash, ts: this.now }, self.keys));
+    this.beaconDirty = true;
+    this.flushBeacon();
+  }
+
+  private flushBeacon(): void {
+    if (!this.beaconDirty || this.now - this.lastBeaconAt < (this.deps.beaconIntervalMs ?? BEACON_INTERVAL_MS)) return;
+    const h = this.backupHeads[this.deps.self().spaceId];
+    if (!h) return;
+    this.beaconDirty = false;
+    this.lastBeaconAt = this.now;
+    this.flood({ event: "bhead", h });
+  }
+
+  /** 그 서버의 백업에 대해 기억하는 최고 번호(모르면 null). */
+  backupHeadOf(origin: string): number | null {
+    return this.backupHeads[origin]?.body.index ?? null;
+  }
+
+  /** 시험용: 형식을 일부러 틀린 보고를 내 키로 서명해 보낸다. */
+  sendRawBeaconForTest(body: object): void {
+    this.flood({ event: "bhead", h: signMesh("bhead", body, this.deps.self().keys) });
+  }
+
+  private onBackupHead(e: { [k: string]: unknown }, from: MeshLink): void {
+    const h = cleanSigned<BHeadBody>(this.sanitize(e.h));
+    if (!h) return;
+    const b = openMesh<BHeadBody>("bhead", h);
+    if (!b || typeof b.origin !== "string" || !SPACE_ID_RE.test(b.origin) || !Number.isSafeInteger(b.index) || b.index < 0
+      || typeof b.hash !== "string" || !/^[0-9a-f]{64}$/.test(b.hash) || typeof b.ts !== "number" || b.ts > this.now + BEACON_FUTURE_MS) return;
+    if (!this.accepted[b.origin] || h.signer !== this.pins[b.origin]) return; // 인정한 서버가 직접 서명한 것만 — 이웃이 숫자를 부풀릴 수 없다
+    const old = this.backupHeads[b.origin];
+    if (old && old.body.index >= b.index) return;
+    this.rememberHead(h);
+    this.flood({ event: "bhead", h }, from);
+  }
+
+  /** 복원한 백업을 기록하고, 이어진 이웃에게 더 높은 번호를 기억하는지 묻는다. */
+  addRestored(rec: RestoredBackup): void {
+    noteRestored(this.deps.dir, rec);
+    this.restored = readRestored(this.deps.dir);
+    for (const l of this.links) void this.queryRestored(l);
+  }
+
+  private async queryRestored(l: MeshLink): Promise<void> {
+    for (const rec of this.restored) {
+      const r = await l.ch.request({ op: "l_backup_head", origin: rec.origin });
+      const h = cleanSigned<BHeadBody>(r?.head);
+      const b = h ? openMesh<BHeadBody>("bhead", h, rec.hubKey) : null;
+      if (!b || b.origin !== rec.origin || !Number.isSafeInteger(b.index) || b.index <= rec.index || (rec.warned ?? -1) >= b.index) continue;
+      rec.warned = b.index;
+      writeFileAtomic(path.join(this.deps.dir, "restored.json"), JSON.stringify(this.restored));
+      this.deps.log("storage_restore_behind_mesh", { origin: rec.origin, restoredIndex: rec.index, knownIndex: b.index });
+    }
+  }
+
   private onCatalog(raw: unknown, from: MeshLink): void {
     raw = this.sanitize(raw);
     if (raw === null) return;
@@ -671,8 +789,10 @@ export class Mesh {
     });
     ch.event({ event: "cat", c: this.ownCatalog() });
     for (const c of this.cats.values()) if (c.body.origin !== info.spaceId) ch.event({ event: "cat", c: c.signed });
+    for (const h of Object.values(this.backupHeads)) ch.event({ event: "bhead", h });
     this.deps.onAttach?.(l);
     void this.syncHeads(l);
+    void this.queryRestored(l);
     return l;
   }
 
@@ -698,6 +818,7 @@ export class Mesh {
 
   private onRequest(l: MeshLink, req: { op: string; [k: string]: unknown }, reply: (r: object) => void): void {
     if (req.op === "l_heads") return reply({ ok: true, heads: this.heads() });
+    if (req.op === "l_backup_head") return reply({ ok: true, head: typeof req.origin === "string" ? this.backupHeads[req.origin] ?? null : null });
     if (req.op === "l_pull") {
       const { origin, ch, after, limit } = req as { origin?: unknown; ch?: unknown; after?: unknown; limit?: unknown };
       if (typeof origin !== "string" || typeof ch !== "string" || typeof after !== "number") return reply({ ok: false, code: "bad_request" });
@@ -773,6 +894,7 @@ export class Mesh {
     }
     if (e.event === "cat") return this.onCatalog(e.c, l);
     if (e.event === "fork") return this.onForkReport(e, l);
+    if (e.event === "bhead") return this.onBackupHead(e, l);
     if (e.event === "v_chal") return this.onVerifyChallenge(e, l);
     if (e.event === "v_resp") return this.onVerifyResponse(e, l);
     if (e.event === "relay") return this.onRelay(e, l);

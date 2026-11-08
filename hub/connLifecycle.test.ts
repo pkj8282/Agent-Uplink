@@ -67,12 +67,12 @@ test("unclean_start_uploads_pending: 정상 종료 보고 없이 꺼진 뒤 다�
   h1.hub.conn.stop = async () => {};
   a1.c.close();
   h1.hub.stop();
-  assert.equal(g.files.size, 0);
+  assert.equal([...g.files.keys()].filter((k) => k.endsWith(".frag")).length, 0);
   const h2 = await startTestHub({ dataDir, storageApiBase: g.apiBase });
   try {
     const a2 = await admin(h2);
     for (let i = 0; i < 100 && g.files.size === 0; i++) await new Promise((r) => setTimeout(r, 20));
-    assert.equal(g.files.size, 1);
+    assert.equal([...g.files.keys()].filter((k) => k.endsWith(".frag")).length, 1);
     const codes = (await a2.req("admin_conn_status")).events.map((e: any) => e.code);
     assert.ok(codes.includes("unclean_shutdown_detected"), codes.join(","));
     assert.equal(lastEvent(dataDir).e, "start");
@@ -91,7 +91,7 @@ test("clean_stop_records_after_last_upload: 정상 종료는 마지막 업로드
   a1.c.close();
   await h1.hub.conn.stop();
   h1.hub.stop();
-  assert.equal(g.files.size, 1);
+  assert.equal([...g.files.keys()].filter((k) => k.endsWith(".frag")).length, 1);
   const ev = lastEvent(dataDir);
   assert.equal(ev.e, "clean_stop");
   assert.equal(ev.nextIndex, 1);

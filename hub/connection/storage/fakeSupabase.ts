@@ -45,7 +45,7 @@ export async function fakeSupabase(opts: { hook?: (req: http.IncomingMessage, re
         const key = `${m[1]}/${m[2]}`;
         if (!buckets.has(m[1])) return json(400, { statusCode: "404", error: "Bucket not found", message: "Bucket not found" });
         if (req.method === "POST") {
-          if (objects.has(key)) return json(400, { statusCode: "409", error: "Duplicate", message: "The resource already exists" });
+          if (objects.has(key) && req.headers["x-upsert"] !== "true") return json(400, { statusCode: "409", error: "Duplicate", message: "The resource already exists" });
           objects.set(key, body);
           return json(200, { Key: key });
         }

@@ -31,12 +31,12 @@ async function fakeGitHub(override?: Handler) {
       const p = m[1] ? decodeURIComponent(m[1]) : undefined;
       if (p === undefined) return json(200, { full_name: "o/r", permissions: { push: true } });
       if (req.method === "PUT") {
-        if (files.has(p)) return json(422, { message: "Invalid request. \"sha\" wasn't supplied." });
+        if (files.has(p) && !JSON.parse(body).sha) return json(422, { message: "Invalid request. \"sha\" wasn't supplied." });
         files.set(p, JSON.parse(body).content);
         return json(201, { content: { path: p } });
       }
       if (req.method === "GET") {
-        if (files.has(p)) return json(200, { type: "file", encoding: "base64", content: files.get(p) });
+        if (files.has(p)) return json(200, { type: "file", encoding: "base64", sha: `sha-${p}`, content: files.get(p) });
         const kids = [...new Set([...files.keys()].filter((k) => k.startsWith(`${p}/`)).map((k) => k.slice(p.length + 1).split("/")[0]))];
         if (kids.length === 0) return json(404, { message: "Not Found" });
         return json(200, kids.map((name) => ({ name, type: files.has(`${p}/${name}`) ? "file" : "dir" })));
@@ -131,4 +131,15 @@ test("parseRepo: owner/name 형식만", () => {
   assert.deepEqual(parseRepo("a/b"), { owner: "a", name: "b" });
   assert.deepEqual(parseRepo("my-org/repo.name_1"), { owner: "my-org", name: "repo.name_1" });
   for (const bad of ["a", "a/b/c", "../x", "a/b c", "", "a/", "/b", "a/.."]) assert.equal(parseRepo(bad), null, bad);
+});
+
+
+test("overwrite_replaces_file: 이미 있는 파일을 sha와 함께 바꾼다, 없으면 새로", async () => {
+  const f = await fakeGitHub();
+  try {
+    const b = make(f.apiBase);
+    await b.overwrite("a/head.json", Buffer.from("1"));
+    await b.overwrite("a/head.json", Buffer.from("22"));
+    assert.equal((await b.get("a/head.json"))!.toString(), "22");
+  } finally { await f.close(); }
 });

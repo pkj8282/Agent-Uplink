@@ -59,7 +59,7 @@ export interface Space1Status {
 }
 export type RestoreInput = ({ kind: "github"; repo: string; ghToken: string } | { kind: "supabase"; url: string; key: string; bucket: string }) & { recoveryKey: string; serverName: string };
 export interface BackupCandidate { spaceId: string; hubId: string; fragments: number; firstDay: string; lastDay: string; }
-export interface RestoreResult { serverId: string; channelCount: number; messageCount: number; breaks: number[]; bad: { path: string; code: string }[]; }
+export interface RestoreResult { serverId: string; channelCount: number; messageCount: number; breaks: number[]; bad: { path: string; code: string }[]; head?: "ok" | "behind" | "missing"; }
 export interface MeshCaseChoice { case: "distributed" | "main" | "single"; main?: string; standby: string[]; }
 export type MeshCommand =
   | { type: "case"; choice: MeshCaseChoice }

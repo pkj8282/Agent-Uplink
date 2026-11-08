@@ -1,6 +1,7 @@
 // 다른 PC 복원(v3.0 7단계): 저장소의 통신 대화 백업을 복구 키로 찾아 검증·복호해 돌려준다. 저장소에는 쓰지 않는다.
 // 경로: agent-uplink/<spaceId>/<hubId>/<UTC 날짜>/<번호8>.frag (업로더와 같음). 방식 1 공간(agent-uplink/s1/…)은 대상이 아니다.
 // 한 Hub 폴더의 조각은 모두 같은 Hub 키여야 하고 hubId = sha256(Hub 키) 앞 16자와 맞아야 한다(다른 Hub 조각 끼워 넣기 차단).
+import { openEnvelope } from "../../../shared/signed.js";
 import { createHash } from "node:crypto";
 import { checkChain, decodeFragment, type FragmentError } from "../../../shared/archive.js";
 import { fromBase32 } from "../../../shared/connCrypto.js";
@@ -34,6 +35,11 @@ export interface RestoreResult {
   messages: number;
   /** 사슬이 이어지지 않은 조각 번호. */
   breaks: number[];
+  /** 마지막 번호 파일과의 비교: ok / behind(최근 조각이 없음) / missing(파일이 없거나 서명이 틀림). */
+  head: "ok" | "behind" | "missing";
+  /** 찾은 가장 큰 조각 번호(없으면 -1)와 그 Hub 키 — 망의 기억과 맞춰 보는 데 쓴다. */
+  lastIndex: number;
+  hubKey: string;
   /** 들여오지 않은 조각(서명·복호·Hub 불일치). */
   bad: { path: string; code: FragmentError | "frag_space_mismatch" }[];
 }
@@ -73,12 +79,26 @@ export async function scanBackups(backend: StorageBackend, spaceKey: Buffer): Pr
   return out;
 }
 
+/** 서명한 마지막 번호 파일과 찾은 조각을 맞춰 본다. 저장소 쓰기 권한자가 파일과 조각을 함께 되돌리면 이것만으로는 못 잡는다. */
+async function checkHead(backend: StorageBackend, dir: string, spaceId: string, hubKey: string | undefined, good: { index: number; hash: string }[], lastIndex: number): Promise<RestoreResult["head"]> {
+  if (!hubKey) return "missing";
+  const raw = await backend.get(`${dir}/head.json`).catch(() => null);
+  if (!raw) return "missing";
+  const env = openEnvelope(raw.toString("utf8"), hubKey);
+  if (!env.ok) return "missing";
+  const b = env.body as { k?: unknown; spaceId?: unknown; hubKey?: unknown; index?: unknown; hash?: unknown };
+  if (b.k !== "backup-head" || b.spaceId !== spaceId || b.hubKey !== hubKey || !Number.isSafeInteger(b.index) || typeof b.hash !== "string") return "missing";
+  if ((b.index as number) > lastIndex) return "behind";
+  const at = good.find((g) => g.index === b.index);
+  return at && at.hash !== b.hash ? "behind" : "ok";
+}
+
 /** 한 백업을 받아 검증·복호한다. 서명·복호·Hub가 맞지 않는 조각은 빼고 보고한다. */
 export async function restoreBackup(backend: StorageBackend, spaceKey: Buffer, target: { spaceId: string; hubId: string }): Promise<RestoreResult> {
   const dir = `${ROOT}/${target.spaceId}/${target.hubId}`;
   const { paths } = await fragmentPaths(backend, dir);
   const bad: RestoreResult["bad"] = [];
-  const good: { index: number; prevHash: string; hash: string; messages: Message[]; channels: { id: string; name: string }[] }[] = [];
+  const good: { index: number; prevHash: string; hash: string; prevIndex?: number; messages: Message[]; channels: { id: string; name: string }[] }[] = [];
   let hubKey: string | undefined;
   for (const p of paths) {
     const bytes = await backend.get(p);
@@ -88,7 +108,7 @@ export async function restoreBackup(backend: StorageBackend, spaceKey: Buffer, t
     if (d.header.spaceId !== target.spaceId) { bad.push({ path: p, code: "frag_space_mismatch" }); continue; }
     if (hubIdOf(d.header.hubKey) !== target.hubId) { bad.push({ path: p, code: "frag_hub_mismatch" }); continue; }
     hubKey ??= d.header.hubKey;
-    good.push({ index: d.header.index, prevHash: d.header.prevHash, hash: d.hash, messages: d.body.messages, channels: d.body.channels ?? [] });
+    good.push({ index: d.header.index, prevHash: d.header.prevHash, hash: d.hash, ...(d.header.prevIndex !== undefined ? { prevIndex: d.header.prevIndex } : {}), messages: d.body.messages, channels: d.body.channels ?? [] });
   }
   const breaks = checkChain(good).breaks;
   good.sort((a, b) => a.index - b.index);
@@ -114,5 +134,6 @@ export async function restoreBackup(backend: StorageBackend, spaceKey: Buffer, t
     }
   }
   const channels: RestoredChannel[] = [...byChannel].filter(([, e]) => e.messages.length > 0).map(([oldId, e]) => ({ oldId, name: e.name, messages: e.messages.sort((a, b) => a.seq - b.seq) }));
-  return { channels, fragments: seenIndex.size, messages, breaks, bad };
+  const lastIndex = good.length ? Math.max(...good.map((g) => g.index)) : -1;
+  return { channels, fragments: seenIndex.size, messages, breaks, bad, lastIndex, hubKey: hubKey ?? "", head: await checkHead(backend, dir, target.spaceId, hubKey, good, lastIndex) };
 }

@@ -300,6 +300,7 @@ export function connEventLine(e: ConnEvent): string {
   if (e.code === "link_removed") return tr("ev_link_removed");
   if (e.code === "link_connect_failed") return tr("ev_link_failed", { detail: connErrorMessage(typeof d.code === "string" ? d.code : undefined, s(d.code)) });
   if (e.code === "mesh_link_dropped") return tr("ev_mesh_link_dropped");
+  if (e.code === "storage_restore_behind_mesh") return tr("ev_restore_behind_mesh", { restored: Number(d.restoredIndex) || 0, known: Number(d.knownIndex) || 0 });
   if (e.code === "mesh_fork_detected") return tr("ev_mesh_fork", { origin: s(d.originName), n: Number(d.n) || 0, mine: s(d.mineVia), other: s(d.otherVia) });
   if (e.code === "mesh_fork_reported") return tr("ev_mesh_fork_reported", { origin: s(d.originName), n: Number(d.n) || 0, by: s(d.by) });
   if (e.code === "mesh_fork_not_signed_by_me") return tr("ev_mesh_fork_not_signed_by_me", { n: Number(d.n) || 0 });
@@ -563,9 +564,11 @@ export function backupRestoreConfirm(serverName: string, c: BackupCandidate): st
   return tr("brestore_confirm", { name: displayName(serverName), first: c.firstDay, last: c.lastDay });
 }
 
-export function backupRestoreDone(r: Pick<RestoreResult, "channelCount" | "messageCount" | "breaks" | "bad">): string {
+export function backupRestoreDone(r: Pick<RestoreResult, "channelCount" | "messageCount" | "breaks" | "bad" | "head">): string {
   const parts = [tr("brestore_done", { channels: r.channelCount, messages: r.messageCount })];
   if (r.breaks.length > 0) parts.push(tr("brestore_breaks", { n: r.breaks.length }));
   if (r.bad.length > 0) parts.push(tr("brestore_bad", { n: r.bad.length }));
+  if (r.head === "behind") parts.push(tr("brestore_head_behind"));
+  if (r.head === "missing") parts.push(tr("brestore_head_missing"));
   return parts.join(" · ");
 }

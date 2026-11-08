@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { generateSigningKeys } from "../../../shared/connCrypto.js";
 import { encodeFragment } from "../../../shared/archive.js";
+import { signEnvelope } from "../../../shared/signed.js";
 import { tempDir } from "../../testing.js";
 import { MemoryBackend } from "./backend.js";
 import { Uploader } from "./uploader.js";
@@ -33,6 +34,15 @@ async function backupHub(backend: MemoryBackend, opts: { names?: boolean; keys?:
   add("c1", "셋째");
   await up.uploadNow();
   return { recoveryKey, keys, up };
+}
+
+/** backupHub 뒤에 한 번 더 올린다(로그는 첫 채널 파일에 이어 쓴다). */
+async function addAndUpload(up: Uploader, _be: MemoryBackend): Promise<void> {
+  const d = (up as any).d;
+  const c = d.channels()[0];
+  const n = fs.readFileSync(c.logFile, "utf8").split("\n").filter(Boolean).length + 1;
+  fs.appendFileSync(c.logFile, JSON.stringify({ seq: n, ts: 1000 + n, channelId: c.id, from: "u1", fromName: "에이AI", text: "또" }) + "\n");
+  await up.uploadNow();
 }
 
 test("parseRecoveryKey: 대소문자·묶음 줄표·공백 무시, 32바이트만", () => {
@@ -118,4 +128,65 @@ test("two_hubs_two_candidates: 같은 공간에 Hub가 둘이면 후보도 둘(�
   // 두 번째 Hub는 같은 복구 키를 쓸 수 없으므로(공간 열쇠는 Hub마다) 다른 키 — 첫 키로는 하나만 보인다
   await backupHub(backend);
   assert.equal((await scanBackups(backend, parseRecoveryKey(a.recoveryKey)!)).length, 1);
+});
+
+
+function targetOf(be: MemoryBackend) {
+  const k = [...be.files.keys()].find((x) => x.endsWith(".frag"))!;
+  const parts = k.split("/");
+  return { key: k, spaceId: parts[parts.length - 4], hubId: parts[parts.length - 3], dir: parts.slice(0, parts.length - 2).join("/") };
+}
+const fragsOf = (be: MemoryBackend) => [...be.files.keys()].filter((k) => k.endsWith(".frag")).sort();
+
+test("head_ok: 마지막 번호 파일과 조각이 맞으면 경고 없음", async () => {
+  const be = new MemoryBackend();
+  const { recoveryKey } = await backupHub(be);
+  const t = targetOf(be);
+  const r = await restoreBackup(be, parseRecoveryKey(recoveryKey)!, t);
+  assert.equal(r.head, "ok");
+  assert.equal(r.lastIndex, 1);
+});
+
+test("skip_is_not_a_chain_break: 자리를 뺏겨 건너뛴 정상 백업은 끊김으로 보고되지 않는다", async () => {
+  const be = new MemoryBackend();
+  const keys = generateSigningKeys();
+  const { recoveryKey, up } = await backupHub(be, { keys });
+  const frags = fragsOf(be);
+  be.files.set(frags[0].replace(/\d{8}\.frag$/, "00000002.frag"), Buffer.from("가짜"));
+  await addAndUpload(up, be);
+  const r = await restoreBackup(be, parseRecoveryKey(recoveryKey)!, targetOf(be));
+  assert.deepEqual(r.breaks, []);
+  assert.equal(r.bad.length, 1);
+  assert.equal(r.lastIndex, 3);
+});
+
+test("deleted_fragment_still_a_break: 진짜로 지운 중간 조각은 여전히 끊김", async () => {
+  const be = new MemoryBackend();
+  const { recoveryKey } = await backupHub(be);
+  be.files.delete(fragsOf(be)[0]);
+  const r = await restoreBackup(be, parseRecoveryKey(recoveryKey)!, targetOf(be));
+  assert.ok(r.breaks.length > 0);
+});
+
+test("tail_deletion_reported_behind: 끝쪽 조각을 지우면 최근 조각이 없다고 알린다", async () => {
+  const be = new MemoryBackend();
+  const { recoveryKey } = await backupHub(be);
+  be.files.delete(fragsOf(be)[1]);
+  assert.equal((await restoreBackup(be, parseRecoveryKey(recoveryKey)!, targetOf(be))).head, "behind");
+});
+
+test("head_deleted_reported_missing: 마지막 번호 파일까지 지우면 확인할 수 없다고 알린다", async () => {
+  const be = new MemoryBackend();
+  const { recoveryKey } = await backupHub(be);
+  for (const k of [...be.files.keys()]) if (k.endsWith("/head.json")) be.files.delete(k);
+  assert.equal((await restoreBackup(be, parseRecoveryKey(recoveryKey)!, targetOf(be))).head, "missing");
+});
+
+test("forged_head_ignored_and_reported_missing: 서명이 틀린 마지막 번호 파일은 없는 것으로", async () => {
+  const be = new MemoryBackend();
+  const { recoveryKey } = await backupHub(be);
+  const t = targetOf(be);
+  const k = generateSigningKeys();
+  be.files.set(`${t.dir}/head.json`, Buffer.from(signEnvelope({ k: "backup-head", spaceId: t.spaceId, hubKey: k.publicKeyB64, index: 99, hash: "a".repeat(64) }, k.privateKeyPem, k.publicKeyB64)));
+  assert.equal((await restoreBackup(be, parseRecoveryKey(recoveryKey)!, t)).head, "missing");
 });
