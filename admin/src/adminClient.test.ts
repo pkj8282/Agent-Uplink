@@ -503,3 +503,13 @@ test("opTimeoutMs: 외부 저장소·다른 PC와 오가는 작업은 오래 기
   assert.equal(opTimeoutMs("admin_snapshot", 5000), 5000);
   assert.equal(opTimeoutMs("admin_conn_storage_restore_scan", 300_000), 300_000); // 더 긴 기본값은 줄이지 않음
 });
+
+
+test("connRestore는 Hub가 준 최신 여부(head)를 그대로 넘긴다", async () => {
+  const c = new AdminClient({ port: 1, keyPath: "x" });
+  (c as any).call = async () => ({ ok: true, serverId: "s", channelCount: 1, messageCount: 2, breaks: [], bad: [], head: "behind" });
+  const r = await c.connRestore({ kind: "github", repo: "o/r", ghToken: "t", recoveryKey: "k", serverName: "n", spaceId: "a", hubId: "b" });
+  assert.equal(r.head, "behind");
+  (c as any).call = async () => ({ ok: true, serverId: "s", channelCount: 1, messageCount: 2, breaks: [], bad: [], head: "이상한값" });
+  assert.equal((await c.connRestore({ kind: "github", repo: "o/r", ghToken: "t", recoveryKey: "k", serverName: "n", spaceId: "a", hubId: "b" })).head, undefined);
+});

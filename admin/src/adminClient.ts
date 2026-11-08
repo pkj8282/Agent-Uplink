@@ -181,7 +181,8 @@ export class AdminClient {
   async connRestoreScan(o: RestoreInput): Promise<BackupCandidate[]> { return (await this.call("admin_conn_storage_restore_scan", { ...o })).candidates; }
   async connRestore(o: RestoreInput & { spaceId: string; hubId: string }): Promise<RestoreResult> {
     const r = await this.call("admin_conn_storage_restore", { ...o });
-    return { serverId: r.serverId, channelCount: r.channelCount, messageCount: r.messageCount, breaks: r.breaks ?? [], bad: r.bad ?? [] };
+    const head = r.head === "ok" || r.head === "behind" || r.head === "missing" ? r.head : undefined;
+    return { serverId: r.serverId, channelCount: r.channelCount, messageCount: r.messageCount, breaks: r.breaks ?? [], bad: r.bad ?? [], ...(head ? { head } : {}) };
   }
 
   // ───── 서버 연결(방식 3) ─────
