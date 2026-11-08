@@ -365,3 +365,8 @@ test("storageIdOf: 저장소마다 다르고 값이 드러나지 않는다", () 
   assert.equal(a, storageIdOf({ kind: "github", repo: "o/r", intervalMin: 60 }));
   assert.equal(a.includes("o/r"), false);
 });
+
+
+test("storageIdOf_includes_branch: GitHub 브랜치가 다르면 다른 저장소", () => {
+  assert.notEqual(storageIdOf({ kind: "github", repo: "o/r", intervalMin: 5 }), storageIdOf({ kind: "github", repo: "o/r", branch: "b2", intervalMin: 5 } as StorageConfig));
+});

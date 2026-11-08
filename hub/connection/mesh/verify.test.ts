@@ -321,3 +321,31 @@ test("verify_flood_keeps_other_events_flowing: 인증 질문이 쏟아져도 다
   m.send({ event: "cat", c: signMesh("cat", { origin: "spM", spaceName: "엠2", ver: 2, channels: [] }, m.keys) });
   await until(() => d.mesh.servers().some((s) => s.spaceName === "엠2"));
 });
+
+
+test("forged_challenge_does_not_burn_real_one: 이웃이 같은 질문값을 자기 키로 먼저 보내도 진짜 질문에는 답한다", async () => {
+  const a = node("에이", "spA", fast, manual), c = node("씨", "spC", fast, manual);
+  a.mesh.registerVerifyCode(c.mesh.issueVerifyCode("에이용"));
+  const keys = generateSigningKeys();
+  registerKey("spM", keys.publicKeyB64);
+  const seen: any[] = [];
+  const [x, y] = LinkChannel.memoryPair();
+  x.setHandlers({ onRequest: (_r, reply) => reply({ ok: true, heads: [], records: [] }), onEvent: (e) => { seen.push(e); } });
+  a.mesh.attach({ spaceId: "spM", spaceName: "엠", serverKey: keys.publicKeyB64 }, y);
+  x.event({ event: "v_chal", ttl: 1, m: signMesh("vchal", { verifier: "spM", prover: "spA", challenge: "X", ts: Date.now() }, keys) });
+  x.event({ event: "v_chal", ttl: 1, m: signMesh("vchal", { verifier: "spC", prover: "spA", challenge: "X", ts: Date.now() }, c.keys) });
+  await until(() => seen.some((e) => e.event === "v_resp"));
+});
+
+test("per_link_cap_keeps_candidate_known_elsewhere: 연결별 상한으로 밀어낼 때 다른 연결도 아는 후보는 지우지 않는다", async () => {
+  const d = node("디", "spD", {}, manual);
+  const m = intruder(d, "spM1"), r = intruder(d, "spR");
+  const x = fakeCat("realX");
+  m.send({ event: "cat", c: x.c });
+  await until(() => !!candidate(d, "realX"));
+  r.send({ event: "cat", c: x.c });
+  await settle();
+  for (let i = 0; i < 16; i++) m.send({ event: "cat", c: fakeCat(`junk${i}`).c });
+  await settle();
+  assert.equal(candidate(d, "realX")?.via, "spR");
+});

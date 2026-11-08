@@ -495,7 +495,12 @@ export class Mesh {
     if (had && had.body.ver >= body.ver) return;
     if (!had) {
       const mine = [...this.cands.values()].filter((c) => c.via === via);
-      if (mine.length >= MAX_CANDIDATES_PER_LINK) this.cands.delete(mine[0].body.origin);
+      if (mine.length >= MAX_CANDIDATES_PER_LINK) {
+        const old = mine[0];
+        old.vias = old.vias.filter((v) => v !== via);
+        if (old.vias.length === 0) this.cands.delete(old.body.origin);
+        else old.via = old.vias[0]; // 다른 연결도 아는 후보는 그 연결 몫으로 옮긴다
+      }
       else if (this.cands.size >= MAX_CANDIDATES && !this.evictBusiestCandidate(mine.length)) { this.deps.log("mesh_drop_too_many_candidates", { origin }); return; }
     }
     this.cands.set(origin, { signed: raw, body, signer, via: had?.via ?? via, vias: had?.vias ?? [via], at: had?.at ?? this.now, warning: had?.warning ?? false });
@@ -612,7 +617,7 @@ export class Mesh {
     const self = this.deps.self();
     const challenge = randomBytes(32).toString("base64");
     this.pendingVerify.set(challenge, { origin, expires: now + VERIFY_ANSWER_MS });
-    this.firstSeen("v", `vchal:${challenge}`);
+    this.firstSeen("v", `vchal:${challenge}:${self.keys.publicKeyB64}`);
     const body: VChalBody = { verifier: self.spaceId, prover: origin, challenge, ts: now };
     this.flood({ event: "v_chal", m: signMesh<VChalBody>("vchal", body, self.keys), ttl: RELAY_TTL });
   }
@@ -636,7 +641,7 @@ export class Mesh {
     const signer = (m as Signed).signer;
     if (!b || typeof b.verifier !== "string" || typeof b.prover !== "string" || typeof b.challenge !== "string" || b.challenge.length > 128 || typeof b.ts !== "number") return;
     if (this.deps.originOf && this.deps.originOf(signer) !== b.verifier) return;
-    if (!this.firstSeen("v", `vchal:${b.challenge}`)) return;
+    if (!this.firstSeen("v", `vchal:${b.challenge}:${signer}`)) return; // 서명자별 — 다른 서버가 같은 질문값으로 선점하지 못하게
     const self = this.deps.self();
     if (b.prover !== self.spaceId) return this.forwardVerify(e, m, from);
     if (Math.abs(this.now - b.ts) > RELAY_MAX_AGE_MS) return;

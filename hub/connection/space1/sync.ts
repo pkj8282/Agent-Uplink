@@ -235,8 +235,8 @@ export class SpaceSync {
     const names = await this.backend.list(`${this.root}/requests`);
     for (const name of names) {
       if (this.st.processed.includes(name)) continue;
+      const raw = await this.backend.get(`${this.root}/requests/${name}`); // 읽기가 실패하면 처리 표시 없이 다음 동기화에서 다시
       this.st.processed.push(name);
-      const raw = await this.backend.get(`${this.root}/requests/${name}`);
       if (!raw) continue;
       const now = this.now();
       const req = readJoinRequest(raw.toString("utf8"), this.cfg.spaceId, (id) => {

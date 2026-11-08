@@ -361,3 +361,18 @@ test("security_alerts_survive_event_flood: 입구 기록이 쏟아져도 갈라�
     assert.ok(saved.includes("mesh_fork_detected"));
   } finally { p.A.hub.stop(); p.B.hub.stop(); }
 });
+
+
+test("normal_events_survive_preauth_flood: 입구 기록이 쏟아져도 일반 사건(참여·키 충돌)은 목록에 남는다", async () => {
+  const p = await startHubPair();
+  try {
+    const log = (p.mA as any).log.bind(p.mA);
+    log("member_joined", { userName: "비" });
+    log("mesh_key_conflict_direct_wins", { spaceId: "x" });
+    for (let i = 0; i < 400; i++) log(i % 2 ? "preauth_per_ip" : "join_failed", { ip: "1.2.3.4" });
+    const codes = p.mA.status().events.map((e: { code: string }) => e.code);
+    assert.ok(codes.includes("member_joined"));
+    assert.ok(codes.includes("mesh_key_conflict_direct_wins"));
+    assert.ok(codes.filter((c: string) => c === "preauth_per_ip" || c === "join_failed").length <= 20);
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});

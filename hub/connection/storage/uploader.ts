@@ -49,7 +49,7 @@ export interface VerifyResult { fragments: number; messages: number; breaks: num
 
 /** 저장소를 구분하는 값(주소를 드러내지 않는 해시). 저장소를 바꾸면 번호가 다시 시작한다. */
 export function storageIdOf(cfg: StorageConfig): string {
-  const id = cfg.kind === "supabase" ? `supabase|${cfg.url}|${cfg.bucket}` : `github|${cfg.repo}`;
+  const id = cfg.kind === "supabase" ? `supabase|${cfg.url}|${cfg.bucket}` : `github|${cfg.repo}#${cfg.branch ?? ""}`;
   return createHash("sha256").update(id).digest("hex").slice(0, 32);
 }
 

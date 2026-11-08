@@ -413,3 +413,18 @@ test("approve_bad_key_error_not_retried: 저장소 문제가 아닌 승인 실�
   assert.ok(a.events.includes("space1_request_rejected"));
   assert.equal(sa.status().members.length, 1);
 });
+
+
+test("request_read_failure_retried: 참여 요청 읽기가 한 번 실패해도 다음 동기화에서 승인된다", async () => {
+  const be = new MemoryBackend();
+  const { sa } = await makeSpace(be);
+  const b = node(be, "비");
+  const sb = await SpaceSync.join(b.deps, sa.invite("비", 60_000), "ghp_b");
+  const orig = be.get.bind(be);
+  let fail = true;
+  be.get = (async (p: string) => { if (fail && p.includes("/requests/")) { fail = false; throw new StorageError("storage_unreachable"); } return orig(p); }) as typeof be.get;
+  await sa.tick().catch(() => {});
+  await sa.tick();
+  await sb.tick();
+  assert.equal(sb.status().state, "active");
+});

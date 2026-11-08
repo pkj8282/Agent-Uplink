@@ -68,7 +68,10 @@ const READ_PER_10S = 120;
 /** 다시 채우다 rate_limited를 받았을 때 기다렸다 재시도하는 횟수. */
 const SYNC_RETRIES = 5;
 /** 일반 사건에 밀려나면 안 되는 경고(갈라진 기록·복원 뒤처짐). */
-const ALERT_CODES = new Set(["mesh_fork_detected", "mesh_fork_reported", "mesh_fork_not_signed_by_me", "mesh_fork_own_unknown", "storage_restore_behind_mesh"]);
+/** 외부인이 마음대로 만들 수 있는 입구 기록 — 따로 적게 둬서 일반 사건을 밀어내지 못하게. */
+const NOISY_CODES = new Set(["preauth_per_ip", "preauth_total", "preauth_evicted", "rate_limited", "join_failed", "auth_failed", "link_join_failed", "link_auth_failed", "frame_too_large", "write_queue_full"]);
+const MAX_NOISY = 20;
+const ALERT_CODES = new Set(["mesh_key_conflict_direct_wins", "mesh_fork_detected", "mesh_fork_reported", "mesh_fork_not_signed_by_me", "mesh_fork_own_unknown", "storage_restore_behind_mesh"]);
 const MAX_ALERTS = 100;
 
 export class ConnectionManager implements ConnStatusSource {
@@ -329,11 +332,17 @@ export class ConnectionManager implements ConnStatusSource {
       } catch { /* 기록 실패로 통신을 멈추지 않는다 */ }
       return;
     }
+    if (NOISY_CODES.has(code)) {
+      this.noisy.push(entry);
+      if (this.noisy.length > MAX_NOISY) this.noisy.shift();
+      return;
+    }
     this.events.push(entry);
     if (this.events.length > 200) this.events.shift();
   }
 
   private alertList: { ts: number; code: string; detail: object }[] | null = null;
+  private noisy: { ts: number; code: string; detail: object }[] = [];
 
   private alerts(): { ts: number; code: string; detail: object }[] {
     if (this.alertList) return this.alertList;
@@ -965,7 +974,7 @@ export class ConnectionManager implements ConnStatusSource {
       spaces1: this.space1Status(),
       comms: this.comms.servers().map((s) => ({ serverId: s.id, name: s.name, channels: s.channels.map((c) => ({ channelId: c.id, name: c.name })) })),
       mesh: this.meshStatus(),
-      events: [...this.alerts(), ...this.events.slice(-50)].sort((a, b) => a.ts - b.ts),
+      events: [...this.alerts(), ...this.events.slice(-50), ...this.noisy].sort((a, b) => a.ts - b.ts),
     };
   }
 
