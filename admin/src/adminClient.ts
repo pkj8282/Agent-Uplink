@@ -78,6 +78,17 @@ export async function toResult<T>(fn: () => Promise<T>): Promise<IpcResult<T>> {
 }
 
 /** Hub admin op 클라이언트. 호출마다 새 연결(접속→hello 검증→op 1회→종료)이라 Hub 재시작에도 상태가 남지 않는다. */
+/** GitHub·Supabase를 여러 번 오가는 작업(백업 찾기·되살리기·검증·올리기)과 다른 PC에 붙는 작업은 기본 5초로는 모자란다. */
+const STORAGE_OPS = new Set(["admin_conn_storage_restore_scan", "admin_conn_storage_restore", "admin_conn_storage_verify", "admin_conn_storage_upload_now", "admin_conn_storage_set"]);
+const REMOTE_OPS = new Set(["admin_conn_join", "admin_conn_mesh_join", "admin_conn_s1_create", "admin_conn_s1_join"]);
+
+/** 작업별 응답 대기 한도(ms). 기본값보다 줄이지는 않는다. */
+export function opTimeoutMs(op: string, base: number): number {
+  if (STORAGE_OPS.has(op)) return Math.max(base, 180_000);
+  if (REMOTE_OPS.has(op)) return Math.max(base, 60_000);
+  return base;
+}
+
 export class AdminClient {
   private readonly port: number;
   private readonly keyPath: string;
@@ -233,7 +244,7 @@ export class AdminClient {
         throw this.fail("version_mismatch", { port: this.port, hub: hello.version, mine: HUB_PROTOCOL_VERSION });
       }
       await this.authenticate(conn, hello.nonce);
-      const r = await conn.request(op, { token: this.readToken(), ...params }).catch((e: unknown) => {
+      const r = await conn.request(op, { token: this.readToken(), ...params }, opTimeoutMs(op, this.timeoutMs)).catch((e: unknown) => {
         if (e instanceof DisconnectedError) throw this.fail("op_dropped");
         if (e instanceof TimeoutError) throw this.fail("op_timeout", { detail: e.message });
         throw e;

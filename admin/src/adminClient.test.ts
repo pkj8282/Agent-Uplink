@@ -6,7 +6,7 @@ import path from "node:path";
 import { startTestHub, TestClient as Raw, tempDir } from "../../hub/testing.js";
 import { hubProof } from "../../shared/auth.js";
 import { encodeFrame, FrameDecoder } from "./framing.js";
-import { AdminClient, HubNotRunningError, hubDownMessage, resolveAdminTarget, toResult } from "./adminClient.js";
+import { AdminClient, HubNotRunningError, hubDownMessage, opTimeoutMs, resolveAdminTarget, toResult } from "./adminClient.js";
 import { hasHangul } from "../../hub/testing.js";
 
 /** 데이터 폴더(언어 기본 ko — 기존 한국어 안내 단정을 유지한다). */
@@ -492,4 +492,14 @@ test("conn_status_old_fields_default: comms·events가 없는 응답(1단계 Hub
   assert.equal(st.storage, null);
   assert.equal((await c.snapshot()).saveBlocked, undefined);
   f.close();
+});
+
+
+test("opTimeoutMs: 외부 저장소·다른 PC와 오가는 작업은 오래 기다리고, 나머지는 기본값", () => {
+  for (const op of ["admin_conn_storage_restore_scan", "admin_conn_storage_restore", "admin_conn_storage_verify", "admin_conn_storage_upload_now", "admin_conn_storage_set"]) {
+    assert.ok(opTimeoutMs(op, 5000) >= 120_000, op);
+  }
+  for (const op of ["admin_conn_join", "admin_conn_mesh_join", "admin_conn_s1_create", "admin_conn_s1_join"]) assert.ok(opTimeoutMs(op, 5000) >= 30_000, op);
+  assert.equal(opTimeoutMs("admin_snapshot", 5000), 5000);
+  assert.equal(opTimeoutMs("admin_conn_storage_restore_scan", 300_000), 300_000); // 더 긴 기본값은 줄이지 않음
 });
