@@ -13,6 +13,15 @@ export function generateWrapKeys(): { publicB64: string; privatePem: string } {
   };
 }
 
+/** X25519 SPKI 공개키(base64)인지. 구성원이 올린 열쇠가 나중에 감싸기를 망가뜨리지 못하게 받을 때 확인한다. */
+export function isWrapPublicKey(b64: string): boolean {
+  try {
+    return createPublicKey({ key: Buffer.from(b64, "base64"), format: "der", type: "spki" }).asymmetricKeyType === "x25519";
+  } catch {
+    return false;
+  }
+}
+
 function gcmEncrypt(key: Buffer, aad: string, plain: Buffer): { nonce: string; ct: string } {
   const nonce = randomBytes(12);
   const c = createCipheriv("aes-256-gcm", key, nonce) as CipherGCM;

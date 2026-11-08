@@ -41,7 +41,7 @@ interface InviteRec { inviteId: string; token: string; label: string; expiresAt:
 interface Secrets { token: string; xPriv: string; xPub: string; epochKeys: Record<string, string>; invites: InviteRec[] }
 interface Member { hubId: string; hubKey: string; xKey: string; joinedAt: number }
 interface Revoked { hubId: string; hubKey: string; atEpoch: number; lastIndex: number }
-interface Roster { v: 1; spaceId: string; version: number; prevHash: string; epoch: number; members: Member[]; revoked: Revoked[]; sealed: { nonce: string; ct: string } }
+interface Roster { v: 1; spaceId: string; version: number; prevHash: string; epoch: number; members: Member[]; revoked: Revoked[]; sealed: { nonce: string; ct: string }; keyChecks: Record<string, string> }
 interface Plain { spaceName: string; names: Record<string, string>; channels: SpaceChannel[] }
 interface Cursor { day: string; nextIndex: number; lastHash: string }
 interface State {
@@ -53,6 +53,8 @@ interface State {
 
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const MAX_SQUAT = 20;
+/** 세대 열쇠의 지문 — 명부(관리자 서명)에 실려, 구성원이 여러 열쇠 파일 중 맞는 것을 고른다. */
+const keyCheckOf = (key: Buffer) => createHash("sha256").update("agent-uplink/v3/epoch-check\n").update(key).digest("hex");
 const pad8 = (n: number) => String(n).padStart(8, "0");
 export const hubIdOf = (hubKey: string) => createHash("sha256").update(hubKey).digest("hex").slice(0, 16);
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -181,7 +183,7 @@ export class SpaceSync {
     const key = this.key(r.epoch)!;
     let version = this.st.rosterVersion + 1;
     for (let tries = 0; tries < MAX_SQUAT; tries++, version++) {
-      const body: Roster = { v: 1, spaceId: this.cfg.spaceId, version, prevHash: this.st.rosterHash, epoch: r.epoch, members: r.members, revoked: r.revoked, sealed: seal(key, `roster|${this.cfg.spaceId}|${version}`, plain) };
+      const body: Roster = { v: 1, spaceId: this.cfg.spaceId, version, prevHash: this.st.rosterHash, epoch: r.epoch, members: r.members, revoked: r.revoked, sealed: seal(key, `roster|${this.cfg.spaceId}|${version}`, plain), keyChecks: { ...(this.st.roster?.keyChecks ?? {}), [String(r.epoch)]: keyCheckOf(key) } };
       const raw = signEnvelope(body as unknown as object, this.d.keys.privateKeyPem, this.d.keys.publicKeyB64);
       try {
         await this.backend.put(`${this.root}/roster/${pad8(version)}.json`, Buffer.from(raw));
@@ -248,11 +250,16 @@ export class SpaceSync {
       const hubId = hubIdOf(req.req.hubKey);
       if (r.members.some((m) => m.hubId === hubId) || r.revoked.some((x) => x.hubId === hubId)) continue;
       const inv = this.sec.invites.find((i) => i.inviteId === req.req.inviteId)!;
-      inv.used = true;
       const m: Member = { hubId, hubKey: req.req.hubKey, xKey: req.req.xKey, joinedAt: now };
+      try {
+        await this.writeKey(r.epoch, m);
+      } catch (e) {
+        this.st.processed = this.st.processed.filter((n) => n !== name); // 다음 동기화에서 다시
+        throw e;
+      }
+      inv.used = true;
       r.members = [...r.members, m];
       plain.names = { ...plain.names, [hubId]: inv.label };
-      await this.writeKey(r.epoch, m);
       this.d.log("space1_member_joined", { spaceId: this.cfg.spaceId, hubId, userName: inv.label });
       changed = true;
     }
@@ -289,7 +296,7 @@ export class SpaceSync {
       const text = raw.toString("utf8");
       const env = openEnvelope(text, this.cfg.ownerKey);
       const b = env.ok ? (env.body as unknown as Roster) : null;
-      if (!b || b.v !== 1 || b.spaceId !== this.cfg.spaceId || b.version !== version || b.prevHash !== this.st.rosterHash || !Array.isArray(b.members) || !Array.isArray(b.revoked)) {
+      if (!b || b.v !== 1 || b.spaceId !== this.cfg.spaceId || b.version !== version || b.prevHash !== this.st.rosterHash || !Array.isArray(b.members) || !Array.isArray(b.revoked) || !b.keyChecks || typeof b.keyChecks !== "object") {
         this.d.log("space1_roster_rejected", { spaceId: this.cfg.spaceId, version });
         continue;
       }
@@ -310,7 +317,7 @@ export class SpaceSync {
       const b = env.body as { v?: unknown; spaceId?: unknown; epoch?: unknown; hubId?: unknown; wrapped?: unknown };
       if (b.v !== 1 || b.spaceId !== this.cfg.spaceId || b.epoch !== epoch || b.hubId !== this.myHubId) continue;
       const k = unwrapKey(b.wrapped as never, this.sec.xPriv, `key|${this.cfg.spaceId}|${epoch}|${this.myHubId}`);
-      if (!k) continue;
+      if (!k || keyCheckOf(k) !== this.st.roster?.keyChecks[String(epoch)]) continue; // 퇴출을 다시 시도해 남은 옛 파일은 건너뜀
       this.sec.epochKeys[String(epoch)] = k.toString("base64");
       return true;
     }

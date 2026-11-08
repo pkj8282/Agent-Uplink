@@ -8,7 +8,8 @@ import { ChannelStore } from "../../channels.js";
 import { tempDir } from "../../testing.js";
 import { MemoryBackend } from "../storage/backend.js";
 import { SpaceSync, type SpaceDeps } from "./sync.js";
-import { encodeSpaceInvite } from "../../../shared/spaceInvite.js";
+import { decodeSpaceInvite, encodeSpaceInvite, makeJoinRequest } from "../../../shared/spaceInvite.js";
+import { generateWrapKeys, isWrapPublicKey } from "../../../shared/keywrap.js";
 
 /** Hub 하나 흉내: 자기 데이터 폴더·채널 저장소·신원 키, 원격 메시지는 delivered에 쌓인다. 저장소는 함께 쓰는 MemoryBackend. */
 function node(backend: MemoryBackend, user: string) {
@@ -284,4 +285,90 @@ test("space1_join_over_existing_refused: 이미 있는 공간에 다시 참여�
   await assert.rejects(SpaceSync.join({ ...a.deps, makeBackend: () => { touched = true; return backend; } }, forged, "ghp_x"), /space_key_changed/);
   assert.equal(touched, false);
   assert.deepEqual(files(), before);
+});
+
+
+test("isWrapPublicKey: X25519 SPKI만 받는다", () => {
+  assert.equal(isWrapPublicKey(generateWrapKeys().publicB64), true);
+  assert.equal(isWrapPublicKey("AAAA"), false);
+  assert.equal(isWrapPublicKey(generateSigningKeys().publicKeyB64), false); // Ed25519 키는 감쌀 수 없음
+});
+
+test("join_request_bad_xkey_rejected: 망가진 xKey의 참여 요청은 거부되고 다른 구성원 퇴출을 막지 못한다", async () => {
+  const be = new MemoryBackend();
+  const { a, sa } = await makeSpace(be);
+  const { sb } = await addMember(be, sa, "비");
+  const dec = decodeSpaceInvite(sa.invite("엠", 60_000), 0);
+  assert.ok(dec.ok);
+  const spaceId = sa.status().spaceId;
+  await be.put(`agent-uplink/s1/${spaceId}/requests/mal-1.json`, Buffer.from(makeJoinRequest(dec.invite, generateSigningKeys(), "AAAA", 1)));
+  await sa.tick();
+  assert.ok(a.events.includes("space1_request_rejected"));
+  assert.equal(sa.status().members.length, 2);
+  const bHub = sb.status().members.find((m) => m.me)!.hubId;
+  assert.equal(await sa.revoke(bHub), true);
+  assert.equal(sa.status().epoch, 2);
+});
+
+function failing(be: MemoryBackend, match: string) {
+  const orig = be.put.bind(be);
+  const ctl = { on: false };
+  be.put = (async (p: string, b: Buffer) => {
+    if (ctl.on && p.includes(match)) throw new Error("net");
+    return orig(p, b);
+  }) as typeof be.put;
+  return ctl;
+}
+
+test("approve_write_failure_retries: 열쇠 쓰기가 실패하면 구성원을 추가하지 않고 다음 동기화에서 다시 승인", async () => {
+  const be = new MemoryBackend();
+  const { sa } = await makeSpace(be);
+  const b = node(be, "비");
+  const ctl = failing(be, "/keys/");
+  const sb = await SpaceSync.join(b.deps, sa.invite("비", 60_000), "ghp_b");
+  ctl.on = true;
+  await sa.tick().catch(() => {});
+  assert.equal(sa.status().members.length, 1);
+  ctl.on = false;
+  await sa.tick();
+  await sb.tick();
+  assert.equal(sb.status().state, "active");
+});
+
+test("revoke_failure_leaves_roster_unchanged: 퇴출 도중 실패하면 세대·구성원 그대로, 다시 하면 된다", async () => {
+  const be = new MemoryBackend();
+  const { sa } = await makeSpace(be);
+  const { sb } = await addMember(be, sa, "비");
+  const { sb: sc } = await addMember(be, sa, "씨");
+  const cHub = sc.status().members.find((m) => m.me)!.hubId;
+  const ctl = failing(be, "/roster/");
+  ctl.on = true;
+  await assert.rejects(sa.revoke(cHub));
+  assert.equal(sa.status().epoch, 1);
+  assert.equal(sa.status().members.filter((m) => !m.revoked).length, 3);
+  ctl.on = false;
+  assert.equal(await sa.revoke(cHub), true);
+  await sb.tick();
+  assert.equal(sb.status().epoch, 2);
+});
+
+test("member_picks_key_matching_roster_check: 퇴출을 여러 번 시도해 열쇠 파일이 여럿이어도 맞는 열쇠를 고른다", async () => {
+  const be = new MemoryBackend();
+  const { a, sa } = await makeSpace(be);
+  const { b, sb } = await addMember(be, sa, "비");
+  const { sb: sc } = await addMember(be, sa, "씨");
+  const cHub = sc.status().members.find((m) => m.me)!.hubId;
+  const ctl = failing(be, "/roster/");
+  ctl.on = true;
+  await assert.rejects(sa.revoke(cHub));
+  await assert.rejects(sa.revoke(cHub));
+  ctl.on = false;
+  assert.equal(await sa.revoke(cHub), true);
+  await sb.tick();
+  assert.equal(sb.status().state, "active");
+  assert.equal(sb.status().epoch, 2);
+  a.channels.append("loc-main", "a", "A", "새 세대 비밀");
+  await sa.tick();
+  await sb.tick();
+  assert.deepEqual(b.delivered.map((d) => d.msg.text), ["새 세대 비밀"]);
 });

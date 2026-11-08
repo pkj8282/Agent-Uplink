@@ -1,6 +1,7 @@
 // 방식 1 초대·참여 요청(v3.0 4단계): 서버가 없으므로 초대 코드에 서버 위치 대신 저장소 위치(GitHub owner/name)를 담는다.
 // 초대는 관리자 Hub가 서명. 참여 요청은 요청자 Hub가 서명하고, 초대 토큰으로 만든 HMAC 증명을 담는다 —
 // 증명에 요청자 공개키가 들어가므로 엿본 요청을 다른 Hub가 다시 쓸 수 없다. 토큰 원문은 저장소에 올리지 않는다.
+import { isWrapPublicKey } from "./keywrap.js";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { fromBase32, signB64, toBase32, verifyB64, type SigningKeys } from "./connCrypto.js";
 import { openEnvelope, signEnvelope } from "./signed.js";
@@ -94,7 +95,7 @@ export function readJoinRequest(raw: string, spaceId: string, tokenOf: (inviteId
   if (!env.ok) return { ok: false };
   const b = env.body as Partial<JoinRequest>;
   if (b.v !== 1 || b.spaceId !== spaceId || typeof b.inviteId !== "string" || typeof b.hubKey !== "string" || b.hubKey !== env.signer
-    || typeof b.xKey !== "string" || typeof b.proof !== "string" || typeof b.ts !== "number") return { ok: false };
+    || typeof b.xKey !== "string" || !isWrapPublicKey(b.xKey) || typeof b.proof !== "string" || typeof b.ts !== "number") return { ok: false };
   const token = tokenOf(b.inviteId);
   if (!token) return { ok: false };
   const want = Buffer.from(joinProof(token, spaceId, b.inviteId, b.hubKey, b.xKey));
