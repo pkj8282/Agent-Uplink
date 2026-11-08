@@ -404,7 +404,7 @@ export class ConnectionManager implements ConnStatusSource {
     if (!spaceName.ok) throw new Error("name_invalid");
     const cfg: ServerConfig & { bindHost?: string } = {
       enabled: true, port: o.port, profile: o.profile, spaceId: prev?.spaceId ?? randomUUID(), spaceName: spaceName.name,
-      burnOnJoin: o.burnOnJoin, shared: prev?.shared ?? [], ...(o.bindHost ? { bindHost: o.bindHost } : {}),
+      burnOnJoin: o.burnOnJoin, shared: prev?.shared ?? [], ...(prev?.meshShared ? { meshShared: prev.meshShared } : {}), ...(prev?.meshExcluded ? { meshExcluded: prev.meshExcluded } : {}), ...(o.bindHost ? { bindHost: o.bindHost } : {}),
     };
     this.store.setServerConfig(cfg);
     this.ensureStarted();
@@ -961,7 +961,7 @@ export class ConnectionManager implements ConnStatusSource {
       deliver: (ch, msg) => {
         // 내 Hub에서 중계로 쓴 메시지가 돌아오면 보낸 계정에게는 메아리를 주지 않는다(from = 출처/진입서버/계정)
         const parts = msg.from.split("/");
-        const skip = parts.length >= 3 && parts[1] === this.store.serverConfig()?.spaceId ? parts.slice(2).join("/") : undefined;
+        const skip = parts.length >= 3 && parts[1] === this.meshSelf().spaceId ? parts.slice(2).join("/") : undefined;
         this.deps.deliver(ch, msg, skip);
         if (this.sharedChannel(ch.id)) this.broadcast(this.msgEvent(msg));
       },
@@ -1083,16 +1083,19 @@ export class ConnectionManager implements ConnStatusSource {
   /** 서버 연결 끊기(그 서버의 키로는 다시 인증 못 함). */
   /** id = 망 ID(화면이 주는 값) 또는 연결 기록의 공간 ID. */
   meshRemove(id: string): boolean {
-    const link = this.store.links().find((l) => !l.removed && (l.spaceId === id || meshIdOf(l.serverKey) === id));
-    if (!link) return false;
-    const ok = this.store.removeLink(link.spaceId);
-    this.dialers.get(link.spaceId)?.stop();
-    this.dialers.delete(link.spaceId);
-    this.listener?.disconnectLink(link.spaceId);
-    this.mesh?.dropLinksTo(meshIdOf(link.serverKey));
-    this.mesh?.forgetDirect(meshIdOf(link.serverKey));
-    if (ok) this.log("link_removed", { spaceId: link.spaceId });
-    return ok;
+    const found = this.store.links().find((l) => !l.removed && (l.spaceId === id || meshIdOf(l.serverKey) === id));
+    if (!found) return false;
+    // 서로 초대했으면 같은 서버의 기록이 둘(in·out) — 하나만 끊으면 남은 쪽이 다시 붙는다
+    for (const link of this.store.links().filter((l) => !l.removed && l.serverKey === found.serverKey)) {
+      this.store.removeLink(link.spaceId);
+      this.dialers.get(link.spaceId)?.stop();
+      this.dialers.delete(link.spaceId);
+      this.listener?.disconnectLink(link.spaceId);
+      this.log("link_removed", { spaceId: link.spaceId });
+    }
+    this.mesh?.dropLinksTo(meshIdOf(found.serverKey));
+    this.mesh?.forgetDirect(meshIdOf(found.serverKey));
+    return true;
   }
 
   private needGov(): Governance {

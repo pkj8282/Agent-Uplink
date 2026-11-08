@@ -167,3 +167,54 @@ test("mesh_verify_code_over_real_tls: 실제 Hub A-C-D에서 D가 준 코드를 
     assert.equal(A.m.status().mesh!.servers.some((s: { spaceName: string }) => s.spaceName === "디 서버"), false);
   } finally { A.hub.stop(); C.hub.stop(); D.hub.stop(); }
 });
+
+
+test("mesh_remove_handles_in_and_out_records: 서로 초대한 서버를 끊으면 기록 둘 다 지워지고 다시 붙지 않는다", async () => {
+  const A = await server("에이 서버", "에이");
+  const C = await server("씨 서버", "씨");
+  try {
+    assert.equal((await C.m.meshJoin(A.m.meshInvite("씨 서버", "127.0.0.1", 60_000).code)).ok, true);
+    assert.equal((await A.m.meshJoin(C.m.meshInvite("에이 서버", "127.0.0.1", 60_000).code)).ok, true);
+    await until(() => A.m.status().mesh!.links.length === 2 && A.m.status().mesh!.links.every((l: { connected: boolean }) => l.connected));
+    assert.equal(A.m.meshRemove(C.m.status().mesh!.self), true);
+    assert.equal(A.m.status().mesh!.links.length, 0);
+    await new Promise((r) => setTimeout(r, 600)); // 다이얼러가 남아 있으면 이 안에 다시 붙는다
+    assert.equal((A.m as any).mesh.links.size, 0);
+    assert.equal(C.m.status().mesh!.links.some((l: { connected: boolean }) => l.connected), false);
+    assert.equal(A.m.status().mesh!.servers.some((s: { spaceName: string }) => s.spaceName === "씨 서버"), false);
+  } finally { A.hub.stop(); C.hub.stop(); }
+});
+
+test("relay_echo_skipped_for_sender: 중계로 쓴 메시지가 돌아와도 보낸 계정에게는 다시 알리지 않는다", async () => {
+  const A = await server("에이 서버", "에이");
+  const D = await server("디 서버", "디");
+  try {
+    const dSrv = D.m.createCommsServer("디작업");
+    const dch = D.m.createCommsChannel(dSrv, "디방");
+    D.m.meshSetShared([dSrv]);
+    assert.equal((await D.m.meshJoin(A.m.meshInvite("디 서버", "127.0.0.1", 60_000).code)).ok, true);
+    const mirror = `m.${D.m.status().mesh!.self}.${dch}`;
+    await until(() => A.hub.hasChannelForTest(mirror));
+    const sender = await login(A.port, "a-sender");
+    const other = await login(A.port, "a-other");
+    assert.equal((await sender.req("send", { channelId: mirror, text: "중계 메시지" })).ok, true);
+    await until(async () => (await texts(other, mirror)).includes("중계 메시지"));
+    await new Promise((r) => setTimeout(r, 100));
+    assert.deepEqual(((await sender.req("check")).items ?? []).map((i: { text: string }) => i.text), []);
+    assert.deepEqual(((await other.req("check")).items ?? []).map((i: { text: string }) => i.text), ["중계 메시지"]);
+    sender.close(); other.close();
+  } finally { A.hub.stop(); D.hub.stop(); }
+});
+
+test("reenable_server_keeps_mesh_shared_and_excluded: 통신 서버를 다시 켜도 망 공유·공유 해제 기록이 남는다", async () => {
+  const A = await server("에이 서버", "에이");
+  try {
+    const s = A.m.createCommsServer("작업");
+    const ch = A.m.createCommsChannel(s, "방");
+    A.m.meshSetShared([s]);
+    (A.m as any).meshExclude(ch);
+    await A.m.enableServer({ port: A.connPort, bindHost: "127.0.0.1", profile: "tls13-chacha20", spaceName: "에이 서버", burnOnJoin: true });
+    assert.deepEqual(A.m.status().mesh!.shared, [s]);
+    assert.deepEqual(A.m.status().mesh!.excluded, [ch]);
+  } finally { A.hub.stop(); }
+});
