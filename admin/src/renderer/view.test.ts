@@ -557,6 +557,7 @@ test("망 문구: 경우·올리기·확인창·명령(한국어), 영어엔 한
 
 // ── 7단계: 다른 PC 백업 가져오기 ──
 import { parseRestoreForm, backupCandidateLine, backupRestoreConfirm, backupRestoreDone } from "./view.js";
+import { meshCandidateConfirm, meshCandidateRejectConfirm, meshForgetConfirm, parseVerifyLabel, parseVerifyCodeInput } from "./view.js";
 
 test("parseRestoreForm: GitHub(저장소·토큰)·Supabase(주소·키·버킷) + 복구 키·서버 이름", () => {
   const base = { kind: "github", repo: "me/backup", token: " ghp_x ", url: "", key: "", bucket: "", recoveryKey: " abcd-efgh \n", serverName: " 복원 " };
@@ -605,6 +606,25 @@ test("같은 서버 다른 키·이미 참여 오류 문구(ko/en)", () => {
       assert.ok(t.length > 0, c);
       assert.equal(hasHangul(t), false, c);
     }
+  } finally {
+    setLang("ko");
+  }
+});
+
+
+test("서버 인정 화면 문구(ko/en)", () => {
+  assert.match(meshCandidateConfirm("가", "abcd", false), /인정합니다/);
+  assert.match(meshCandidateConfirm("가", "abcd", true), /맞지 않았습니다/);
+  assert.equal(parseVerifyLabel(" ").ok, false);
+  assert.deepEqual(parseVerifyCodeInput(" x "), { ok: true, value: "x" });
+  setLang("en");
+  try {
+    const texts = [meshCandidateConfirm("a", "f", false), meshCandidateConfirm("a", "f", true), meshCandidateRejectConfirm("a"), meshForgetConfirm("a"),
+      connErrorMessage("verify_code_invalid", ""), connErrorMessage("verify_code_own", ""), connErrorMessage("verify_too_many", ""),
+      connEventLine({ ts: 1, code: "mesh_candidate", detail: { origin: "abc" } }), connEventLine({ ts: 1, code: "mesh_server_accepted", detail: { origin: "abc" } }), connEventLine({ ts: 1, code: "mesh_verify_failed", detail: { origin: "abc" } })];
+    assert.deepEqual(texts.filter(hasHangul), []);
+    const bad = parseVerifyLabel("");
+    assert.equal(!bad.ok && hasHangul(bad.error), false);
   } finally {
     setLang("ko");
   }

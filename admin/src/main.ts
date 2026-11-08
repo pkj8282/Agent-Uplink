@@ -138,6 +138,14 @@ handle("admin:connMeshSetShared", (ids) => toResult(() => {
 handle("admin:connMeshSetCase", (c) => toResult(() => client.connMeshSetCase(asObj(c) as unknown as MeshCaseChoice)));
 handle("admin:connMeshCoordinator", (on) => toResult(() => client.connMeshCoordinator(on === true)));
 handle("admin:connMeshAccept", (id) => toResult(() => client.connMeshAccept(id === null ? null : asId(id))));
+handle("admin:connMeshServerAccept", (id) => toResult(() => client.connMeshServerAccept(asId(id))));
+handle("admin:connMeshServerReject", (id) => toResult(() => client.connMeshServerReject(asId(id))));
+handle("admin:connMeshVerifyCreate", (label) => toResult(() => client.connMeshVerifyCreate(asStr(label, 200))));
+handle("admin:connMeshVerifyRegister", (code) => toResult(() => client.connMeshVerifyRegister(asStr(code, 2048))));
+handle("admin:connMeshVerifyDelete", (arg) => toResult(() => {
+  const o = asObj(arg);
+  return client.connMeshVerifyDelete(o.kind === "held" ? "held" : "managed", asId(o.cid));
+}));
 handle("admin:connMeshCommand", (c) => toResult(() => client.connMeshCommand(asObj(c) as unknown as MeshCommand)));
 handle("admin:connSetShared", (ids) => toResult(() => {
   if (!Array.isArray(ids) || ids.length > 100 || !ids.every((x) => typeof x === "string")) throw new Error(msg("invalid_target"));

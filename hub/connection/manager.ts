@@ -1090,6 +1090,7 @@ export class ConnectionManager implements ConnStatusSource {
     this.dialers.delete(link.spaceId);
     this.listener?.disconnectLink(link.spaceId);
     this.mesh?.dropLinksTo(meshIdOf(link.serverKey));
+    this.mesh?.forgetDirect(meshIdOf(link.serverKey));
     if (ok) this.log("link_removed", { spaceId: link.spaceId });
     return ok;
   }
@@ -1112,6 +1113,37 @@ export class ConnectionManager implements ConnStatusSource {
     this.needGov().accept(spaceId);
   }
 
+  private needMesh(): Mesh {
+    const m = this.ensureMesh();
+    if (!m) throw new Error("server_not_enabled");
+    return m;
+  }
+
+  /** 다른 서버가 알려 준 후보를 인정한다 — 이 Hub 주인의 승인. */
+  meshAcceptServer(origin: string): boolean {
+    return this.needMesh().acceptServer(origin);
+  }
+
+  meshRejectServer(origin: string): boolean {
+    return this.needMesh().rejectServer(origin);
+  }
+
+  /** 다른 서버에게 줄 인증 코드를 만든다(Verify_Management). 코드는 돌려줄 때 한 번만 보인다. */
+  meshVerifyCreate(label: string): string {
+    const name = validateName(label, "server", (s) => this.g(s, "mesh_verify", "label"));
+    if (!name.ok) throw new Error("name_invalid");
+    return this.needMesh().issueVerifyCode(name.name);
+  }
+
+  /** 받은 인증 코드를 넣는다(Verify_Code_List). */
+  meshVerifyRegister(code: string): { ok: true } | { ok: false; code: string } {
+    return this.needMesh().registerVerifyCode(code.trim());
+  }
+
+  meshVerifyDelete(kind: "managed" | "held", cid: string): boolean {
+    return this.needMesh().deleteVerifyCode(kind, cid);
+  }
+
   meshCommand(cmd: GovCommand): void {
     this.needGov().issue(cmd);
   }
@@ -1130,11 +1162,15 @@ export class ConnectionManager implements ConnStatusSource {
     servers: { spaceId: string; spaceName: string; channelCount: number; direct: boolean }[];
     channels: { spaceId: string; channels: { id: string; name: string }[] }[];
     gov: ReturnType<Governance["status"]> | null;
+    candidates: { origin: string; spaceName: string; viaName: string; fingerprint: string; warning: boolean; at: number }[];
+    verify: { managed: { cid: string; label: string; createdAt: number; boundName: string | null }[]; held: { cid: string; issuerName: string; addedAt: number }[] };
   } | null {
     const cfg = this.store.serverConfig();
     if (!cfg) return null;
     const live = new Set([...(this.mesh?.links ?? [])].map((l) => l.info.spaceId));
     const links = this.store.links().filter((l) => !l.removed);
+    const verify = this.mesh?.listVerifyCodes() ?? { managed: [], held: [] };
+    const nameOfServer = (id: string) => this.mesh?.catalogOf(id)?.spaceName ?? links.find((l) => meshIdOf(l.serverKey) === id)?.spaceName ?? id.slice(0, 16);
     return {
       self: meshIdOf(this.store.identity().publicKeyB64),
       shared: cfg.meshShared ?? [],
@@ -1143,6 +1179,11 @@ export class ConnectionManager implements ConnStatusSource {
       servers: (this.mesh?.servers() ?? []).map((s) => ({ spaceId: s.spaceId, spaceName: s.spaceName, channelCount: s.channels.length, direct: links.some((l) => meshIdOf(l.serverKey) === s.spaceId) })),
       channels: [{ spaceId: meshIdOf(this.store.identity().publicKeyB64), channels: this.meshOwnChannels() }, ...(this.mesh?.servers() ?? []).map((s) => ({ spaceId: s.spaceId, channels: s.channels }))],
       gov: this.gov?.status() ?? null,
+      candidates: (this.mesh?.candidates() ?? []).map((x) => ({ origin: x.origin, spaceName: x.spaceName, viaName: nameOfServer(x.via), fingerprint: x.origin.slice(0, 16), warning: x.warning, at: x.at })),
+      verify: {
+        managed: verify.managed.map((m) => ({ cid: m.cid, label: m.label, createdAt: m.createdAt, boundName: m.boundTo ? nameOfServer(m.boundTo) : null })),
+        held: verify.held.map((h) => ({ cid: h.cid, issuerName: nameOfServer(h.issuer), addedAt: h.addedAt })),
+      },
     };
   }
 

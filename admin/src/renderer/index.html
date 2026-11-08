@@ -213,6 +213,28 @@
         <ul id="mesh-links" class="list"></ul>
         <h2 data-i18n="mesh_servers_heading"></h2>
         <ul id="mesh-servers" class="list"></ul>
+        <h2 data-i18n="mesh_cand_heading"></h2>
+        <p class="hint" data-i18n="mesh_cand_hint"></p>
+        <ul id="mesh-candidates" class="list"></ul>
+        <h2 data-i18n="mesh_verify_heading"></h2>
+        <p class="hint" data-i18n="mesh_verify_hint"></p>
+        <h3 data-i18n="mesh_verify_managed"></h3>
+        <form id="mesh-verify-create-form" class="form">
+          <label><span data-i18n="mesh_verify_label"></span> <input id="mesh-verify-label" type="text" autocomplete="off" maxlength="64"></label>
+          <div class="actions"><button type="submit" data-i18n="btn_mesh_verify_create"></button></div>
+        </form>
+        <div id="mesh-verify-out" class="form" hidden>
+          <textarea id="mesh-verify-code" readonly rows="3" spellcheck="false"></textarea>
+          <p class="hint" data-i18n="mesh_verify_code_hint"></p>
+          <div class="actions"><button id="mesh-verify-copy" type="button" data-i18n="btn_copy"></button><span id="mesh-verify-copy-msg" class="msg"></span></div>
+        </div>
+        <ul id="mesh-verify-managed" class="list"></ul>
+        <h3 data-i18n="mesh_verify_held"></h3>
+        <form id="mesh-verify-register-form" class="form">
+          <textarea id="mesh-verify-input" rows="3" spellcheck="false" autocomplete="off" data-i18n-ph="mesh_verify_ph"></textarea>
+          <div class="actions"><button type="submit" data-i18n="btn_mesh_verify_register"></button></div>
+        </form>
+        <ul id="mesh-verify-held" class="list"></ul>
         <h2 data-i18n="mesh_shared_heading"></h2>
         <p class="hint" data-i18n="mesh_shared_hint"></p>
         <div id="mesh-shared" class="form"></div>

@@ -300,6 +300,9 @@ export function connEventLine(e: ConnEvent): string {
   if (e.code === "link_removed") return tr("ev_link_removed");
   if (e.code === "link_connect_failed") return tr("ev_link_failed", { detail: connErrorMessage(typeof d.code === "string" ? d.code : undefined, s(d.code)) });
   if (e.code === "mesh_link_dropped") return tr("ev_mesh_link_dropped");
+  if (e.code === "mesh_candidate") return tr("ev_mesh_candidate", { name: s(String(d.origin ?? "").slice(0, 16)) });
+  if (e.code === "mesh_server_accepted") return tr("ev_mesh_server_accepted", { name: s(String(d.origin ?? "").slice(0, 16)) });
+  if (e.code === "mesh_verify_failed") return tr("ev_mesh_verify_failed", { name: s(String(d.origin ?? "").slice(0, 16)) });
   if (e.code.startsWith("mesh_reject_")) return tr("ev_mesh_reject");
   if (e.code === "gov_command_applied") return tr("ev_gov_applied", { type: s(d.type) });
   if (e.code === "mesh_channel_unshared_by_coordinator") return tr("ev_mesh_unshared_by_coord");
@@ -316,6 +319,7 @@ export function connEventLine(e: ConnEvent): string {
 
 const CONN_CODE_KEY: Record<string, AdminKey> = {
   recovery_key_invalid: "ce_recovery_key_invalid", restore_empty: "ce_restore_empty",
+  verify_code_invalid: "ce_verify_code_invalid", verify_code_own: "ce_verify_code_own", verify_too_many: "ce_verify_too_many",
   space_key_changed: "ce_space_key_changed", space_already_joined: "ce_space_already_joined",
   not_link_invite: "ce_not_link_invite", link_self: "ce_link_self", link_join_failed: "ce_link_join_failed", link_not_found: "ce_link_not_found",
   not_coordinator: "ce_not_coordinator", relay_timeout: "ce_relay_timeout", relay_write_blocked: "ce_relay_write_blocked",
@@ -480,6 +484,28 @@ export function meshUploadLine(u: { own: boolean; mirrors: number }): string {
 
 export function meshInviteConfirm(label: string, host: string): string {
   return tr("mesh_invite_confirm", { label: displayName(label), host: displayName(host, 253) });
+}
+
+export function meshCandidateConfirm(name: string, fp: string, warning: boolean): string {
+  return tr(warning ? "mesh_cand_accept_warn_confirm" : "mesh_cand_accept_confirm", { name: displayName(name), fp });
+}
+
+export function meshCandidateRejectConfirm(name: string): string {
+  return tr("mesh_cand_reject_confirm", { name: displayName(name) });
+}
+
+export function meshForgetConfirm(name: string): string {
+  return tr("mesh_forget_confirm", { name: displayName(name) });
+}
+
+export function parseVerifyLabel(raw: string): { ok: true; value: string } | { ok: false; error: string } {
+  const value = raw.trim();
+  return value ? { ok: true, value } : { ok: false, error: tr("form_mesh_verify_label_invalid") };
+}
+
+export function parseVerifyCodeInput(raw: string): { ok: true; value: string } | { ok: false; error: string } {
+  const value = raw.trim();
+  return value ? { ok: true, value } : { ok: false, error: tr("form_mesh_verify_code_invalid") };
 }
 
 export function meshRemoveConfirm(name: string): string {

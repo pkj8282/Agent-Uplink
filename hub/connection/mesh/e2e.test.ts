@@ -32,6 +32,11 @@ async function server(name: string, user: string, dataDir?: string, port?: numbe
   return { ...h, m, connPort: p };
 }
 
+/** 망에서 소개받은 서버를 주인이 승인한 것으로(인정 절차를 시험하지 않는 시험용). */
+function acceptAll(hubs: { m: { status(): any; meshAcceptServer(o: string): boolean } }[]): void {
+  for (const h of hubs) for (const c of h.m.status().mesh.candidates) h.m.meshAcceptServer(c.origin);
+}
+
 async function texts(c: TestClient, channelId: string): Promise<string[]> {
   const r = await c.req("read", { channelId });
   return (r.messages ?? []).map((x: { text: string }) => x.text);
@@ -61,7 +66,7 @@ test("mesh_e2e_three_hubs: A-C-D 망 + A 구성원 B가 A 거쳐 D 채널 읽고
     assert.ok(j.ok);
     const dSpace = D.m.status().mesh!.self;
     const viaA = `r:${j.ok ? j.spaceId : ""}:m.${dSpace}.${dch}`;
-    await until(() => B.hub.hasChannelForTest(viaA));
+    await until(() => { acceptAll([A, D]); return B.hub.hasChannelForTest(viaA); });
 
     const b = await login(B.port, "b-ai");
     const d = await login(D.port, "d-ai");
@@ -140,4 +145,25 @@ test("mesh_join_same_id_other_key_refused: 서버 연결도 같은 ID에 다른 
     const forged = encodeInvite({ ...d.invite, serverKey: k.publicKeyB64, endpoint: { type: "direct", host: "127.0.0.1", port: 1 }, token: newJoinToken() }, k.privateKeyPem);
     assert.deepEqual(await C.m.meshJoin(forged), { ok: false, code: "space_key_changed" });
   } finally { A.hub.stop(); C.hub.stop(); }
+});
+
+
+test("mesh_verify_code_over_real_tls: 실제 Hub A-C-D에서 D가 준 코드를 A가 답하면 D가 A를 자동 인정, 없으면 후보로", async () => {
+  const A = await server("에이 서버", "에이");
+  const C = await server("씨 서버", "씨");
+  const D = await server("디 서버", "디");
+  try {
+    assert.equal(A.m.meshVerifyRegister(D.m.meshVerifyCreate("에이 서버")).ok, true);
+    const link = async (x: typeof A, y: typeof A) => {
+      const { code } = x.m.meshInvite(y === A ? "에이" : "상대", "127.0.0.1", 60_000);
+      assert.equal((await y.m.meshJoin(code)).ok, true);
+    };
+    await link(C, A);
+    await link(C, D);
+    await until(() => D.m.status().mesh!.servers.some((s: { spaceName: string }) => s.spaceName === "에이 서버"));
+    assert.equal(D.m.status().mesh!.verify.managed[0].boundName, "에이 서버");
+    // 코드를 받지 않은 쪽(A가 D를 확인)은 후보로 남는다
+    await until(() => A.m.status().mesh!.candidates.some((c: { spaceName: string }) => c.spaceName === "디 서버"));
+    assert.equal(A.m.status().mesh!.servers.some((s: { spaceName: string }) => s.spaceName === "디 서버"), false);
+  } finally { A.hub.stop(); C.hub.stop(); D.hub.stop(); }
 });

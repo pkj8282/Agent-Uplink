@@ -7,6 +7,7 @@ import {
   connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, parseSupabaseForm, parseS1CreateForm, parseS1JoinForm, space1StateLabel, space1RevokeConfirm, space1LeaveConfirm, storageStatusLine, verifyResultMessage, parsePruneForm,
   parseMeshCaseForm, meshCaseLabel, meshUploadLine, meshInviteConfirm, meshRemoveConfirm, meshAcceptConfirm, meshUnacceptConfirm, meshCommandWhat, meshCommandConfirm,
   parseRestoreForm, backupCandidateLine, backupRestoreConfirm, backupRestoreDone,
+  meshCandidateConfirm, meshCandidateRejectConfirm, meshForgetConfirm, parseVerifyLabel, parseVerifyCodeInput,
 } from "./view.js";
 import type { FormMessage } from "./view.js";
 import { getLang, setLang, tr } from "./lang.js";
@@ -938,6 +939,50 @@ function fillSelect(sel: HTMLSelectElement, items: [string, string][]): void {
   if (items.some(([v]) => v === keep)) sel.value = keep;
 }
 
+/** 인정을 기다리는 서버 + 인증 코드 목록. */
+function renderMeshApproval(m: MeshStatus): void {
+  const cands = byId("mesh-candidates");
+  cands.replaceChildren();
+  if ((m.candidates ?? []).length === 0) cands.append(el("li", tr("mesh_cand_none"), "empty"));
+  for (const c of m.candidates ?? []) {
+    const li = el("li", undefined, "row");
+    li.append(el("span", c.spaceName, "name"), el("span", tr("mesh_cand_via", { name: c.viaName }), "meta"), el("span", tr("mesh_fp", { fp: c.fingerprint }), "id"));
+    if (c.warning) li.append(el("span", tr("mesh_cand_warning"), "meta warn"));
+    const ok = el("button", tr("btn_mesh_cand_accept"));
+    ok.type = "button";
+    ok.addEventListener("click", () => { if (window.confirm(meshCandidateConfirm(c.spaceName, c.fingerprint, c.warning))) void connRun(ok, () => window.admin.connMeshServerAccept(c.origin)); });
+    const no = el("button", tr("btn_mesh_cand_reject"), "danger");
+    no.type = "button";
+    no.addEventListener("click", () => { if (window.confirm(meshCandidateRejectConfirm(c.spaceName))) void connRun(no, () => window.admin.connMeshServerReject(c.origin)); });
+    li.append(ok, no);
+    cands.append(li);
+  }
+  const managed = byId("mesh-verify-managed");
+  managed.replaceChildren();
+  if ((m.verify?.managed ?? []).length === 0) managed.append(el("li", tr("mesh_verify_none"), "empty"));
+  for (const v of m.verify?.managed ?? []) {
+    const li = el("li", undefined, "row");
+    li.append(el("span", v.label, "name"), el("span", v.boundName ? tr("mesh_verify_bound", { name: v.boundName }) : tr("mesh_verify_unused"), "meta"));
+    const del = el("button", tr("btn_mesh_verify_delete"), "danger");
+    del.type = "button";
+    del.addEventListener("click", () => { if (window.confirm(tr("mesh_verify_delete_confirm"))) void connRun(del, () => window.admin.connMeshVerifyDelete("managed", v.cid)); });
+    li.append(del);
+    managed.append(li);
+  }
+  const held = byId("mesh-verify-held");
+  held.replaceChildren();
+  if ((m.verify?.held ?? []).length === 0) held.append(el("li", tr("mesh_verify_none"), "empty"));
+  for (const v of m.verify?.held ?? []) {
+    const li = el("li", undefined, "row");
+    li.append(el("span", tr("mesh_verify_issuer", { name: v.issuerName }), "name"));
+    const del = el("button", tr("btn_mesh_verify_delete"), "danger");
+    del.type = "button";
+    del.addEventListener("click", () => void connRun(del, () => window.admin.connMeshVerifyDelete("held", v.cid)));
+    li.append(del);
+    held.append(li);
+  }
+}
+
 function renderMesh(c: IpcResult<ConnStatus>): void {
   const body = byId("mesh-body");
   const un = byId("mesh-unavailable");
@@ -980,8 +1025,15 @@ function renderMesh(c: IpcResult<ConnStatus>): void {
   for (const s of m.servers) {
     const li = el("li", undefined, "row");
     li.append(el("span", s.spaceName, "name"), el("span", tr("mesh_channels", { n: s.channelCount }), "meta"), el("span", tr(s.direct ? "mesh_direct" : "mesh_indirect"), "meta"));
+    if (!s.direct) {
+      const f = el("button", tr("btn_mesh_server_forget"), "danger");
+      f.type = "button";
+      f.addEventListener("click", () => { if (window.confirm(meshForgetConfirm(s.spaceName))) void connRun(f, () => window.admin.connMeshServerReject(s.spaceId)); });
+      li.append(f);
+    }
     servers.append(li);
   }
+  renderMeshApproval(m);
 
   // 망 공유(고르는 중이면 덮어쓰지 않음)
   const shared = byId("mesh-shared");
@@ -1104,6 +1156,27 @@ byId<HTMLFormElement>("mesh-invite-form").addEventListener("submit", (e) => {
 });
 
 byId("mesh-inv-copy").addEventListener("click", () => void copyBox("mesh-inv-code", "mesh-inv-copy-msg"));
+
+byId<HTMLFormElement>("mesh-verify-create-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const parsed = parseVerifyLabel(byId<HTMLInputElement>("mesh-verify-label").value);
+  if (!parsed.ok) { showOpMsg({ text: parsed.error, kind: "err" }); return; }
+  void connRun(submitter(e), () => window.admin.connMeshVerifyCreate(parsed.value), (code) => {
+    byId<HTMLTextAreaElement>("mesh-verify-code").value = code;
+    byId("mesh-verify-copy-msg").textContent = "";
+    byId("mesh-verify-out").hidden = false;
+    byId<HTMLInputElement>("mesh-verify-label").value = "";
+  });
+});
+byId("mesh-verify-copy").addEventListener("click", () => void copyBox("mesh-verify-code", "mesh-verify-copy-msg"));
+
+byId<HTMLFormElement>("mesh-verify-register-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const box = byId<HTMLTextAreaElement>("mesh-verify-input");
+  const parsed = parseVerifyCodeInput(box.value);
+  if (!parsed.ok) { showOpMsg({ text: parsed.error, kind: "err" }); return; }
+  void connRun(submitter(e), () => window.admin.connMeshVerifyRegister(parsed.value), () => { box.value = ""; });
+});
 
 byId<HTMLFormElement>("mesh-join-form").addEventListener("submit", (e) => {
   e.preventDefault();

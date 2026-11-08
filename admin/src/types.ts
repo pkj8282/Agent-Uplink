@@ -74,6 +74,9 @@ export interface MeshStatus {
   servers: { spaceId: string; spaceName: string; channelCount: number; direct: boolean }[];
   /** 망 서버별 채널(이름 표시·공유 중단 명령 대상 고르기). */
   channels?: { spaceId: string; channels: { id: string; name: string }[] }[];
+  /** 다른 서버가 알려 줬지만 아직 인정하지 않은 서버. */
+  candidates?: { origin: string; spaceName: string; viaName: string; fingerprint: string; warning: boolean; at: number }[];
+  verify?: { managed: { cid: string; label: string; createdAt: number; boundName: string | null }[]; held: { cid: string; issuerName: string; addedAt: number }[] };
   gov: {
     choice: MeshCaseChoice; effective: MeshCaseChoice; coordinator: boolean; accepted: string | null; coordinators: string[];
     blocked: string[]; unshared: { origin: string; ch: string }[]; noWrite: { entry: string; hubUser?: string }[]; upload: { own: boolean; mirrors: number };
@@ -177,6 +180,11 @@ export interface AdminApi {
   connMeshSetCase(choice: MeshCaseChoice): Promise<IpcResult<void>>;
   connMeshCoordinator(on: boolean): Promise<IpcResult<void>>;
   connMeshAccept(spaceId: string | null): Promise<IpcResult<void>>;
+  connMeshServerAccept(origin: string): Promise<IpcResult<void>>;
+  connMeshServerReject(origin: string): Promise<IpcResult<void>>;
+  connMeshVerifyCreate(label: string): Promise<IpcResult<string>>;
+  connMeshVerifyRegister(code: string): Promise<IpcResult<void>>;
+  connMeshVerifyDelete(kind: "managed" | "held", cid: string): Promise<IpcResult<void>>;
   connMeshCommand(cmd: MeshCommand): Promise<IpcResult<void>>;
   connStoragePruneSet(o: { enabled: boolean; days: number }): Promise<IpcResult<void>>;
   // 통신 서버·채널 삭제(휴지통으로)

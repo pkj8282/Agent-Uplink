@@ -402,6 +402,18 @@ export class Hub {
         case "admin_conn_mesh_accept":
           c.meshAccept(typeof q.spaceId === "string" ? q.spaceId : null);
           return { ok: true };
+        case "admin_conn_mesh_server_accept":
+          return c.meshAcceptServer(String(q.origin ?? "")) ? { ok: true } : fail("link_not_found", "conn_op_failed", { code: "link_not_found" });
+        case "admin_conn_mesh_server_reject":
+          return c.meshRejectServer(String(q.origin ?? "")) ? { ok: true } : fail("link_not_found", "conn_op_failed", { code: "link_not_found" });
+        case "admin_conn_mesh_verify_create":
+          return { ok: true, code: c.meshVerifyCreate(typeof q.label === "string" ? q.label : "") };
+        case "admin_conn_mesh_verify_register": {
+          const r = c.meshVerifyRegister(String(q.code ?? ""));
+          return r.ok ? { ok: true } : fail(r.code, "conn_op_failed", { code: r.code });
+        }
+        case "admin_conn_mesh_verify_delete":
+          return c.meshVerifyDelete(q.kind === "held" ? "held" : "managed", String(q.cid ?? "")) ? { ok: true } : fail("link_not_found", "conn_op_failed", { code: "link_not_found" });
         case "admin_conn_mesh_command":
           c.meshCommand(q.cmd as GovCommand);
           return { ok: true };

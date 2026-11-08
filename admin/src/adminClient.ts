@@ -184,6 +184,11 @@ export class AdminClient {
   async connMeshSetCase(choice: MeshCaseChoice): Promise<void> { await this.call("admin_conn_mesh_set_case", { choice }); }
   async connMeshCoordinator(on: boolean): Promise<void> { await this.call("admin_conn_mesh_coordinator", { on }); }
   async connMeshAccept(spaceId: string | null): Promise<void> { await this.call("admin_conn_mesh_accept", { spaceId }); }
+  async connMeshServerAccept(origin: string): Promise<void> { await this.call("admin_conn_mesh_server_accept", { origin }); }
+  async connMeshServerReject(origin: string): Promise<void> { await this.call("admin_conn_mesh_server_reject", { origin }); }
+  async connMeshVerifyCreate(label: string): Promise<string> { return (await this.call("admin_conn_mesh_verify_create", { label })).code; }
+  async connMeshVerifyRegister(code: string): Promise<void> { await this.call("admin_conn_mesh_verify_register", { code }); }
+  async connMeshVerifyDelete(kind: "managed" | "held", cid: string): Promise<void> { await this.call("admin_conn_mesh_verify_delete", { kind, cid }); }
   async connMeshCommand(cmd: MeshCommand): Promise<void> { await this.call("admin_conn_mesh_command", { cmd }); }
 
   // ───── 공간(방식 1) ─────

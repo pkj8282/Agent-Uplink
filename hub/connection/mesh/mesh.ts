@@ -5,13 +5,14 @@
 //   같은 연결에서 3번 거부하면 그 연결을 끊는다. 받아들인 기록은 거울 채널 m.<출처>.<채널>에 넣고 받은 곳을 뺀 연결로 민다.
 // - 다른 서버를 믿지 않는다: 모든 문자열은 감독(guard)을 다시 거친다.
 import fs from "node:fs";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import path from "node:path";
 import { writeFileAtomic } from "../../fsutil.js";
 import { validateName } from "../../names.js";
 import type { ChannelStore } from "../../channels.js";
 import { MAX_STORED_TEXT_LENGTH, MAX_TEXT_LENGTH, type Channel, type Message, type MessageOrigin } from "../../../shared/protocol.js";
 import type { SigningKeys } from "../../../shared/connCrypto.js";
+import { decodeVerifyCode, openVerifyAnswer, sealVerifyAnswer, VerifyStore, type Sealed } from "./verify.js";
 import { checkChain, cleanSigned, MAX_SIGNED_BYTES, openMesh, recordHash, signMesh, validRecordBody, type RecordBody, type Signed } from "../../../shared/meshRecord.js";
 import type { LinkChannel } from "./link.js";
 
@@ -79,6 +80,10 @@ export interface MeshDeps {
   relayTimeoutMs?: number;
   /** 다른 이벤트(명령 등) — 처리했으면 true. */
   onOtherEvent?(e: { event: string; [k: string]: unknown }, from: MeshLink): boolean;
+  /** 새 후보가 생겼을 때. */
+  onCandidate?(origin: string): void;
+  /** 답이 없는 후보에게 다시 묻는 간격(기본 60초). */
+  verifyRetryMs?: number;
   /** 망 서버·채널 목록이 바뀌었을 때(구성원에게 공유 목록 다시 알리기). */
   onServersChanged?(): void;
   /** 연결이 붙어 목록을 보낸 뒤(거버넌스가 자기 알림을 보낸다). */
@@ -90,6 +95,26 @@ export interface PeerInfo {
   spaceName: string;
   serverKey: string;
 }
+
+interface Accepted {
+  key: string;
+  how: "direct" | "manual" | "code";
+  at: number;
+}
+
+interface Candidate {
+  signed: Signed<CatalogBody>;
+  body: CatalogBody;
+  signer: string;
+  /** 이 후보를 알려 준 연결(망 ID). */
+  via: string;
+  at: number;
+  /** 코드 답이 틀렸음 — 자동 인정 안 함, 주인에게 경고. */
+  warning: boolean;
+}
+
+interface VChalBody { verifier: string; prover: string; challenge: string; ts: number }
+interface VRespBody { verifier: string; prover: string; cid: string; challenge: string; sealed: Sealed; ts: number }
 
 export interface MeshLink {
   info: PeerInfo;
@@ -115,7 +140,14 @@ interface Chain {
 
 const SPACE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const CHANNEL_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
-const MAX_SERVERS = 64;
+/** 인정 전 후보: 전체·연결별 상한(메모리에만 — 재시작하면 사라진다). */
+const MAX_CANDIDATES = 64;
+/** 한 번에 살펴볼 사슬 머리 수. */
+const MAX_HEADS = 6400;
+const MAX_CANDIDATES_PER_LINK = 16;
+const MAX_REJECTED = 256;
+/** 인증 코드 답을 기다리는 시간. */
+const VERIFY_ANSWER_MS = 15_000;
 const MAX_CHANNELS = 100;
 const PULL_BATCH = 500;
 /** 당기기 응답 한 번의 기록 바이트 상한 — 받는 쪽 프레임 상한(1MB)보다 넉넉히 작게. */
@@ -138,10 +170,19 @@ export class Mesh {
   private pulling = new Set<string>();
   private seen = new Map<string, number>();
   private relayTimes = new Map<string, number[]>();
+  private accepted: Record<string, Accepted> = {};
+  private cands = new Map<string, Candidate>();
+  private rejected = new Set<string>();
+  private pendingVerify = new Map<string, { origin: string; expires: number }>();
+  private readonly verify: VerifyStore;
+  private readonly verifyTimer: NodeJS.Timeout;
   private pendingRelay = new Map<string, (r: { ok: true; seq: number } | { ok: false; code: string }) => void>();
 
   constructor(private readonly deps: MeshDeps) {
+    this.verify = new VerifyStore(deps.dir);
     this.load();
+    this.verifyTimer = setInterval(() => { for (const o of this.cands.keys()) this.challenge(o); }, deps.verifyRetryMs ?? 60_000);
+    this.verifyTimer.unref?.();
   }
 
   private get now(): number {
@@ -162,11 +203,12 @@ export class Mesh {
       // 처음
     }
     try {
-      const d = JSON.parse(fs.readFileSync(this.file("dir.json"), "utf8")) as { pins?: Record<string, string>; cats?: Record<string, unknown> };
+      const d = JSON.parse(fs.readFileSync(this.file("dir.json"), "utf8")) as { pins?: Record<string, string>; cats?: Record<string, unknown>; accepted?: Record<string, Accepted> };
+      if (d.accepted && typeof d.accepted === "object") this.accepted = { ...d.accepted };
       if (d.pins && typeof d.pins === "object") this.pins = { ...d.pins };
       for (const [origin, raw] of Object.entries(d.cats ?? {})) {
         const b = openMesh<CatalogBody>("cat", raw, this.pins[origin]);
-        if (b && b.origin === origin) this.cats.set(origin, { signed: raw as Signed<CatalogBody>, body: b });
+        if (b && b.origin === origin && this.accepted[origin]) this.cats.set(origin, { signed: raw as Signed<CatalogBody>, body: b });
       }
     } catch {
       // 처음
@@ -212,7 +254,7 @@ export class Mesh {
     fs.mkdirSync(this.deps.dir, { recursive: true });
     const cats: Record<string, unknown> = {};
     for (const [o, c] of this.cats) cats[o] = c.signed;
-    writeFileAtomic(this.file("dir.json"), JSON.stringify({ pins: this.pins, cats }, null, 2));
+    writeFileAtomic(this.file("dir.json"), JSON.stringify({ pins: this.pins, cats, accepted: this.accepted }, null, 2));
   }
 
   private appendRecord(origin: string, ch: string, r: Signed<RecordBody>): void {
@@ -358,6 +400,177 @@ export class Mesh {
     return c;
   }
 
+  // ───────── 서버 인정(후보·인증 코드·수동 승인) ─────────
+
+  /** 목록으로 처음 들은 서버는 후보로만 둔다 — 저장·거울·전달 없음. */
+  private noteCandidate(raw: Signed<CatalogBody>, body: CatalogBody, signer: string, from: MeshLink): void {
+    const origin = body.origin;
+    if (this.rejected.has(origin)) return;
+    const had = this.cands.get(origin);
+    if (had && had.body.ver >= body.ver) return;
+    const via = from.info.spaceId;
+    if (!had) {
+      const mine = [...this.cands.values()].filter((c) => c.via === via);
+      if (mine.length >= MAX_CANDIDATES_PER_LINK) this.cands.delete(mine[0].body.origin);
+      else if (this.cands.size >= MAX_CANDIDATES) { this.deps.log("mesh_drop_too_many_candidates", { origin }); return; }
+    }
+    this.cands.set(origin, { signed: raw, body, signer, via: had?.via ?? via, at: had?.at ?? this.now, warning: had?.warning ?? false });
+    if (had) return;
+    this.deps.log("mesh_candidate", { origin, via });
+    this.deps.onCandidate?.(origin);
+    this.challenge(origin);
+  }
+
+  candidates(): { origin: string; spaceName: string; via: string; warning: boolean; at: number }[] {
+    return [...this.cands.values()].map((c) => ({ origin: c.body.origin, spaceName: c.body.spaceName, via: c.via, warning: c.warning, at: c.at }));
+  }
+
+  /** 후보를 정식으로 인정한다(주인이 승인 또는 코드 확인 성공). */
+  acceptServer(origin: string, how: "manual" | "code" = "manual"): boolean {
+    const c = this.cands.get(origin);
+    if (!c) return false;
+    this.cands.delete(origin);
+    this.accepted[origin] = { key: c.signer, how, at: this.now };
+    this.pins[origin] = c.signer;
+    this.cats.set(origin, { signed: c.signed, body: c.body });
+    this.saveDir();
+    this.applyMirrors(origin);
+    this.deps.onServersChanged?.();
+    this.deps.log("mesh_server_accepted", { origin, how });
+    for (const l of this.links) {
+      if (l.info.spaceId !== c.via) l.ch.event({ event: "cat", c: c.signed });
+      void this.syncHeads(l);
+    }
+    return true;
+  }
+
+  /** 후보를 거절하거나 인정을 취소한다. 직접 이은 서버는 연결을 끊어야 한다. */
+  rejectServer(origin: string): boolean {
+    if (this.cands.delete(origin)) {
+      this.rememberRejected(origin);
+      return true;
+    }
+    const a = this.accepted[origin];
+    if (!a || a.how === "direct") return false;
+    this.forget(origin, false);
+    this.rememberRejected(origin);
+    return true;
+  }
+
+  private rememberRejected(origin: string): void {
+    this.rejected.add(origin);
+    if (this.rejected.size > MAX_REJECTED) this.rejected.delete(this.rejected.values().next().value as string);
+  }
+
+  /** 직접 연결을 끊었을 때 — 그 서버의 인정도 거둔다. */
+  forgetDirect(origin: string): void {
+    if (this.accepted[origin]?.how === "direct") this.forget(origin, false);
+  }
+
+  private forget(origin: string, backToCandidate: boolean): void {
+    const cat = this.cats.get(origin);
+    const key = this.accepted[origin]?.key;
+    delete this.accepted[origin];
+    delete this.pins[origin];
+    this.cats.delete(origin);
+    if (cat && key && backToCandidate) this.cands.set(origin, { signed: cat.signed, body: cat.body, signer: key, via: "", at: this.now, warning: false });
+    this.saveDir();
+    this.applyMirrors(origin);
+    this.deps.onServersChanged?.();
+  }
+
+  issueVerifyCode(label: string): string {
+    const code = this.verify.issue(this.deps.self().spaceId, label, this.now);
+    this.deps.log("mesh_verify_code_created", {});
+    return code;
+  }
+
+  registerVerifyCode(code: string): { ok: true } | { ok: false; code: string } {
+    const c = decodeVerifyCode(code);
+    if (!c) return { ok: false, code: "verify_code_invalid" };
+    if (c.issuer === this.deps.self().spaceId) return { ok: false, code: "verify_code_own" };
+    if (!this.verify.add(c, this.now)) return { ok: false, code: "verify_too_many" };
+    this.deps.log("mesh_verify_code_added", { issuer: c.issuer });
+    return { ok: true };
+  }
+
+  listVerifyCodes(): ReturnType<VerifyStore["list"]> {
+    return this.verify.list();
+  }
+
+  deleteVerifyCode(kind: "managed" | "held", cid: string): boolean {
+    if (kind === "held") return this.verify.removeHeld(cid);
+    const m = this.verify.removeManaged(cid);
+    if (!m) return false;
+    if (m.boundTo && this.accepted[m.boundTo]?.how === "code") this.forget(m.boundTo, true);
+    return true;
+  }
+
+  /** 후보에게 코드를 답할 수 있는지 묻는다. 내가 낸 코드가 없으면 물을 이유가 없다. */
+  private challenge(origin: string): void {
+    const c = this.cands.get(origin);
+    if (!c || c.warning || !this.verify.hasManaged) return;
+    const now = this.now;
+    for (const [k, p] of this.pendingVerify) if (p.expires <= now) this.pendingVerify.delete(k);
+    if ([...this.pendingVerify.values()].some((p) => p.origin === origin)) return;
+    const self = this.deps.self();
+    const challenge = randomBytes(32).toString("base64");
+    this.pendingVerify.set(challenge, { origin, expires: now + VERIFY_ANSWER_MS });
+    this.firstSeen(`vchal:${challenge}`);
+    const body: VChalBody = { verifier: self.spaceId, prover: origin, challenge, ts: now };
+    this.flood({ event: "v_chal", m: signMesh<VChalBody>("vchal", body, self.keys), ttl: RELAY_TTL });
+  }
+
+  private forwardVerify(e: { event: string; [k: string]: unknown }, m: unknown, from: MeshLink): void {
+    const ttl = typeof e.ttl === "number" ? Math.min(e.ttl, RELAY_TTL) - 1 : 0;
+    if (ttl > 0) this.flood({ event: e.event, m, ttl }, from);
+  }
+
+  private onVerifyChallenge(e: { event: string; [k: string]: unknown }, from: MeshLink): void {
+    const m = this.sanitize(e.m);
+    if (m === null) return;
+    const b = openMesh<VChalBody>("vchal", m);
+    const signer = (m as Signed).signer;
+    if (!b || typeof b.verifier !== "string" || typeof b.prover !== "string" || typeof b.challenge !== "string" || b.challenge.length > 128 || typeof b.ts !== "number") return;
+    if (this.deps.originOf && this.deps.originOf(signer) !== b.verifier) return;
+    if (!this.firstSeen(`vchal:${b.challenge}`)) return;
+    const self = this.deps.self();
+    if (b.prover !== self.spaceId) return this.forwardVerify(e, m, from);
+    if (Math.abs(this.now - b.ts) > RELAY_MAX_AGE_MS) return;
+    const held = this.verify.heldFor(b.verifier);
+    if (!held) return; // 코드를 준 서버의 질문에만 답한다
+    const sealed = sealVerifyAnswer(held, { verifierId: b.verifier, proverId: self.spaceId, proverKey: self.keys.publicKeyB64, challenge: b.challenge });
+    const body: VRespBody = { verifier: b.verifier, prover: self.spaceId, cid: held.cid, challenge: b.challenge, sealed, ts: this.now };
+    this.firstSeen(`vresp:${b.challenge}`);
+    this.flood({ event: "v_resp", m: signMesh<VRespBody>("vresp", body, self.keys), ttl: RELAY_TTL });
+  }
+
+  private onVerifyResponse(e: { event: string; [k: string]: unknown }, from: MeshLink): void {
+    const m = this.sanitize(e.m);
+    if (m === null) return;
+    const b = openMesh<VRespBody>("vresp", m);
+    const signer = (m as Signed).signer;
+    if (!b || typeof b.verifier !== "string" || typeof b.prover !== "string" || typeof b.cid !== "string" || typeof b.challenge !== "string" || b.challenge.length > 128 || !b.sealed || typeof b.sealed !== "object") return;
+    if (this.deps.originOf && this.deps.originOf(signer) !== b.prover) return;
+    if (!this.firstSeen(`vresp:${b.challenge}`)) return;
+    if (b.verifier !== this.deps.self().spaceId) return this.forwardVerify(e, m, from);
+    const pending = this.pendingVerify.get(b.challenge);
+    if (!pending || pending.origin !== b.prover || pending.expires <= this.now) return;
+    this.pendingVerify.delete(b.challenge);
+    const cand = this.cands.get(b.prover);
+    if (!cand || cand.signer !== signer) return;
+    const issued = this.verify.findManaged(b.cid);
+    const ok = !!issued && (!issued.boundTo || issued.boundTo === b.prover)
+      && openVerifyAnswer(issued, { verifierId: b.verifier, proverId: b.prover, proverKey: signer, challenge: b.challenge }, b.sealed);
+    if (!ok) {
+      cand.warning = true;
+      this.deps.log("mesh_verify_failed", { origin: b.prover });
+      return;
+    }
+    this.verify.bind(b.cid, b.prover);
+    this.acceptServer(b.prover, "code");
+  }
+
   private onCatalog(raw: unknown, from: MeshLink): void {
     raw = this.sanitize(raw);
     if (raw === null) return;
@@ -376,7 +589,6 @@ export class Mesh {
     if (pin && pin !== signer) return this.strike(from, "key_conflict");
     const known = this.cats.get(b.origin);
     if (known && known.body.ver >= b.ver) return; // 같은 것·되돌리기
-    if (!known && this.cats.size >= MAX_SERVERS) { this.deps.log("mesh_drop_too_many_servers", { origin: b.origin }); return; }
     const name = validateName(b.spaceName, "server", (s) => this.deps.guard(s, "spaceName"));
     if (!name.ok) return this.strike(from, "catalog_bad");
     const channels: CatalogBody["channels"] = [];
@@ -385,8 +597,9 @@ export class Mesh {
       const cn = validateName(x?.name, "channel", (s) => this.deps.guard(s, "channelName"));
       if (typeof x?.id === "string" && CHANNEL_ID_RE.test(x.id) && cn.ok) channels.push({ id: x.id, name: cn.name });
     }
-    if (!pin) this.pins[b.origin] = signer;
     const body: CatalogBody = { origin: b.origin, spaceName: name.name, ver: b.ver, channels };
+    if (!this.accepted[b.origin]) return this.noteCandidate(raw as Signed<CatalogBody>, body, signer, from);
+    if (!pin) this.pins[b.origin] = signer;
     const added = channels.some((c) => !known?.body.channels.some((k) => k.id === c.id));
     this.cats.set(b.origin, { signed: raw as Signed<CatalogBody>, body });
     this.saveDir();
@@ -409,6 +622,12 @@ export class Mesh {
       this.cats.delete(info.spaceId);
     }
     this.pins[info.spaceId] = info.serverKey;
+    if (this.accepted[info.spaceId]?.key !== info.serverKey || this.accepted[info.spaceId]?.how !== "direct") {
+      this.accepted[info.spaceId] = { key: info.serverKey, how: "direct", at: this.now };
+      this.saveDir();
+    }
+    this.cands.delete(info.spaceId);
+    this.rejected.delete(info.spaceId);
     const l: MeshLink = { info, ch, strikes: 0, recTimes: [], otherTimes: [] };
     if (this.deps.policy?.blocked(info.spaceId)) {
       this.deps.log("mesh_blocked_link", { spaceId: info.spaceId });
@@ -416,7 +635,11 @@ export class Mesh {
       return l;
     }
     this.links.add(l);
-    ch.onClose(() => this.links.delete(l));
+    ch.onClose(() => {
+      this.links.delete(l);
+      if ([...this.links].some((x) => x.info.spaceId === info.spaceId)) return;
+      for (const [o, c] of this.cands) if (c.via === info.spaceId) this.cands.delete(o);
+    });
     ch.setHandlers({
       onRequest: (req, reply) => this.onRequest(l, req, reply),
       onEvent: (e) => this.onEvent(l, e),
@@ -429,6 +652,7 @@ export class Mesh {
   }
 
   stop(): void {
+    clearInterval(this.verifyTimer);
     for (const l of [...this.links]) l.ch.close();
     this.links.clear();
   }
@@ -480,7 +704,7 @@ export class Mesh {
     const r = await l.ch.request({ op: "l_heads" });
     if (!r?.ok || !Array.isArray(r.heads)) return;
     const self = this.deps.self().spaceId;
-    for (const h of r.heads.slice(0, MAX_SERVERS * MAX_CHANNELS)) {
+    for (const h of r.heads.slice(0, MAX_HEADS)) {
       const x = h as { origin?: unknown; ch?: unknown; n?: unknown };
       if (typeof x?.origin !== "string" || typeof x.ch !== "string" || typeof x.n !== "number" || x.origin === self) continue;
       if (!this.shareable(x.origin, x.ch)) continue;
@@ -522,6 +746,8 @@ export class Mesh {
       l.otherTimes.push(now);
     }
     if (e.event === "cat") return this.onCatalog(e.c, l);
+    if (e.event === "v_chal") return this.onVerifyChallenge(e, l);
+    if (e.event === "v_resp") return this.onVerifyResponse(e, l);
     if (e.event === "relay") return this.onRelay(e, l);
     if (e.event === "ack") return this.onAck(e, l);
     if (e.event === "rec") {

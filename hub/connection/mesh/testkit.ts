@@ -31,7 +31,7 @@ export interface Node {
   mirror(origin: Node, chId: string): Message[];
 }
 
-export function node(name: string, spaceId: string, extra: Partial<MeshDeps> = {}, opts: { gov?: boolean } = {}): Node {
+export function node(name: string, spaceId: string, extra: Partial<MeshDeps> = {}, opts: { gov?: boolean; manual?: boolean } = {}): Node {
   const dataDir = tempDir(`mesh-${spaceId}-`);
   const keys = generateSigningKeys();
   registerKey(spaceId, keys.publicKeyB64);
@@ -56,6 +56,8 @@ export function node(name: string, spaceId: string, extra: Partial<MeshDeps> = {
     log: (code) => n.logs.push(code),
     originOf: (k: string) => KEY_IDS.get(k),
     deliver: (_ch: Channel, m: Message) => n.delivered.push(m),
+    // 인정 절차를 시험하지 않는 시험은 후보를 바로 승인한다(manual이면 시험이 직접)
+    onCandidate: (origin: string) => { if (!opts.manual) n.mesh.acceptServer(origin); },
     appendOwn: (ch, from, fromName, text, origin) => (n.channels.getChannel(ch) ? n.channels.append(ch, from, fromName, text, origin) : null),
     ...(opts.gov ? {
       policy: { blocked: (id: string) => n.gov!.blocked(id), channelBlocked: (o: string, c: string) => n.gov!.channelBlocked(o, c), noWrite: (e: string, h: string) => n.gov!.noWrite(e, h) },
