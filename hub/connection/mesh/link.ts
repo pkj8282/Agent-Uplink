@@ -1,5 +1,6 @@
 // 서버 연결(방식 3, v3.0 5단계): 통신 서버끼리 잇는 양방향 채널.
 // 연결 하나에서 양쪽 모두 요청({op,id})·응답({id,ok})·이벤트({event})를 보낸다. 받는 쪽(리스너)과 거는 쪽(LinkDialer)이 같은 LinkChannel을 쓴다.
+import { boundedWrite, CONN_WRITE_QUEUE } from "../../../shared/boundedWrite.js";
 import { encodeFrame } from "../../../shared/framing.js";
 import { signB64, type SigningKeys } from "../../../shared/connCrypto.js";
 import { CONN_MAGIC, LINK_OPS_AFTER_AUTH, linkAuthSigData, linkJoinSigData } from "../../../shared/connProtocol.js";
@@ -124,7 +125,7 @@ export class LinkChannel {
 }
 
 function overSocket(ps: PinnedSocket): LinkChannel {
-  const ch = new LinkChannel({ write: (o) => { if (!ps.sock.destroyed) ps.sock.write(encodeFrame(o)); }, close: () => ps.sock.destroy(), allowedOps: LINK_OPS });
+  const ch = new LinkChannel({ write: (o) => { boundedWrite(ps.sock, encodeFrame(o), CONN_WRITE_QUEUE); }, close: () => ps.sock.destroy(), allowedOps: LINK_OPS });
   ps.onFrame((f) => ch.feed(f));
   ps.sock.once("close", () => ch.notifyClosed());
   return ch;

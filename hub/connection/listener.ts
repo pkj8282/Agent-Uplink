@@ -5,7 +5,7 @@
 import net from "node:net";
 import tls from "node:tls";
 import { randomBytes, randomUUID } from "node:crypto";
-import { boundedWrite } from "../../shared/boundedWrite.js";
+import { boundedWrite, CONN_WRITE_QUEUE } from "../../shared/boundedWrite.js";
 import { encodeFrame, FrameDecoder, FrameTooLargeError } from "../../shared/framing.js";
 import { selfSignedCertPem } from "../../shared/x509.js";
 import { verifyB64 } from "../../shared/connCrypto.js";
@@ -45,7 +45,7 @@ export const DEFAULT_CONN_LIMITS: ConnLimits = {
   maxPreAuthTotal: 8,
   maxSocketsPerPeer: 2,
   preAuthWriteQueue: 64 * 1024,
-  writeQueue: 8 * 1024 * 1024,
+  writeQueue: CONN_WRITE_QUEUE,
 };
 
 export interface ConnPeer {

@@ -3,6 +3,7 @@
 // 초대 코드의 서버 공개키 지문(SPKI SHA-256)·TLS 1.3·프로필 암호를 확인하기 전에는 한 바이트도 보내지 않는다(공개키 고정).
 import tls from "node:tls";
 import { createHash } from "node:crypto";
+import { boundedWrite, CONN_WRITE_QUEUE } from "../../shared/boundedWrite.js";
 import { encodeFrame, FrameDecoder } from "../../shared/framing.js";
 import { signB64, spkiFingerprint, type SigningKeys } from "../../shared/connCrypto.js";
 import { PROFILES, type ProfileId } from "../../shared/cryptoProfile.js";
@@ -123,7 +124,7 @@ function openPinned(
           if (sock.destroyed) return res({ ok: false, code: "connection_lost" });
           const id = next++;
           pending.set(id, res);
-          sock.write(encodeFrame({ ...r, id }));
+          boundedWrite(sock, encodeFrame({ ...r, id }), CONN_WRITE_QUEUE);
         }),
       },
     };

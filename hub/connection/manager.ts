@@ -63,6 +63,10 @@ const MAX_REMOTE_ACCOUNTS = 200;
 const MAX_REMOTE_SERVERS = 100;
 /** c_read 응답의 메시지 바이트 상한 — 참여자 쪽 프레임 상한(4MB)보다 넉넉히 작게. */
 const C_READ_MAX_BYTES = 2 * 1024 * 1024;
+/** 구성원 한 명의 읽기·목록·계정 알림 요청 상한(10초). 다시 채우기는 공유 채널마다 한 번씩이라 넉넉히. */
+const READ_PER_10S = 120;
+/** 다시 채우다 rate_limited를 받았을 때 기다렸다 재시도하는 횟수. */
+const SYNC_RETRIES = 5;
 
 export class ConnectionManager implements ConnStatusSource {
   readonly store: ConnectionStore;
@@ -80,8 +84,21 @@ export class ConnectionManager implements ConnStatusSource {
   private meshTimers: NodeJS.Timeout[] = [];
   /** 구성원별 최근 전송 시각(설계 5.2 "참여자별 메시지 속도 제한", RT-C16). */
   private sendTimes = new Map<string, number[]>();
+  private readTimes = new Map<string, number[]>();
+  private readLimit = { max: READ_PER_10S, windowMs: 10_000 };
+  private rateRetryMs = 10_000;
 
   /** 구성원 한 명은 10초에 60개까지. */
+  private allowRead(memberId: string): boolean {
+    const now = Date.now();
+    const { max, windowMs } = this.readLimit;
+    const list = (this.readTimes.get(memberId) ?? []).filter((t) => now - t < windowMs);
+    const ok = list.length < max;
+    if (ok) list.push(now);
+    this.readTimes.set(memberId, list);
+    return ok;
+  }
+
   private allowSend(memberId: string): boolean {
     const now = Date.now();
     const list = (this.sendTimes.get(memberId) ?? []).filter((t) => now - t < 10_000);
@@ -553,6 +570,10 @@ export class ConnectionManager implements ConnStatusSource {
 
   private handle(p: ConnPeer, req: ConnRequest, reply: (r: object) => void): void {
     const fail = (code: string) => reply({ ok: false, code });
+    if ((req.op === "c_list" || req.op === "c_read" || req.op === "c_accounts") && !this.allowRead(p.memberId)) {
+      this.log("rate_limited", { memberId: p.memberId, op: req.op });
+      return fail("rate_limited");
+    }
     switch (req.op) {
       case "c_list":
         return reply({ ok: true, servers: this.sharedServers() });
@@ -683,14 +704,24 @@ export class ConnectionManager implements ConnStatusSource {
     st.client.start();
   }
 
+  /** 요청을 보내고, 서버가 속도 제한이면 잠시 기다렸다 다시 — 다시 채우기에 빈 곳이 생기지 않게. */
+  private async requestRetrying(st: SpaceState, req: ConnRequestBody): Promise<any> {
+    let r = await st.client.request(req);
+    for (let i = 0; i < SYNC_RETRIES && !r.ok && r.code === "rate_limited"; i++) {
+      await new Promise((res) => setTimeout(res, this.rateRetryMs));
+      r = await st.client.request(req);
+    }
+    return r;
+  }
+
   private async syncSpace(st: SpaceState): Promise<void> {
-    const r = await st.client.request({ op: "c_list" });
+    const r = await this.requestRetrying(st, { op: "c_list" });
     if (r.ok && Array.isArray(r.servers)) this.applyShared(st, r.servers, true);
     await this.pushAccounts(st);
     // 끊겨 있던 동안의 메시지를 채운다(이미 가진 seq는 거울이 버림 — 중복 없음).
     for (const s of st.shared) {
       for (const c of s.channels) {
-        const rr = await st.client.request({ op: "c_read", channelId: c.channelId, limit: MAX_READ_LIMIT });
+        const rr = await this.requestRetrying(st, { op: "c_read", channelId: c.channelId, limit: MAX_READ_LIMIT });
         if (rr.ok && Array.isArray(rr.messages)) for (const m of rr.messages) this.ingest(st, c.channelId, m);
       }
     }
@@ -700,7 +731,7 @@ export class ConnectionManager implements ConnStatusSource {
     const accounts = this.deps.accounts.list()
       .filter((a) => a.area === "connection")
       .map((a) => ({ uuid: a.uuid, name: a.name, description: a.description ?? "" }));
-    await st.client.request({ op: "c_accounts", accounts });
+    await this.requestRetrying(st, { op: "c_accounts", accounts });
   }
 
   private remoteId(spaceId: string, id: string): string {
@@ -1111,6 +1142,10 @@ export class ConnectionManager implements ConnStatusSource {
   }
 
   // ───────── 시험용 ─────────
+
+  setReadLimitForTest(max: number, windowMs: number): void { this.readLimit = { max, windowMs }; }
+  setRateRetryMsForTest(ms: number): void { this.rateRetryMs = ms; }
+  syncSpaceForTest(spaceId: string): Promise<void> { return this.syncSpace(this.spaces.get(spaceId)!); }
 
   setTapForTest(fn: ((o: object) => void) | null): void {
     this.tap = fn;

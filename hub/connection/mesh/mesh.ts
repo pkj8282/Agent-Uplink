@@ -99,6 +99,7 @@ export interface MeshLink {
   ch: LinkChannel;
   strikes: number;
   recTimes: number[];
+  otherTimes: number[];
 }
 
 export interface CatalogBody {
@@ -124,6 +125,8 @@ const PULL_BATCH = 500;
 const PULL_MAX_BYTES = 640 * 1024;
 const STRIKES_TO_DROP = 3;
 const REC_PER_SECOND = 200;
+/** 한 연결의 기록 외 이벤트(목록·중계·확인·총괄 등) 초당 상한 — 넘으면 버린다. */
+const OTHER_PER_SECOND = 100;
 const RELAY_TTL = 8;
 const RELAY_MAX_AGE_MS = 10 * 60_000;
 const SEEN_MAX = 5000;
@@ -389,14 +392,14 @@ export class Mesh {
     if (this.deps.originOf && this.deps.originOf(info.serverKey) !== info.spaceId) {
       this.deps.log("mesh_reject_origin_mismatch", { spaceId: info.spaceId });
       ch.close();
-      return { info, ch, strikes: 0, recTimes: [] };
+      return { info, ch, strikes: 0, recTimes: [], otherTimes: [] };
     }
     if (this.pins[info.spaceId] && this.pins[info.spaceId] !== info.serverKey) {
       this.deps.log("mesh_key_conflict_direct_wins", { spaceId: info.spaceId });
       this.cats.delete(info.spaceId);
     }
     this.pins[info.spaceId] = info.serverKey;
-    const l: MeshLink = { info, ch, strikes: 0, recTimes: [] };
+    const l: MeshLink = { info, ch, strikes: 0, recTimes: [], otherTimes: [] };
     if (this.deps.policy?.blocked(info.spaceId)) {
       this.deps.log("mesh_blocked_link", { spaceId: info.spaceId });
       ch.close();
@@ -502,6 +505,12 @@ export class Mesh {
   }
 
   private onEvent(l: MeshLink, e: { event: string; [k: string]: unknown }): void {
+    if (e.event !== "rec") {
+      const now = this.now;
+      l.otherTimes = l.otherTimes.filter((t) => now - t < 1000);
+      if (l.otherTimes.length >= OTHER_PER_SECOND) { this.deps.log("mesh_drop_other_rate", { spaceId: l.info.spaceId }); return; }
+      l.otherTimes.push(now);
+    }
     if (e.event === "cat") return this.onCatalog(e.c, l);
     if (e.event === "relay") return this.onRelay(e, l);
     if (e.event === "ack") return this.onAck(e, l);

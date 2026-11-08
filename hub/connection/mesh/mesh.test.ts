@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { connect, node, settle, until } from "./testkit.js";
+import { connect, node, registerKey, settle, until } from "./testkit.js";
+import { LinkChannel } from "./link.js";
+import { generateSigningKeys } from "../../../shared/connCrypto.js";
 
 test("line_multi_hop: A-C-D로 이으면 D가 A 채널 기록을 받는다(출처·보낸 이름·순서)", async () => {
   const a = node("에이", "spA"), c = node("씨", "spC"), d = node("디", "spD");
@@ -146,4 +148,16 @@ test("pull_reply_fits_frame: 긴 기록이 많아도 당기기 응답 프레임 
   connect(a, c, (_from, obj) => { if (obj.id !== undefined && obj.records) maxFrame = Math.max(maxFrame, Buffer.byteLength(JSON.stringify(obj))); return true; });
   await until(() => c.mirror(a, ch).length === 12, 8000);
   assert.ok(maxFrame <= 1024 * 1024, `가장 큰 당기기 응답 ${maxFrame}바이트`);
+});
+
+
+test("mesh_other_events_over_budget_dropped: 한 연결의 기록 외 이벤트는 초당 상한까지만, 연결은 유지", async () => {
+  const c = node("씨", "spC");
+  const [x, y] = LinkChannel.memoryPair();
+  const atk = generateSigningKeys();
+  registerKey("spX", atk.publicKeyB64);
+  c.mesh.attach({ spaceId: "spX", spaceName: "엑스", serverKey: atk.publicKeyB64 }, y);
+  for (let i = 0; i < 150; i++) x.event({ event: "zz", i });
+  await until(() => c.logs.includes("mesh_drop_other_rate"));
+  assert.equal(y.isClosed, false);
 });

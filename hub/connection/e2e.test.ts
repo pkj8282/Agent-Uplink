@@ -248,3 +248,45 @@ test("c_read_reply_fits_frame: 긴 메시지가 많은 채널도 다시 채우�
     a.close();
   } finally { p.A.hub.stop(); p.B.hub.stop(); }
 });
+
+
+test("member_reads_over_budget_rate_limited: 읽기 요청을 쏟아내면 rate_limited, 다른 구성원은 정상", async () => {
+  const p = await startHubPair();
+  const C = await startTestHub({ connBackoffMs: [50, 100] });
+  try {
+    C.hub.conn.setUserName("씨");
+    const { code } = p.mA.createInvite("씨", "127.0.0.1", 60_000);
+    const j = await C.hub.conn.join(code);
+    assert.equal(j.ok, true);
+    await p.until(() => C.hub.conn.hasLiveConnection());
+    let limited = 0;
+    for (let i = 0; i < 125; i++) {
+      const r = await p.mB.requestSpaceForTest(p.spaceId, i % 2 ? { op: "c_read", channelId: p.channelId, limit: 1 } : { op: "c_list" });
+      if (!r.ok && r.code === "rate_limited") limited++;
+    }
+    assert.ok(limited >= 5, `limited=${limited}`);
+    assert.equal((await p.mB.requestSpaceForTest(p.spaceId, { op: "c_accounts", accounts: [] })).code, "rate_limited");
+    const other = await C.hub.conn.requestSpaceForTest(j.ok ? j.spaceId : "", { op: "c_list" });
+    assert.equal(other.ok, true);
+  } finally { p.A.hub.stop(); p.B.hub.stop(); C.hub.stop(); }
+});
+
+test("reconnect_sync_retries_when_rate_limited: 다시 채우다 속도 제한에 걸려도 기다렸다 이어서 빈 곳이 안 생긴다", async () => {
+  const p = await startHubPair();
+  try {
+    const s2 = p.mA.createCommsServer("많은채널");
+    const ids: string[] = [];
+    for (let i = 0; i < 8; i++) ids.push(p.mA.createCommsChannel(s2, `c${i}`));
+    const a = await login(p.A.port, "a-conn", "connection");
+    for (const id of ids) assert.equal((await a.req("send", { channelId: id, text: `m-${id}` })).ok, true);
+    p.mA.setShared([p.serverId, s2]);
+    const remote = ids.map((id) => `r:${p.spaceId}:${id}`);
+    await p.until(() => remote.every((r) => p.B.hub.hasChannelForTest(r)));
+    p.mA.setReadLimitForTest(3, 300);
+    p.mB.setRateRetryMsForTest(100);
+    await p.mB.syncSpaceForTest(p.spaceId);
+    const b = await login(p.B.port, "b-conn", "connection");
+    for (const r of remote) assert.equal((await b.req("read", { channelId: r })).messages?.length, 1, r);
+    a.close(); b.close();
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});
