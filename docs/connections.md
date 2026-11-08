@@ -107,7 +107,7 @@ On the new PC's **Connections** tab, under **Restore a backup from another PC**,
 - Invites and server link certificates are signed by the server, so the address, key, and profile cannot be swapped. Each participant hub (and each linked server) has its own Ed25519 key; every login signs a fresh challenge together with keying material exported from that TLS session, so a captured signature cannot be reused on another connection.
 - Limits before authentication (time, frame size, attempts and open connections per IP counted from the moment the TCP connection opens, one hello per connection), a cap on unauthenticated connections overall, a total connection limit, a send-queue limit that disconnects a peer that stops reading, two sockets per member or linked server, per-member message and read rate limits, and a per-link event budget.
 - Tokens, the recovery key's space key, and signing keys are stored in the data folder under the same access control as `admin.key`, and are never given to MCP servers or written to logs.
-- Repository contents are encrypted and signed; a changed, missing, or foreign fragment is detected.
+- Repository contents are encrypted and signed; a changed, missing, or foreign fragment is detected (for a rollback of the latest fragments, see Limitations).
 
 ## Limitations
 
