@@ -11,14 +11,11 @@ import { writeFileAtomic } from "../../fsutil.js";
 import { validateName } from "../../names.js";
 import type { ChannelStore } from "../../channels.js";
 import { MAX_STORED_TEXT_LENGTH, MAX_TEXT_LENGTH, type Channel, type Message, type MessageOrigin } from "../../../shared/protocol.js";
-import { spkiFingerprint, type SigningKeys } from "../../../shared/connCrypto.js";
+import type { SigningKeys } from "../../../shared/connCrypto.js";
 import { checkChain, openMesh, recordHash, signMesh, validRecordBody, type RecordBody, type Signed } from "../../../shared/meshRecord.js";
 import type { LinkChannel } from "./link.js";
 
-/** 망 ID = 서버 공개키 지문(SPKI SHA-256) 앞 32자 — 키에서 나오므로 남이 같은 ID를 주장할 수 없다. */
-export function meshIdOf(serverKeyB64: string): string {
-  return spkiFingerprint(serverKeyB64).slice(0, 32);
-}
+export { meshIdOf } from "../../../shared/connCrypto.js";
 
 export interface MeshSelf {
   spaceId: string;

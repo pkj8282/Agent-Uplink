@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import { generateSigningKeys } from "../../../shared/connCrypto.js";
 import type { Channel, Message } from "../../../shared/protocol.js";
@@ -7,6 +8,7 @@ import { ChannelStore } from "../../channels.js";
 import { tempDir } from "../../testing.js";
 import { MemoryBackend } from "../storage/backend.js";
 import { SpaceSync, type SpaceDeps } from "./sync.js";
+import { encodeSpaceInvite } from "../../../shared/spaceInvite.js";
 
 /** Hub 하나 흉내: 자기 데이터 폴더·채널 저장소·신원 키, 원격 메시지는 delivered에 쌓인다. 저장소는 함께 쓰는 MemoryBackend. */
 function node(backend: MemoryBackend, user: string) {
@@ -261,4 +263,25 @@ test("request_forgery_rejected: 서명 없는·증명 틀린 참여 요청은 �
   await sa.tick();
   assert.equal(sa.status().members.length, 1);
   assert.ok(a.events.includes("space1_request_rejected"));
+});
+
+
+test("space1_join_over_existing_refused: 이미 있는 공간에 다시 참여해 비밀·설정을 덮어쓰지 못한다", async () => {
+  const backend = new MemoryBackend();
+  const { a, sa } = await makeSpace(backend);
+  const spaceId = sa.status().spaceId;
+  const dir = path.join(a.deps.spacesDir, spaceId);
+  const files = () => ["config.json", "secrets.json"].map((f) => fs.readFileSync(path.join(dir, f), "utf8"));
+  const own = sa.invite("나", 60_000);
+  const before = files();
+  await assert.rejects(SpaceSync.join(a.deps, own, "ghp_x"), /space_already_joined/);
+  const k = generateSigningKeys();
+  const forged = encodeSpaceInvite({
+    v: 1, kind: "space1", spaceId, spaceName: "가짜", repo: "evil/repo", ownerKey: k.publicKeyB64, inviteId: "i1", token: "t".repeat(32),
+    expiresAt: 2_000_000_000_000, memberName: "피해자", hostUser: "공격자",
+  } as never, k.privateKeyPem);
+  let touched = false;
+  await assert.rejects(SpaceSync.join({ ...a.deps, makeBackend: () => { touched = true; return backend; } }, forged, "ghp_x"), /space_key_changed/);
+  assert.equal(touched, false);
+  assert.deepEqual(files(), before);
 });

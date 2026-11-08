@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { startHubPair, startTestHub, TestClient } from "../testing.js";
 import { MAX_TEXT_LENGTH } from "../../shared/protocol.js";
+import { generateSigningKeys, newJoinToken } from "../../shared/connCrypto.js";
+import { encodeInvite } from "../../shared/invite.js";
 
 async function login(port: number, uuid: string, area?: "connection"): Promise<TestClient> {
   const c = new TestClient(port);
@@ -288,5 +290,38 @@ test("reconnect_sync_retries_when_rate_limited: 다시 채우다 속도 제한�
     const b = await login(p.B.port, "b-conn", "connection");
     for (const r of remote) assert.equal((await b.req("read", { channelId: r })).messages?.length, 1, r);
     a.close(); b.close();
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});
+
+
+function forgedInvite(kind: "join" | "link", spaceId: string): string {
+  const k = generateSigningKeys();
+  return encodeInvite({
+    v: 1, kind, spaceId, spaceName: "가짜", profile: "tls13-chacha20", endpoint: { type: "direct", host: "127.0.0.1", port: 1 },
+    serverKey: k.publicKeyB64, token: newJoinToken(), expiresAt: Date.now() + 60_000, hostUser: "공격자", memberName: "피해자",
+  }, k.privateKeyPem);
+}
+
+test("join_same_id_other_key_refused: 같은 공간 ID에 다른 서버 키인 초대는 거부, 기존 공간은 그대로", async () => {
+  const p = await startHubPair();
+  try {
+    const before = JSON.stringify(p.mB.joinedForTest());
+    const r = await p.mB.join(forgedInvite("join", p.spaceId));
+    assert.deepEqual(r, { ok: false, code: "space_key_changed" });
+    assert.equal(JSON.stringify(p.mB.joinedForTest()), before);
+    assert.equal(p.mB.hasLiveConnection(), true);
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});
+
+test("join_same_id_same_key_keeps_space: 같은 초대를 실수로 다시 붙여 넣어도 기존 공간은 그대로", async () => {
+  const p = await startHubPair();
+  try {
+    const { code } = p.mA.createInvite("비", "127.0.0.1", 60_000);
+    assert.equal((await p.mB.join(code)).ok, true);
+    await p.until(() => p.mB.hasLiveConnection());
+    const before = JSON.stringify(p.mB.joinedForTest());
+    assert.deepEqual(await p.mB.join(code), { ok: true, spaceId: p.spaceId }); // 파기된 코드 — 실패로 놀라게 하지 않음
+    assert.equal(JSON.stringify(p.mB.joinedForTest()), before);
+    await p.until(() => p.mB.hasLiveConnection());
   } finally { p.A.hub.stop(); p.B.hub.stop(); }
 });

@@ -104,6 +104,11 @@ export class SpaceSync {
     const dec = decodeSpaceInvite(code, (d.now ?? Date.now)());
     if (!dec.ok) throw new Error(dec.code);
     const inv = dec.invite;
+    // 초대의 spaceId는 서명자가 정한다 — 이미 있는 공간의 비밀·설정을 덮어쓰지 않는다(네트워크 호출 전에).
+    if (ID_RE.test(inv.spaceId)) {
+      const have = readJson<Config | null>(path.join(d.spacesDir, inv.spaceId, "config.json"), null);
+      if (have) throw new Error(have.ownerKey === inv.ownerKey ? "space_already_joined" : "space_key_changed");
+    }
     const backend = d.makeBackend(inv.repo, inv.branch, token);
     await backend.check();
     const root = `agent-uplink/s1/${inv.spaceId}`;

@@ -91,3 +91,8 @@ export function newJoinToken(): string {
   const raw = toBase32(derivePieces(randomBytes(32), 4, 5, "join-token"));
   return raw.match(/.{4}/g)!.join("-");
 }
+
+/** 망 ID = 서버 공개키 지문(SPKI SHA-256) 앞 32자 — 키에서 나오므로 남이 같은 ID를 주장할 수 없다. */
+export function meshIdOf(serverKeyB64: string): string {
+  return spkiFingerprint(serverKeyB64).slice(0, 32);
+}

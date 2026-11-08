@@ -671,8 +671,11 @@ export class ConnectionManager implements ConnStatusSource {
   async join(code: string): Promise<{ ok: true; spaceId: string } | { ok: false; code: string }> {
     const d = decodeInvite(code, Date.now());
     if (!d.ok) return d;
+    // 초대의 공간 ID는 서명자가 정한다 — 같은 ID에 다른 키면 고정 키를 덮어쓰지 않고 거부(네트워크 호출 전에).
+    const had = this.store.joined().find((s) => s.spaceId === d.invite.spaceId);
+    if (had && had.serverKey !== d.invite.serverKey) return { ok: false, code: "space_key_changed" };
     const r = await joinSpace(d.invite, this.store.identity(), this.userName());
-    if (!r.ok) return r;
+    if (!r.ok) return had ? { ok: true, spaceId: had.spaceId } : r; // 이미 있는 공간: 같은 초대를 다시 넣은 것 — 기존 연결을 그대로 둔다
     this.store.addJoined(r.space);
     this.ensureStarted();
     this.startSpace(r.space);
@@ -1042,6 +1045,8 @@ export class ConnectionManager implements ConnStatusSource {
     const cfg = this.store.serverConfig();
     if (!cfg) return { ok: false, code: "server_not_enabled" };
     if (d.invite.spaceId === cfg.spaceId) return { ok: false, code: "link_self" };
+    const had = this.store.link(d.invite.spaceId);
+    if (had && had.serverKey !== d.invite.serverKey) return { ok: false, code: "space_key_changed" };
     const self = this.meshSelf();
     const r = await joinLink(d.invite, { keys: self.keys, spaceId: self.spaceId, spaceName: self.spaceName });
     if (!r.ok) return r;
@@ -1143,6 +1148,7 @@ export class ConnectionManager implements ConnStatusSource {
 
   // ───────── 시험용 ─────────
 
+  joinedForTest(): unknown { return this.store.joined(); }
   setReadLimitForTest(max: number, windowMs: number): void { this.readLimit = { max, windowMs }; }
   setRateRetryMsForTest(ms: number): void { this.rateRetryMs = ms; }
   syncSpaceForTest(spaceId: string): Promise<void> { return this.syncSpace(this.spaces.get(spaceId)!); }

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import tls from "node:tls";
 import { tempDir } from "../../testing.js";
 import { encodeFrame, FrameDecoder } from "../../../shared/framing.js";
-import { generateSigningKeys, newJoinToken, signB64 } from "../../../shared/connCrypto.js";
+import { generateSigningKeys, meshIdOf, newJoinToken, signB64 } from "../../../shared/connCrypto.js";
 import { CONN_EKM_LABEL, joinSigData } from "../../../shared/connProtocol.js";
 import type { InvitePayload } from "../../../shared/invite.js";
 import { ConnectionStore } from "../store.js";
@@ -46,7 +46,10 @@ async function setupA() {
   return { store, listener, port, logs, links, handled, linkInvite, memberToken };
 }
 
-const selfC = (): LinkSelf => ({ keys: generateSigningKeys(), spaceId: "spC", spaceName: "씨 서버" });
+const selfC = (): LinkSelf => {
+  const keys = generateSigningKeys();
+  return { keys, spaceId: meshIdOf(keys.publicKeyB64), spaceName: "씨 서버" };
+};
 
 function up(d: { link: any; self: LinkSelf }): Promise<{ dialer: LinkDialer; ch: LinkChannel }> {
   return new Promise((resolve) => {
@@ -69,7 +72,7 @@ test("link_join_and_auth: 서버 연결 인증서로 잇고, 다시 붙을 때�
     if (!j.ok) return;
     assert.equal(j.link.spaceId, "spA");
     assert.equal(j.link.dir, "out");
-    const inA = a.store.links().find((l) => l.spaceId === "spC");
+    const inA = a.store.links().find((l) => l.spaceId === c.spaceId);
     assert.equal(inA?.serverKey, c.keys.publicKeyB64);
     assert.equal(inA?.dir, "in");
     const { dialer, ch } = await up({ link: j.link, self: c });
@@ -80,7 +83,7 @@ test("link_join_and_auth: 서버 연결 인증서로 잇고, 다시 붙을 때�
     let gotOnC = "";
     ch.setHandlers({ onRequest: (req, reply) => { gotOnC = req.op; reply({ ok: true }); }, onEvent: () => {} });
     const last = a.links[a.links.length - 1];
-    assert.equal(last.spaceId, "spC");
+    assert.equal(last.spaceId, c.spaceId);
     assert.equal((await last.ch.request({ op: "l_pull" })).ok, true);
     assert.equal(gotOnC, "l_pull");
     dialer.stop();
@@ -116,7 +119,7 @@ test("link_removed_rejected: 끊어 둔(제거한) 서버는 인증 거부", asy
     const j = await joinLink(a.linkInvite().invite, c);
     assert.ok(j.ok);
     if (!j.ok) return;
-    a.store.removeLink("spC");
+    a.store.removeLink(c.spaceId);
     const errors: string[] = [];
     const dialer = new LinkDialer({ link: j.link, self: c, backoffMs: [1000], onUp: () => errors.push("up"), onDown: () => {}, onError: (e) => errors.push(e) });
     dialer.start();
@@ -199,6 +202,17 @@ test("mesh_join_relay_unsupported: 중계 끝점 인증서는 풀리지만 접�
     const { invite } = a.linkInvite();
     const r = await joinLink({ ...invite, endpoint: { type: "relay", relay: "relay.example", serverId: "spA" } }, selfC());
     assert.deepEqual(r, { ok: false, code: "relay_unsupported" });
+    assert.equal(a.store.links().length, 0);
+  } finally { await a.listener.close(); }
+});
+
+
+test("l_join_spaceid_must_match_key_fingerprint: 서버 연결의 공간 ID는 서버 키 지문이어야 한다(다른 서버 ID 선점 차단)", async () => {
+  const a = await setupA();
+  try {
+    const keys = generateSigningKeys();
+    const r = await joinLink(a.linkInvite().invite, { keys, spaceId: "someone-elses-id", spaceName: "가짜" });
+    assert.equal(r.ok, false);
     assert.equal(a.store.links().length, 0);
   } finally { await a.listener.close(); }
 });

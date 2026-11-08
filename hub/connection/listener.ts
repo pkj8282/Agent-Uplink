@@ -8,7 +8,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { boundedWrite, CONN_WRITE_QUEUE } from "../../shared/boundedWrite.js";
 import { encodeFrame, FrameDecoder, FrameTooLargeError } from "../../shared/framing.js";
 import { selfSignedCertPem } from "../../shared/x509.js";
-import { verifyB64 } from "../../shared/connCrypto.js";
+import { meshIdOf, verifyB64 } from "../../shared/connCrypto.js";
 import { LinkChannel, LINK_OPS } from "./mesh/link.js";
 import { DEFAULT_PROFILE, PROFILES } from "../../shared/cryptoProfile.js";
 import {
@@ -310,7 +310,8 @@ export class ConnListener {
           const bad = () => { this.deps.log("link_join_failed", { ip }); return fail("link_join_failed"); };
           if (!own || typeof q.token !== "string" || typeof q.serverKey !== "string" || typeof q.sig !== "string" || !name.ok
             || typeof q.spaceId !== "string" || !SPACE_ID_RE.test(q.spaceId) || q.spaceId === own.spaceId
-            || !verifyB64(q.serverKey, linkJoinSigData(challenge, ekm, q.token, q.serverKey, q.spaceId), q.sig)) return bad();
+            || !verifyB64(q.serverKey, linkJoinSigData(challenge, ekm, q.token, q.serverKey, q.spaceId), q.sig)
+            || q.spaceId !== meshIdOf(q.serverKey)) return bad(); // 공간 ID는 키 지문 — 다른 서버의 ID를 선점하지 못하게
           const existing = store.link(q.spaceId);
           if (existing && (existing.removed || existing.serverKey !== q.serverKey)) return bad();
           if (store.useLinkInvite(q.token, Date.now()) !== "ok") return bad();

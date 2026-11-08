@@ -2,6 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { freePort, startTestHub, TestClient } from "../../testing.js";
+import { generateSigningKeys, newJoinToken } from "../../../shared/connCrypto.js";
+import { decodeInvite, encodeInvite } from "../../../shared/invite.js";
 
 async function login(port: number, uuid: string): Promise<TestClient> {
   const c = new TestClient(port);
@@ -122,5 +124,20 @@ test("mesh_remove_link_disconnects: 서버 연결을 끊으면 상대가 다시 
     await new Promise((r) => setTimeout(r, 300));
     assert.equal(C.m.status().mesh!.links[0].connected, false);
     assert.ok(A.m.status().events.some((e) => e.code === "link_auth_failed"));
+  } finally { A.hub.stop(); C.hub.stop(); }
+});
+
+
+test("mesh_join_same_id_other_key_refused: 서버 연결도 같은 ID에 다른 키면 거부", async () => {
+  const A = await server("에이 서버", "에이");
+  const C = await server("씨 서버", "씨");
+  try {
+    const { code } = A.m.meshInvite("씨 서버", "127.0.0.1", 60_000);
+    const d = decodeInvite(code, Date.now());
+    assert.ok(d.ok);
+    assert.equal((await C.m.meshJoin(code)).ok, true);
+    const k = generateSigningKeys();
+    const forged = encodeInvite({ ...d.invite, serverKey: k.publicKeyB64, endpoint: { type: "direct", host: "127.0.0.1", port: 1 }, token: newJoinToken() }, k.privateKeyPem);
+    assert.deepEqual(await C.m.meshJoin(forged), { ok: false, code: "space_key_changed" });
   } finally { A.hub.stop(); C.hub.stop(); }
 });

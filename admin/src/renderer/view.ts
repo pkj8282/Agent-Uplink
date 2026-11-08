@@ -316,6 +316,7 @@ export function connEventLine(e: ConnEvent): string {
 
 const CONN_CODE_KEY: Record<string, AdminKey> = {
   recovery_key_invalid: "ce_recovery_key_invalid", restore_empty: "ce_restore_empty",
+  space_key_changed: "ce_space_key_changed", space_already_joined: "ce_space_already_joined",
   not_link_invite: "ce_not_link_invite", link_self: "ce_link_self", link_join_failed: "ce_link_join_failed", link_not_found: "ce_link_not_found",
   not_coordinator: "ce_not_coordinator", relay_timeout: "ce_relay_timeout", relay_write_blocked: "ce_relay_write_blocked",
   server_not_enabled: "ce_server_not_enabled", server_not_found: "ce_server_not_found", port_invalid: "ce_port_invalid",

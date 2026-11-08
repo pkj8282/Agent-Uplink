@@ -593,3 +593,19 @@ test("복원 문구: 후보·확인창·결과(끊김·거부 조각), 영어엔
     setLang("ko");
   }
 });
+
+
+test("같은 서버 다른 키·이미 참여 오류 문구(ko/en)", () => {
+  assert.match(connErrorMessage("space_key_changed", ""), /키가/);
+  assert.match(connErrorMessage("space_already_joined", ""), /이미 참여/);
+  setLang("en");
+  try {
+    for (const c of ["space_key_changed", "space_already_joined"]) {
+      const t = connErrorMessage(c, "");
+      assert.ok(t.length > 0, c);
+      assert.equal(hasHangul(t), false, c);
+    }
+  } finally {
+    setLang("ko");
+  }
+});
