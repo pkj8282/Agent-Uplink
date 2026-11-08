@@ -16,7 +16,11 @@ export function generateWrapKeys(): { publicB64: string; privatePem: string } {
 /** X25519 SPKI 공개키(base64)인지. 구성원이 올린 열쇠가 나중에 감싸기를 망가뜨리지 못하게 받을 때 확인한다. */
 export function isWrapPublicKey(b64: string): boolean {
   try {
-    return createPublicKey({ key: Buffer.from(b64, "base64"), format: "der", type: "spki" }).asymmetricKeyType === "x25519";
+    const pub = createPublicKey({ key: Buffer.from(b64, "base64"), format: "der", type: "spki" });
+    if (pub.asymmetricKeyType !== "x25519") return false;
+    // 전부 0 같은 저차수 키는 형식은 맞아도 키 합의에서 실패한다 — 실제로 한 번 해 본다
+    diffieHellman({ privateKey: generateKeyPairSync("x25519").privateKey, publicKey: pub });
+    return true;
   } catch {
     return false;
   }

@@ -33,6 +33,8 @@ export interface ConnLimits {
   /** 보내기 큐 상한(바이트): 인증 전 / 인증 뒤. 넘으면 그 연결을 끊는다. */
   preAuthWriteQueue: number;
   writeQueue: number;
+  /** TCP를 연 뒤 TLS를 마칠 때까지 기다리는 시간 — 인증 전 칸을 오래 잡지 못하게. */
+  handshakeTimeoutMs: number;
 }
 
 export const DEFAULT_CONN_LIMITS: ConnLimits = {
@@ -46,6 +48,7 @@ export const DEFAULT_CONN_LIMITS: ConnLimits = {
   maxSocketsPerPeer: 2,
   preAuthWriteQueue: 64 * 1024,
   writeQueue: CONN_WRITE_QUEUE,
+  handshakeTimeoutMs: 5_000,
 };
 
 export interface ConnPeer {
@@ -72,6 +75,7 @@ export interface ConnListenerDeps {
 }
 
 const AFTER_AUTH = new Set<string>(CONN_OPS_AFTER_AUTH);
+const NOISY_CODES = new Set(["preauth_per_ip", "preauth_total", "preauth_evicted", "rate_limited", "join_failed", "auth_failed", "link_join_failed", "link_auth_failed", "frame_too_large", "write_queue_full"]);
 const SPACE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 export class ConnListener {
@@ -81,7 +85,8 @@ export class ConnListener {
   private socketsByLink = new Map<string, Set<tls.TLSSocket>>();
   private attempts = new Map<string, number[]>();
   private preAuthByIp = new Map<string, number>();
-  private preAuthOpen = new Set<string>();
+  private preAuthOpen = new Map<string, { ip: string; port: number | undefined; raw: net.Socket }>();
+  private noted = new Map<string, { at: number; n: number }>();
 
   constructor(private readonly deps: ConnListenerDeps) {
     this.limits = { ...DEFAULT_CONN_LIMITS, ...deps.limits };
@@ -96,7 +101,7 @@ export class ConnListener {
       minVersion: "TLSv1.3",
       maxVersion: "TLSv1.3",
       ciphers: PROFILES[profile].tlsCipher,
-      handshakeTimeout: this.limits.preAuthTimeoutMs,
+      handshakeTimeout: Math.min(this.limits.preAuthTimeoutMs, this.limits.handshakeTimeoutMs),
     });
     srv.maxConnections = this.limits.maxConnections;
     srv.on("connection", (raw: net.Socket) => this.onTcp(raw));
@@ -152,14 +157,47 @@ export class ConnListener {
     const port = raw.remotePort;
     raw.on("error", () => {});
     const held = this.preAuthByIp.get(ip) ?? 0;
-    if (held >= this.limits.maxPreAuthPerIp || this.preAuthOpen.size >= this.limits.maxPreAuthTotal) {
-      this.deps.log(held >= this.limits.maxPreAuthPerIp ? "preauth_per_ip" : "preauth_total", { ip });
+    if (held >= this.limits.maxPreAuthPerIp) {
+      this.note("preauth_per_ip", { ip });
+      raw.destroy();
+      return;
+    }
+    if (this.preAuthOpen.size >= this.limits.maxPreAuthTotal && !this.evictBusiest(held)) {
+      this.note("preauth_total", { ip });
       raw.destroy();
       return;
     }
     this.preAuthByIp.set(ip, held + 1);
-    this.preAuthOpen.add(`${ip}:${port}`);
+    this.preAuthOpen.set(`${ip}:${port}`, { ip, port, raw });
     raw.once("close", () => this.releasePreAuth(ip, port));
+  }
+
+  /** 칸이 가득 찼을 때 새 연결보다 칸을 많이 잡은 IP의 가장 오래된 연결을 내보낸다. 없으면 false. */
+  private evictBusiest(newcomerHeld: number): boolean {
+    let busiest: string | null = null;
+    let most = newcomerHeld;
+    for (const [ip, n] of this.preAuthByIp) if (n > most) { busiest = ip; most = n; }
+    if (busiest === null) return false;
+    for (const e of this.preAuthOpen.values()) {
+      if (e.ip !== busiest) continue;
+      e.raw.destroy();
+      this.releasePreAuth(e.ip, e.port);
+      this.note("preauth_evicted", { ip: e.ip });
+      return true;
+    }
+    return false;
+  }
+
+  /** 기록. 인증 전 거부처럼 외부인이 마음대로 만들 수 있는 것은 10초에 5줄까지(사건 목록을 밀어내지 못하게). */
+  private note(code: string, detail: object): void {
+    if (NOISY_CODES.has(code)) {
+      const now = Date.now();
+      const e = this.noted.get(code);
+      if (!e || now - e.at >= 10_000) this.noted.set(code, { at: now, n: 1 });
+      else if (e.n >= 5) return;
+      else e.n++;
+    }
+    this.deps.log(code, detail);
   }
 
   /** 인증 전 칸을 돌려준다(인증 성공·연결 닫힘·핸드셰이크 실패 어디서 불려도 한 번만). */
@@ -210,7 +248,7 @@ export class ConnListener {
       if (sock.destroyed) return;
       this.deps.tap?.(obj);
       const limit = peer || link ? this.limits.writeQueue : this.limits.preAuthWriteQueue;
-      if (!boundedWrite(sock, encodeFrame(obj), limit)) this.deps.log("write_queue_full", { ip });
+      if (!boundedWrite(sock, encodeFrame(obj), limit)) this.note("write_queue_full", { ip });
     };
     const becomePeer = (memberId: string, userName: string) => {
       peer = {
@@ -267,33 +305,33 @@ export class ConnListener {
           reply({ ok: true, magic: CONN_MAGIC, version: CONN_VERSION, challenge });
           return;
         case "c_join": {
-          if (!this.allowAttempt(ip)) { this.deps.log("rate_limited", { ip }); return fail("rate_limited", true); }
+          if (!this.allowAttempt(ip)) { this.note("rate_limited", { ip }); return fail("rate_limited", true); }
           const q = f as { token?: unknown; hubKey?: unknown; userName?: unknown; sig?: unknown };
           // 참여자 이름은 서버 A가 초대 때 정한 이름(사용자 결정) — 참여자가 보낸 userName은 쓰지 않는다.
           const name = validateName(typeof q.token === "string" ? this.deps.store.inviteLabel(q.token) : null, "account", this.deps.cleanName);
           if (typeof q.token !== "string" || typeof q.hubKey !== "string" || typeof q.sig !== "string" || !name.ok
             || !verifyB64(q.hubKey, joinSigData(challenge, ekm, q.token, q.hubKey), q.sig)) {
-            this.deps.log("join_failed", { ip });
+            this.note("join_failed", { ip });
             return fail("join_failed");
           }
           const store = this.deps.store;
           const existing = store.members().find((m) => m.hubKey === q.hubKey);
-          if (existing?.revoked) { this.deps.log("join_failed", { ip }); return fail("join_failed"); }
+          if (existing?.revoked) { this.note("join_failed", { ip }); return fail("join_failed"); }
           const use = store.useInvite(q.token, q.hubKey, Date.now(), store.serverConfig()?.burnOnJoin === true);
-          if (use !== "ok") { this.deps.log("join_failed", { ip, reason: use }); return fail("join_failed"); }
+          if (use !== "ok") { this.note("join_failed", { ip, reason: use }); return fail("join_failed"); }
           const memberId = existing?.memberId ?? randomUUID();
           store.addMember({ memberId, hubKey: q.hubKey, userName: name.name, joinedAt: existing?.joinedAt ?? Date.now(), revoked: false });
           becomePeer(memberId, name.name);
-          this.deps.log("member_joined", { memberId, userName: name.name });
+          this.note("member_joined", { memberId, userName: name.name });
           reply({ ok: true, memberId, spaceName: store.serverConfig()?.spaceName ?? "" });
           return;
         }
         case "c_auth": {
-          if (!this.allowAttempt(ip)) { this.deps.log("rate_limited", { ip }); return fail("rate_limited", true); }
+          if (!this.allowAttempt(ip)) { this.note("rate_limited", { ip }); return fail("rate_limited", true); }
           const q = f as { memberId?: unknown; sig?: unknown };
           const m = typeof q.memberId === "string" ? this.deps.store.member(q.memberId) : undefined;
           if (!m || m.revoked || typeof q.sig !== "string" || !verifyB64(m.hubKey, authSigData(challenge, ekm, m.memberId), q.sig)) {
-            this.deps.log("auth_failed", { ip });
+            this.note("auth_failed", { ip });
             return fail("auth_failed");
           }
           becomePeer(m.memberId, m.userName);
@@ -302,12 +340,12 @@ export class ConnListener {
         }
         case "l_join": {
           if (!this.deps.onLink) return fail("auth_required", true);
-          if (!this.allowAttempt(ip)) { this.deps.log("rate_limited", { ip }); return fail("rate_limited", true); }
+          if (!this.allowAttempt(ip)) { this.note("rate_limited", { ip }); return fail("rate_limited", true); }
           const q = f as { token?: unknown; serverKey?: unknown; spaceId?: unknown; spaceName?: unknown; sig?: unknown };
           const store = this.deps.store;
           const own = store.serverConfig();
           const name = validateName(q.spaceName, "server", this.deps.cleanName);
-          const bad = () => { this.deps.log("link_join_failed", { ip }); return fail("link_join_failed"); };
+          const bad = () => { this.note("link_join_failed", { ip }); return fail("link_join_failed"); };
           if (!own || typeof q.token !== "string" || typeof q.serverKey !== "string" || typeof q.sig !== "string" || !name.ok
             || typeof q.spaceId !== "string" || !SPACE_ID_RE.test(q.spaceId) || q.spaceId === own.spaceId
             || !verifyB64(q.serverKey, linkJoinSigData(challenge, ekm, q.token, q.serverKey, q.spaceId), q.sig)
@@ -317,18 +355,18 @@ export class ConnListener {
           if (store.useLinkInvite(q.token, Date.now()) !== "ok") return bad();
           const rec: LinkRecord = { spaceId: q.spaceId, spaceName: name.name, serverKey: q.serverKey, dir: "in", addedAt: existing?.addedAt ?? Date.now(), removed: false };
           store.addLink(rec);
-          this.deps.log("link_joined", { spaceId: rec.spaceId, spaceName: rec.spaceName });
+          this.note("link_joined", { spaceId: rec.spaceId, spaceName: rec.spaceName });
           reply({ ok: true, spaceId: own.spaceId, spaceName: own.spaceName });
           becomeLink(rec);
           return;
         }
         case "l_auth": {
           if (!this.deps.onLink) return fail("auth_required", true);
-          if (!this.allowAttempt(ip)) { this.deps.log("rate_limited", { ip }); return fail("rate_limited", true); }
+          if (!this.allowAttempt(ip)) { this.note("rate_limited", { ip }); return fail("rate_limited", true); }
           const q = f as { spaceId?: unknown; sig?: unknown };
           const rec = typeof q.spaceId === "string" ? this.deps.store.link(q.spaceId) : undefined;
           if (!rec || rec.removed || typeof q.sig !== "string" || !verifyB64(rec.serverKey, linkAuthSigData(challenge, ekm, rec.spaceId), q.sig)) {
-            this.deps.log("link_auth_failed", { ip });
+            this.note("link_auth_failed", { ip });
             return fail("link_auth_failed");
           }
           reply({ ok: true, spaceId: this.deps.store.serverConfig()?.spaceId ?? "", spaceName: this.deps.store.serverConfig()?.spaceName ?? "" });
@@ -344,7 +382,7 @@ export class ConnListener {
       try {
         decoder.push(chunk, onFrame);
       } catch (e) {
-        if (e instanceof FrameTooLargeError) this.deps.log("frame_too_large", { ip, length: e.length });
+        if (e instanceof FrameTooLargeError) this.note("frame_too_large", { ip, length: e.length });
         sock.destroy();
       }
     });

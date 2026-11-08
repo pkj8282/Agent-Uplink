@@ -375,3 +375,38 @@ test("member_name_set_by_host: 참여자 이름은 서버 A가 초대 때 정한
     c.sock.destroy();
   } finally { await s.listener.close(); }
 });
+
+
+test("full_preauth_evicts_busiest_ip_for_newcomer: IP 둘이 인증 전 칸을 다 잡아도 새 연결은 들어온다", async () => {
+  const s = await setup();
+  try {
+    const holds = [];
+    for (const ip of ["127.0.0.2", "127.0.0.3"]) for (let i = 0; i < 4; i++) holds.push(await tcpHold(s.port, ip));
+    await new Promise((r) => setTimeout(r, 50));
+    const c = await rawConn(s.port);
+    assert.equal((await join(c, s.token, generateSigningKeys())).res.ok, true);
+    assert.ok(s.logs.includes("preauth_evicted"));
+    c.sock.destroy();
+    for (const h of holds) h.sock.destroy();
+  } finally { await s.listener.close(); }
+});
+
+test("idle_tcp_closed_before_tls_timeout: TLS를 시작하지 않는 연결은 짧은 시간 안에 닫힌다", async () => {
+  const s = await setup({ limits: { handshakeTimeoutMs: 200 } });
+  try {
+    const h = await tcpHold(s.port);
+    assert.equal(await closesSoon(h.closed, 2000), "closed");
+  } finally { await s.listener.close(); }
+});
+
+test("preauth_noise_is_sampled: 인증 전 거부 기록은 쏟아져도 몇 줄로 줄인다", async () => {
+  const s = await setup();
+  try {
+    const conns = [];
+    for (let i = 0; i < 60; i++) conns.push(await tcpHold(s.port, "127.0.0.2"));
+    await new Promise((r) => setTimeout(r, 100));
+    const n = s.logs.filter((l) => l === "preauth_per_ip").length;
+    assert.ok(n >= 1 && n <= 5, `n=${n}`);
+    for (const c of conns) c.sock.destroy();
+  } finally { await s.listener.close(); }
+});

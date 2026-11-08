@@ -1116,7 +1116,8 @@ export class Mesh {
     const b = openMesh<AckBody>("ack", e.a);
     if (!b || typeof b.reqId !== "string" || typeof b.target !== "string" || typeof b.entry !== "string") return this.strike(from, "ack_bad");
     const key = this.pins[b.target];
-    if (!key || (e.a as Signed).signer !== key) return this.strike(from, "ack_forged");
+    if (!key) { this.deps.log("mesh_drop_ack_unknown_target", { target: b.target }); return; } // 내가 승인하지 않은 서버의 확인 — 전달자 잘못이 아니다
+    if ((e.a as Signed).signer !== key) return this.strike(from, "ack_forged");
     if (!this.firstSeen(b.target, `ack:${b.reqId}`)) return;
     if (b.entry === this.deps.self().spaceId) {
       const p = this.pendingRelay.get(b.reqId);

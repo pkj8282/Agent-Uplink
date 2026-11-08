@@ -6,7 +6,7 @@ import { generateSigningKeys } from "../../../shared/connCrypto.js";
 import type { Channel, Message } from "../../../shared/protocol.js";
 import { ChannelStore } from "../../channels.js";
 import { tempDir } from "../../testing.js";
-import { MemoryBackend } from "../storage/backend.js";
+import { MemoryBackend, StorageError } from "../storage/backend.js";
 import { SpaceSync, type SpaceDeps } from "./sync.js";
 import { decodeSpaceInvite, encodeSpaceInvite, makeJoinRequest } from "../../../shared/spaceInvite.js";
 import { generateWrapKeys, isWrapPublicKey } from "../../../shared/keywrap.js";
@@ -314,7 +314,7 @@ function failing(be: MemoryBackend, match: string) {
   const orig = be.put.bind(be);
   const ctl = { on: false };
   be.put = (async (p: string, b: Buffer) => {
-    if (ctl.on && p.includes(match)) throw new Error("net");
+    if (ctl.on && p.includes(match)) throw new StorageError("storage_unreachable");
     return orig(p, b);
   }) as typeof be.put;
   return ctl;
@@ -386,4 +386,30 @@ test("join_invite_spacename_guarded: 초대의 공간 이름도 표시 전에 �
   const code = encodeSpaceInvite({ ...dec.invite, spaceName: "팀\u200B이름" }, ownerKey.privateKeyPem);
   const sb = await SpaceSync.join(b.deps, code, "ghp_b");
   assert.equal(sb.status().spaceName.includes("\u200B"), false);
+});
+
+
+test("join_request_low_order_xkey_rejected: 전부 0인 X25519 키도 거부되어 관리자 동기화가 멈추지 않는다", async () => {
+  const zero = Buffer.concat([Buffer.from("302a300506032b656e032100", "hex"), Buffer.alloc(32)]).toString("base64");
+  assert.equal(isWrapPublicKey(zero), false);
+  const be = new MemoryBackend();
+  const { a, sa } = await makeSpace(be);
+  const dec = decodeSpaceInvite(sa.invite("엠", 60_000), 0);
+  assert.ok(dec.ok);
+  await be.put(`agent-uplink/s1/${sa.status().spaceId}/requests/mal-1.json`, Buffer.from(makeJoinRequest(dec.invite, generateSigningKeys(), zero, 1)));
+  await sa.tick();
+  assert.ok(a.events.includes("space1_request_rejected"));
+  assert.equal(sa.status().lastError, null);
+});
+
+test("approve_bad_key_error_not_retried: 저장소 문제가 아닌 승인 실패는 재시도하지 않고 동기화를 멈추지 않는다", async () => {
+  const be = new MemoryBackend();
+  const { a, sa } = await makeSpace(be);
+  const b = node(be, "비");
+  await SpaceSync.join(b.deps, sa.invite("비", 60_000), "ghp_b");
+  (sa as any).writeKey = async () => { throw new TypeError("bad key"); };
+  await sa.tick();
+  assert.equal(sa.status().lastError, null);
+  assert.ok(a.events.includes("space1_request_rejected"));
+  assert.equal(sa.status().members.length, 1);
 });

@@ -1,4 +1,6 @@
 import { test } from "node:test";
+import fs from "node:fs";
+import path from "node:path";
 import assert from "node:assert/strict";
 import { startHubPair, startTestHub, TestClient } from "../testing.js";
 import { MAX_TEXT_LENGTH } from "../../shared/protocol.js";
@@ -341,4 +343,21 @@ test("join_reply_spacename_guarded: 서버가 보낸 공간 이름·초대의 �
     const j = C.hub.conn.status().joined[0];
     for (const v of [j.spaceName, j.hostUser]) assert.equal(/[\u200B\n]|\u{E0041}/u.test(v), false, JSON.stringify(v));
   } finally { p.A.hub.stop(); p.B.hub.stop(); C.hub.stop(); }
+});
+
+
+test("security_alerts_survive_event_flood: 입구 기록이 쏟아져도 갈라짐·복원 경고는 목록에 남고 파일로도 보존된다", async () => {
+  const p = await startHubPair();
+  try {
+    const log = (p.mA as any).log.bind(p.mA);
+    log("mesh_fork_detected", { originName: "엠", n: 7, mineVia: "에이치", otherVia: "케이" });
+    log("storage_restore_behind_mesh", { restoredIndex: 8, knownIndex: 10 });
+    for (let i = 0; i < 300; i++) log("preauth_per_ip", { ip: "1.2.3.4" });
+    const codes = p.mA.status().events.map((e: { code: string }) => e.code);
+    assert.ok(codes.includes("mesh_fork_detected"));
+    assert.ok(codes.includes("storage_restore_behind_mesh"));
+    assert.equal(codes.filter((c: string) => c === "preauth_per_ip").length <= 50, true);
+    const saved = fs.readFileSync(path.join((p.mA as any).store.dir, "alerts.json"), "utf8");
+    assert.ok(saved.includes("mesh_fork_detected"));
+  } finally { p.A.hub.stop(); p.B.hub.stop(); }
 });

@@ -67,6 +67,9 @@ const C_READ_MAX_BYTES = 2 * 1024 * 1024;
 const READ_PER_10S = 120;
 /** 다시 채우다 rate_limited를 받았을 때 기다렸다 재시도하는 횟수. */
 const SYNC_RETRIES = 5;
+/** 일반 사건에 밀려나면 안 되는 경고(갈라진 기록·복원 뒤처짐). */
+const ALERT_CODES = new Set(["mesh_fork_detected", "mesh_fork_reported", "mesh_fork_not_signed_by_me", "mesh_fork_own_unknown", "storage_restore_behind_mesh"]);
+const MAX_ALERTS = 100;
 
 export class ConnectionManager implements ConnStatusSource {
   readonly store: ConnectionStore;
@@ -315,8 +318,32 @@ export class ConnectionManager implements ConnStatusSource {
   }
 
   private log(code: string, detail: object = {}): void {
-    this.events.push({ ts: Date.now(), code, detail });
+    const entry = { ts: Date.now(), code, detail };
+    if (ALERT_CODES.has(code)) {
+      // 주인이 꼭 봐야 하는 경고는 일반 사건에 밀려나지 않게 따로 두고 파일로도 남긴다
+      this.alerts().push(entry);
+      if (this.alerts().length > MAX_ALERTS) this.alerts().shift();
+      try {
+        fs.mkdirSync(this.store.dir, { recursive: true });
+        writeFileAtomic(path.join(this.store.dir, "alerts.json"), JSON.stringify(this.alerts()));
+      } catch { /* 기록 실패로 통신을 멈추지 않는다 */ }
+      return;
+    }
+    this.events.push(entry);
     if (this.events.length > 200) this.events.shift();
+  }
+
+  private alertList: { ts: number; code: string; detail: object }[] | null = null;
+
+  private alerts(): { ts: number; code: string; detail: object }[] {
+    if (this.alertList) return this.alertList;
+    try {
+      const v = JSON.parse(fs.readFileSync(path.join(this.store.dir, "alerts.json"), "utf8")) as unknown;
+      this.alertList = Array.isArray(v) ? (v as { ts: number; code: string; detail: object }[]) : [];
+    } catch {
+      this.alertList = [];
+    }
+    return this.alertList;
   }
 
   /** 원격 문자열 감독(숨은 문자 → 보이는 이스케이프). */
@@ -938,7 +965,7 @@ export class ConnectionManager implements ConnStatusSource {
       spaces1: this.space1Status(),
       comms: this.comms.servers().map((s) => ({ serverId: s.id, name: s.name, channels: s.channels.map((c) => ({ channelId: c.id, name: c.name })) })),
       mesh: this.meshStatus(),
-      events: this.events.slice(-50),
+      events: [...this.alerts(), ...this.events.slice(-50)].sort((a, b) => a.ts - b.ts),
     };
   }
 

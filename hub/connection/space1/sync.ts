@@ -254,6 +254,10 @@ export class SpaceSync {
       try {
         await this.writeKey(r.epoch, m);
       } catch (e) {
+        if (!(e instanceof StorageError)) { // 저장소 문제가 아니면 다시 해도 같다 — 관리자 동기화를 멈추지 않게 이 요청만 버린다
+          this.d.log("space1_request_rejected", { spaceId: this.cfg.spaceId });
+          continue;
+        }
         this.st.processed = this.st.processed.filter((n) => n !== name); // 다음 동기화에서 다시
         throw e;
       }

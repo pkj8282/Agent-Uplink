@@ -132,3 +132,20 @@ test("relay_replay_after_flood_from_other_entry_dropped: 다른 서버가 중복
   assert.equal(d.channels.recent(dch, 100).length, before);
   assert.equal(before, 1);
 });
+
+
+test("ack_for_unapproved_target_no_strike: 일부 서버만 승인한 망에서 정상 확인 때문에 연결이 끊기지 않는다", async () => {
+  const manual = { manual: true };
+  const a = node("에이", "spA", { relayTimeoutMs: 2000 }, manual), b = node("비", "spB", {}, manual), c = node("씨", "spC", {}, manual), d = node("디", "spD", {}, manual);
+  const cch = c.addChannel("씨 일반");
+  connect(a, b); connect(c, b); connect(d, b);
+  await until(() => a.mesh.candidates().some((x) => x.origin === "spC") && c.mesh.candidates().some((x) => x.origin === "spA"));
+  assert.equal(a.mesh.acceptServer("spC"), true);
+  assert.equal(c.mesh.acceptServer("spA"), true);
+  await until(() => a.mesh.servers().some((s) => s.spaceId === "spC"));
+  for (let i = 0; i < 4; i++) assert.equal((await a.mesh.relayWrite({ mirrorId: a.mesh.mirrorId("spC", cch), from: "u1", fromName: "n", hubUser: "h", text: `t${i}` })).ok, true);
+  await settle(50);
+  assert.equal(d.logs.includes("mesh_reject_ack_forged"), false);
+  assert.equal(d.logs.includes("mesh_link_dropped"), false);
+  assert.equal(d.mesh.links.size, 1);
+});
