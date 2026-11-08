@@ -510,7 +510,8 @@ export function meshCommandConfirm(what: string): string {
 export function parseRestoreForm(i: { kind: string; repo: string; token: string; url: string; key: string; bucket: string; recoveryKey: string; serverName: string }):
   { ok: true; value: RestoreInput } | { ok: false; error: string } {
   const recoveryKey = i.recoveryKey.trim();
-  if (!recoveryKey || !/^[A-Za-z2-7\-\s]+$/.test(recoveryKey)) return { ok: false, error: tr("form_recovery_invalid") };
+  if (!recoveryKey) return { ok: false, error: tr("form_recovery_invalid") };
+  if (!/^[A-Za-z2-7\-\s]+$/.test(recoveryKey)) return { ok: false, error: connErrorMessage("recovery_key_invalid", tr("form_recovery_invalid")) };
   const serverName = i.serverName.trim();
   if (!serverName) return { ok: false, error: tr("form_brestore_name_invalid") };
   if (i.kind === "supabase") {

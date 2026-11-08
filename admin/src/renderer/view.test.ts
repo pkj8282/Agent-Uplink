@@ -567,6 +567,11 @@ test("parseRestoreForm: GitHub(저장소·토큰)·Supabase(주소·키·버킷)
   assert.equal(parseRestoreForm({ ...base, token: "" }).ok, false);
   assert.equal(parseRestoreForm({ ...base, recoveryKey: "" }).ok, false);
   assert.equal(parseRestoreForm({ ...base, recoveryKey: "ab!cd" }).ok, false);
+  // 뭔가 넣었는데 형식이 틀리면 "넣으세요"가 아니라 "올바르지 않습니다" — 비었을 때만 "넣으세요"
+  const empty = parseRestoreForm({ ...base, recoveryKey: "  " });
+  assert.ok(!empty.ok && /넣으세요/.test(empty.error));
+  const wrongChar = parseRestoreForm({ ...base, recoveryKey: "abc1-efgh" });
+  assert.ok(!wrongChar.ok && /올바르지 않습니다/.test(wrongChar.error));
   assert.equal(parseRestoreForm({ ...base, serverName: " " }).ok, false);
 });
 

@@ -1,4 +1,4 @@
-import type { AdminApi, AdminConfig, ConnStatus, IpcResult, MeshCommand, MeshStatus, SecurityFinding, Snapshot, SnapshotServer, TrashItem } from "../types.js";
+import type { AdminApi, AdminConfig, BackupCandidate, ConnStatus, IpcResult, MeshCommand, MeshStatus, RestoreInput, RestoreResult, SecurityFinding, Snapshot, SnapshotServer, TrashItem } from "../types.js";
 import {
   ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf,
   emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage,
@@ -895,6 +895,8 @@ byId<HTMLSelectElement>("cfg-lang").addEventListener("change", async (e) => {
   if (fm) showFormMessage(fm);
   else showFormMessage({ text: "", kind: "ok" });
   showOpMsg(null);
+  renderRestoreCandidates();
+  renderRestoreResult();
   const m = byId("lang-msg");
   m.textContent = r.ok ? tr("lang_changed_notice") : r.error;
   m.className = `msg ${r.ok ? "ok" : "err"}`;
@@ -1184,34 +1186,51 @@ byId("restore-kind").addEventListener("change", () => {
   byId("restore-sb").hidden = !sb;
 });
 
+// 마지막 찾기·가져오기 결과 — 언어를 바꾸면 이 값으로 새 언어로 다시 그린다.
+let restoreScan: { cands: BackupCandidate[]; input: RestoreInput } | null = null;
+let restoreDone: RestoreResult | null = null;
+
+function renderRestoreResult(): void {
+  byId("restore-result").textContent = restoreDone ? backupRestoreDone(restoreDone) : "";
+}
+
+function renderRestoreCandidates(): void {
+  const list = byId("restore-candidates");
+  list.replaceChildren();
+  if (!restoreScan) return;
+  const { cands, input } = restoreScan;
+  if (cands.length === 0) list.append(el("li", tr("brestore_none"), "empty"));
+  for (const c of cands) {
+    const li = el("li", undefined, "row");
+    li.append(el("span", backupCandidateLine(c), "name"), el("span", c.hubId, "id"));
+    const b = el("button", tr("btn_brestore_import"));
+    b.type = "button";
+    b.addEventListener("click", () => {
+      if (!window.confirm(backupRestoreConfirm(input.serverName, c))) return;
+      void connRun(b, () => window.admin.connRestore({ ...input, spaceId: c.spaceId, hubId: c.hubId }), (r) => {
+        restoreDone = r;
+        restoreScan = null;
+        renderRestoreResult();
+        renderRestoreCandidates();
+        clearRestoreSecrets();
+        return backupRestoreDone(r);
+      });
+    });
+    li.append(b);
+    list.append(li);
+  }
+}
+
 byId<HTMLFormElement>("restore-form").addEventListener("submit", (e) => {
   e.preventDefault();
   const parsed = restoreFormValue();
   if (!parsed.ok) { showOpMsg({ text: parsed.error, kind: "err" }); return; }
   const input = parsed.value;
-  const list = byId("restore-candidates");
-  byId("restore-result").textContent = "";
+  restoreDone = null;
+  renderRestoreResult();
   void connRun(submitter(e), () => window.admin.connRestoreScan(input), (cands) => {
-    list.replaceChildren();
-    if (cands.length === 0) list.append(el("li", tr("brestore_none"), "empty"));
-    for (const c of cands) {
-      const li = el("li", undefined, "row");
-      li.append(el("span", backupCandidateLine(c), "name"), el("span", c.hubId, "id"));
-      const b = el("button", tr("btn_brestore_import"));
-      b.type = "button";
-      b.addEventListener("click", () => {
-        if (!window.confirm(backupRestoreConfirm(input.serverName, c))) return;
-        void connRun(b, () => window.admin.connRestore({ ...input, spaceId: c.spaceId, hubId: c.hubId }), (r) => {
-          const text = backupRestoreDone(r);
-          byId("restore-result").textContent = text;
-          list.replaceChildren();
-          clearRestoreSecrets();
-          return text;
-        });
-      });
-      li.append(b);
-      list.append(li);
-    }
+    restoreScan = { cands, input };
+    renderRestoreCandidates();
   });
 });
 
