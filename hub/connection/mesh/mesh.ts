@@ -12,7 +12,7 @@ import { validateName } from "../../names.js";
 import type { ChannelStore } from "../../channels.js";
 import { MAX_STORED_TEXT_LENGTH, MAX_TEXT_LENGTH, type Channel, type Message, type MessageOrigin } from "../../../shared/protocol.js";
 import type { SigningKeys } from "../../../shared/connCrypto.js";
-import { checkChain, openMesh, recordHash, signMesh, validRecordBody, type RecordBody, type Signed } from "../../../shared/meshRecord.js";
+import { checkChain, cleanSigned, MAX_SIGNED_BYTES, openMesh, recordHash, signMesh, validRecordBody, type RecordBody, type Signed } from "../../../shared/meshRecord.js";
 import type { LinkChannel } from "./link.js";
 
 export { meshIdOf } from "../../../shared/connCrypto.js";
@@ -347,7 +347,20 @@ export class Mesh {
     this.deps.onServersChanged?.();
   }
 
+  /** 서명 밖 필드를 버린 묶음(저장·전달은 이것만). 형식이 틀리면 그대로 돌려줘 openMesh가 거부하게 하고, 너무 크면 null(서명자의 문제라 벌점 없음). */
+  sanitize(raw: unknown): unknown | null {
+    const c = cleanSigned(raw);
+    if (!c) return raw;
+    if (Buffer.byteLength(JSON.stringify(c)) > MAX_SIGNED_BYTES) {
+      this.deps.log("mesh_drop_oversized", {});
+      return null;
+    }
+    return c;
+  }
+
   private onCatalog(raw: unknown, from: MeshLink): void {
+    raw = this.sanitize(raw);
+    if (raw === null) return;
     const b = openMesh<CatalogBody>("cat", raw);
     const signer = (raw as Signed).signer;
     if (!b || typeof b.origin !== "string" || !SPACE_ID_RE.test(b.origin) || typeof b.ver !== "number" || !Number.isInteger(b.ver) || b.ver < 1
@@ -526,6 +539,8 @@ export class Mesh {
 
   /** 받은 기록 하나를 검증·저장·전달. 결과 코드를 돌려준다. */
   private handleRecord(raw: unknown, from: MeshLink, pulled: boolean): string {
+    raw = this.sanitize(raw);
+    if (raw === null) return "bad";
     const b = openMesh<RecordBody>("rec", raw);
     if (!b || !validRecordBody(b, this.now)) { this.strike(from, "record_bad"); return "bad"; }
     if (b.origin === this.deps.self().spaceId) return "dup"; // 내 기록이 돌아옴
@@ -612,6 +627,9 @@ export class Mesh {
   }
 
   private onRelay(e: { [k: string]: unknown }, from: MeshLink): void {
+    const q = this.sanitize(e.q);
+    if (q === null) return;
+    e = { ...e, q };
     const b = openMesh<RelayBody>("relay", e.q);
     const isS = (x: unknown, max: number) => typeof x === "string" && x.length > 0 && x.length <= max;
     if (!b || !isS(b.reqId, 64) || !isS(b.entry, 64) || !isS(b.entryName, 256) || !isS(b.target, 64) || !isS(b.ch, 128) || !isS(b.from, 300)
@@ -658,6 +676,9 @@ export class Mesh {
   }
 
   private onAck(e: { [k: string]: unknown }, from: MeshLink): void {
+    const a = this.sanitize(e.a);
+    if (a === null) return;
+    e = { ...e, a };
     const b = openMesh<AckBody>("ack", e.a);
     if (!b || typeof b.reqId !== "string" || typeof b.target !== "string" || typeof b.entry !== "string") return this.strike(from, "ack_bad");
     const key = this.pins[b.target];

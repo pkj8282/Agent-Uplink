@@ -1,5 +1,7 @@
 // 방식 3 레드팀(설계 5.1 "연결된 다른 통신 서버" 행, 5.4): 악의 서버 M이 D에 직접 붙어 프레임을 마음대로 보낸다.
 import { test } from "node:test";
+import fs from "node:fs";
+import path from "node:path";
 import assert from "node:assert/strict";
 import { generateSigningKeys } from "../../../shared/connCrypto.js";
 import { signMesh, recordHash, type RecordBody } from "../../../shared/meshRecord.js";
@@ -156,4 +158,57 @@ test("catalog_race_impersonation_blocked: 진짜 A 목록보다 먼저 온 가�
   await until(() => d.mesh.servers().some((s) => s.spaceId === "spA" && s.spaceName === "에이"));
   assert.equal(d.mesh.keyOf("spA"), a.keys.publicKeyB64);
   assert.equal([...d.mesh.links].some((l) => l.info.spaceId === "spC"), true); // 정상 이웃 C 연결 유지
+});
+
+
+// ── 독립 리뷰 M6: 서명 밖 필드 ──
+
+function dataContains(dir: string, needle: string): boolean {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const f = path.join(dir, e.name);
+    if (e.isDirectory() ? dataContains(f, needle) : fs.readFileSync(f, "utf8").includes(needle)) return true;
+  }
+  return false;
+}
+
+/** 관찰자가 붙은 D + D에 직접 붙은 악의 서버 M. D가 관찰자에게 전달하는 프레임을 모은다. */
+async function padWorld(opts: { gov?: boolean } = {}) {
+  const d = node("디", "spD", {}, opts), obs = node("관찰", "spO");
+  const out: any[] = [];
+  connect(d, obs, (from, o) => { if (from === "a") out.push(JSON.parse(JSON.stringify(o))); return true; });
+  const m = intruder(d);
+  await until(() => d.mesh.servers().some((s) => s.spaceId === "spM"));
+  return { d, m, out };
+}
+
+test("padded_record_stored_and_forwarded_without_padding: 서명 밖 필드는 저장·전달 때 사라진다", async () => {
+  const { d, m, out } = await padWorld();
+  const { r } = m.rec(1, "");
+  m.send({ event: "rec", r: { ...r, pad: "PADPADPAD" } });
+  await until(() => d.channels.recent(d.mesh.mirrorId("spM", m.ch), 10).length === 1);
+  await until(() => out.some((o) => o.event === "rec"));
+  assert.equal(out.find((o) => o.event === "rec").r.pad, undefined);
+  assert.equal(dataContains(path.join(d.dataDir, "mesh"), "PADPADPAD"), false);
+});
+
+test("oversized_signed_body_refused: 서명자가 본문을 부풀린 기록은 벌점 없이 버린다", async () => {
+  const { d, m } = await padWorld();
+  const body = { origin: "spM", ch: m.ch, n: 1, prev: "", seq: 1, ts: Date.now(), from: "m1", fromName: "엠AI", hubUser: "엠", via: [], text: "t", blob: "x".repeat(1_500_000) };
+  m.send({ event: "rec", r: signMesh("rec", body, m.keys) });
+  await until(() => d.logs.includes("mesh_drop_oversized"));
+  assert.equal(d.channels.recent(d.mesh.mirrorId("spM", m.ch), 10).length, 0);
+  assert.equal(rejects(d, "record_bad"), 0);
+  assert.equal(m.closed(), false);
+});
+
+test("padded_cat_relay_ack_coord_forwarded_clean: 목록·중계·확인·총괄 알림도 서명 밖 필드 없이 전달", async () => {
+  const { d, m, out } = await padWorld({ gov: true });
+  const pad = { pad: "PADPADPAD" };
+  m.send({ event: "cat", c: { ...signMesh("cat", { origin: "spM", spaceName: "엠", ver: 2, channels: [{ id: m.ch, name: "엠 채널" }] }, m.keys), ...pad } });
+  m.send({ event: "relay", ttl: 5, q: { ...signMesh("relay", { reqId: "r1", entry: "spM", entryName: "엠", target: "spZ", ch: "x", from: "a", fromName: "a", hubUser: "u", text: "t", ts: Date.now() }, m.keys), ...pad } });
+  m.send({ event: "ack", a: { ...signMesh("ack", { reqId: "r2", entry: "spZ", target: "spM", ok: true, seq: 1 }, m.keys), ...pad } });
+  m.send({ event: "coord", m: { ...signMesh("coord", { origin: "spM", ver: 1, on: true }, m.keys), ...pad } });
+  await until(() => ["relay", "ack", "coord"].every((k) => out.some((o) => o.event === k)) && out.some((o) => o.event === "cat" && o.c.body.origin === "spM" && o.c.body.ver === 2));
+  assert.equal(out.some((o) => JSON.stringify(o).includes("PADPADPAD")), false);
+  assert.equal(dataContains(path.join(d.dataDir, "mesh"), "PADPADPAD"), false);
 });

@@ -44,6 +44,7 @@ export interface PinnedSocket {
 export function openPinnedSocket(
   target: { endpoint: InvitePayload["endpoint"]; serverKey: string; profile: ProfileId },
   timeoutMs: number,
+  maxFrame = CLIENT_MAX_FRAME,
 ): Promise<{ ok: true; ps: PinnedSocket } | { ok: false; code: ConnectError }> {
   const ep = target.endpoint;
   if (ep.type !== "direct") return Promise.resolve({ ok: false, code: "relay_unsupported" });
@@ -73,7 +74,7 @@ export function openPinnedSocket(
       const bad = checkPeer(sock, target.serverKey, target.profile);
       if (bad) return done({ ok: false, code: bad });
       sock.on("error", () => {});
-      const dec = new FrameDecoder({ maxFrame: CLIENT_MAX_FRAME });
+      const dec = new FrameDecoder({ maxFrame });
       let handler: ((f: any) => void) | null = null;
       const queued: any[] = [];
       sock.on("data", (chunk: Buffer) => {

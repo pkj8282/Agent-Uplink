@@ -19,6 +19,8 @@ export interface LinkHandlers {
   onEvent(e: { event: string; [k: string]: unknown }): void;
 }
 
+/** 서버 연결의 프레임 상한 — 받는 쪽 리스너와 같게(거는 쪽만 더 크면 전달할 때 상대가 끊는다). */
+const LINK_MAX_FRAME = 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 30_000;
 export const LINK_OPS: ReadonlySet<string> = new Set<string>(LINK_OPS_AFTER_AUTH);
 
@@ -136,7 +138,7 @@ export type LinkJoinError = "relay_unsupported" | "pin_mismatch" | "cipher_misma
 /** 서버 연결 인증서로 처음 잇는다(C 주인의 승인 = 이 호출). 성공하면 저장할 연결 정보. */
 export async function joinLink(invite: InvitePayload, self: LinkSelf, timeoutMs = 10_000): Promise<{ ok: true; link: LinkRecord } | { ok: false; code: LinkJoinError }> {
   if (invite.kind !== "link") return { ok: false, code: "not_link_invite" };
-  const o = await openPinnedSocket(invite, timeoutMs);
+  const o = await openPinnedSocket(invite, timeoutMs, LINK_MAX_FRAME);
   if (!o.ok) return o;
   const ch = overSocket(o.ps);
   try {
@@ -215,7 +217,7 @@ export class LinkDialer {
     if (this.stopped) return;
     const l = this.opts.link;
     if (!l.endpoint || !l.profile) { this.opts.onError?.("no_endpoint"); return; }
-    const o = await openPinnedSocket({ endpoint: l.endpoint, serverKey: l.serverKey, profile: l.profile }, this.opts.timeoutMs ?? 10_000);
+    const o = await openPinnedSocket({ endpoint: l.endpoint, serverKey: l.serverKey, profile: l.profile }, this.opts.timeoutMs ?? 10_000, LINK_MAX_FRAME);
     if (this.stopped) { if (o.ok) o.ps.sock.destroy(); return; }
     if (!o.ok) { this.opts.onError?.(o.code); this.schedule(); return; }
     const ch = overSocket(o.ps);

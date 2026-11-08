@@ -216,3 +216,20 @@ test("l_join_spaceid_must_match_key_fingerprint: 서버 연결의 공간 ID는 �
     assert.equal(a.store.links().length, 0);
   } finally { await a.listener.close(); }
 });
+
+
+test("link_frame_limit_is_1mb_both_directions: 거는 쪽도 1MB가 넘는 프레임은 받지 않고 끊는다", async () => {
+  const a = await setupA();
+  try {
+    const c = selfC();
+    const j = await joinLink(a.linkInvite().invite, c);
+    if (!j.ok) assert.fail("join");
+    const { dialer, ch } = await up({ link: j.link, self: c });
+    let closed = false;
+    ch.onClose(() => { closed = true; });
+    a.links[a.links.length - 1].ch.event({ event: "big", pad: "x".repeat(1_500_000) });
+    for (let i = 0; i < 200 && !closed; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(closed, true);
+    dialer.stop();
+  } finally { await a.listener.close(); }
+});

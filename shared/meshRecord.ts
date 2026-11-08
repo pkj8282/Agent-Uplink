@@ -29,6 +29,17 @@ export interface RecordBody {
   text: string;
 }
 
+/** 망으로 다니는 서명 묶음 하나의 크기 상한(바이트) — 받는 쪽 프레임 상한(1MB) 안에 들어가게. */
+export const MAX_SIGNED_BYTES = 512 * 1024;
+
+/** 서명 대상이 아닌 바깥 필드를 버리고 {body, signer, sig}만 새로 만든다. 형식이 틀리면 null. */
+export function cleanSigned<T = Record<string, unknown>>(raw: unknown): Signed<T> | null {
+  if (!raw || typeof raw !== "object") return null;
+  const { body, signer, sig } = raw as { body?: unknown; signer?: unknown; sig?: unknown };
+  if (!body || typeof body !== "object" || Array.isArray(body) || typeof signer !== "string" || typeof sig !== "string") return null;
+  return { body, signer, sig } as Signed<T>;
+}
+
 export function signMesh<T extends object>(kind: MeshKind, body: T, keys: SigningKeys): Signed<T> {
   const b = { ...body, k: kind } as T & { k: MeshKind };
   return JSON.parse(signEnvelope(b, keys.privateKeyPem, keys.publicKeyB64)) as Signed<T>;

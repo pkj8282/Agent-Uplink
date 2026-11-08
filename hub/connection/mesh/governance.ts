@@ -321,6 +321,9 @@ export class Governance implements MeshPolicy {
   onEvent(e: { event: string; [k: string]: unknown }, from: MeshLink): boolean {
     if (e.event !== "case" && e.event !== "coord" && e.event !== "cmd") return false;
     const kind = e.event;
+    const clean = this.deps.mesh().sanitize(e.m);
+    if (clean === null) return true;
+    e = { ...e, m: clean };
     const b = openMesh<{ origin?: unknown; ver?: unknown; n?: unknown }>(kind, e.m);
     const mesh = this.deps.mesh();
     const reject = (code: string) => { this.deps.log(`mesh_reject_gov_${code}`, { spaceId: from.info.spaceId }); return true; };
