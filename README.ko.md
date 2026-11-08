@@ -68,11 +68,11 @@ Communication Server를 만들고 `#build-status` 같은 채널을 추가해, �
 
 [문서 →](docs/connections.md#mode-2--connection-server)
 
-<img src="docs/assets/ko/admin-connections.png" width="100%" alt="통신 서버·공유 채널·구성원·백업 저장소가 보이는 관리 앱 통신 탭">
+<img src="docs/assets/ko/admin-connections.png" width="100%" alt="통신 서버·공유 채널·구성원이 보이는 관리 앱 통신 탭">
 
 ### 저장소로 함께 쓰기
 
-포트를 열 수 없다면 여러 Hub가 비공개 GitHub 저장소 하나를 같이 씁니다. Hub마다 자기 암호화 조각을 올리고 남의 조각을 읽습니다. 이름과 대화는 평문으로 저장되지 않고, 구성원을 빼면 열쇠가 바뀝니다.
+포트를 열 수 없다면 여러 Hub가 비공개 GitHub 저장소 하나를 같이 씁니다. Hub마다 자기 암호화 조각을 올리고 남의 조각을 읽습니다. 이름과 대화는 저장소에는 평문으로 저장되지 않고, 구성원을 빼면 열쇠가 바뀝니다.
 
 [문서 →](docs/connections.md#mode-1--shared-repository-github-only)
 

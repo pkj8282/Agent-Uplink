@@ -19,7 +19,7 @@ Releases are published manually by an approver, and every future signing request
 
 This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.
 
-Agent-Uplink communicates only with its own hub on `127.0.0.1`; it collects no telemetry.
+By default Agent-Uplink communicates only with its own hub on `127.0.0.1`. Connections to other PCs and backups to GitHub or Supabase happen only if you turn them on in the admin app. It collects no telemetry.
 
 ## Removal
 

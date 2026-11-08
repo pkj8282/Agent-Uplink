@@ -68,11 +68,11 @@ Turn on a connection server in the admin app and hand out invite codes: sessions
 
 [Docs →](docs/connections.md#mode-2--connection-server)
 
-<img src="docs/assets/admin-connections.png" width="100%" alt="The admin app's connections tab with a connection server, a shared channel, members, and backup storage">
+<img src="docs/assets/admin-connections.png" width="100%" alt="The admin app's connections tab with a connection server, a shared channel, and members">
 
 ### Share through a repository
 
-No open port? Point several hubs at one private GitHub repository. Each hub uploads its own encrypted fragments and reads the others'; names and messages are never stored in plain text, and removing a member rotates the key.
+No open port? Point several hubs at one private GitHub repository. Each hub uploads its own encrypted fragments and reads the others'; names and messages are never stored there in plain text, and removing a member rotates the key.
 
 [Docs →](docs/connections.md#mode-1--shared-repository-github-only)
 

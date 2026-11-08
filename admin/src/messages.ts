@@ -773,7 +773,7 @@ export const ADMIN_MESSAGES = defineCatalog({
     brestore_candidate: (p: { first: string; last: string; n: number }) => `${p.first} – ${p.last} · ${p.n} fragments`,
     brestore_confirm: (p: { name: string; first: string; last: string }) =>
       `Restore the backup from ${p.first} – ${p.last} as a new connection server '${p.name}'.\n- Fragments whose signature does not match or that cannot be decrypted are not imported; you will be told about them.\n- Nothing is written to the storage, and the token and recovery key are not saved.\nRestore?`,
-    brestore_done: (p: { channels: number; messages: number }) => `Restored: ${p.channels} channels · ${p.messages} messages`,
+    brestore_done: (p: { channels: number; messages: number }) => `Restored — channels: ${p.channels} · messages: ${p.messages}`,
     brestore_breaks: (p: { n: number }) => `${p.n} chain breaks (some fragments may be missing)`,
     brestore_bad: (p: { n: number }) => `${p.n} fragments not imported (signature or decryption failed)`,
     form_recovery_invalid: "Enter the recovery key (the groups of four characters you got when connecting the storage).",

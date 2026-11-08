@@ -586,6 +586,7 @@ test("복원 문구: 후보·확인창·결과(끊김·거부 조각), 영어엔
   try {
     for (const t of [backupCandidateLine(c), backupRestoreConfirm("x", c), backupRestoreDone({ channelCount: 1, messageCount: 1, breaks: [1], bad: [{ path: "p", code: "x" }] }),
       connErrorMessage("recovery_key_invalid", ""), connErrorMessage("restore_empty", ""), connEventLine({ ts: 1, code: "storage_restored", detail: { messages: 3 } })]) assert.equal(hasHangul(t), false, t);
+    assert.match(backupRestoreDone({ channelCount: 1, messageCount: 3, breaks: [], bad: [] }), /channels: 1 · messages: 3/);
     const bad = parseRestoreForm({ kind: "github", repo: "", token: "", url: "", key: "", bucket: "", recoveryKey: "", serverName: "" });
     assert.equal(!bad.ok && hasHangul(bad.error), false);
   } finally {

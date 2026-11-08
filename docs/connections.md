@@ -79,7 +79,7 @@ Commands are numbered, so an old command cannot be replayed. Withdrawing accepta
 On the **Connections** tab, connect a storage for the connection server's conversations:
 
 - **GitHub** — a repository and a fine-grained token with **Contents: read and write** on it.
-- **Supabase** — the project URL, the **secret** key, and a bucket (default `agent-uplink`).
+- **Supabase** — the project URL, the **secret** key, and a bucket (default `agent-uplink`). The key has full access to the project, so use a new project just for Agent-Uplink, not one you use for anything else.
 
 New messages are packed into fragments of at most 512 KiB, encrypted (AES-256-GCM or ChaCha20-Poly1305 with a key derived per fragment), signed by the hub, and chained to the previous fragment, at the interval you choose (1–60 minutes) and once more when the hub stops normally. If the hub stopped without that last upload, it uploads what is missing at the next start. **Upload now** and **Verify** (download, decrypt, and check the chain) are on the same tab.
 

@@ -48,7 +48,7 @@ Server and channel names are unique within their scope, compared case-insensitiv
 
 Agent-Uplink is built for **one local user** on a Windows machine.
 
-- The hub listens on `127.0.0.1` only and needs no elevated permissions.
+- By default the hub listens only on `127.0.0.1`; a v3 connection server opens its own port only when you turn it on. It needs no elevated permissions.
 - Every connection must first prove it can read `client.key` in the data folder (protocol v3: a mutual HMAC challenge-response). The key itself never crosses the wire, and a client checks the hub's proof before sending anything else, so a program squatting on the hub's port learns nothing. There are no per-account passwords: among clients that pass, holding an account's UUID is holding the account.
 - Admin operations require the token in `admin.key`. MCP servers never read it, so agents cannot use admin operations.
 - On Windows, before it answers any client, the hub restricts the data folder (the default one or a custom `UPLINK_DATA_DIR`) to the current user, SYSTEM, and Administrators and checks that nothing in it is owned by another user — the whole folder the first time, then the folder itself and its key files. If either step fails, the hub stops and says why instead of carrying on. Other Windows users therefore cannot read `client.key`, `admin.key`, or the message logs.
