@@ -4,7 +4,8 @@ import tls from "node:tls";
 import { tempDir } from "../testing.js";
 import { encodeFrame, FrameDecoder } from "../../shared/framing.js";
 import { generateSigningKeys, newJoinToken, signB64, type SigningKeys } from "../../shared/connCrypto.js";
-import { CONN_EKM_LABEL, joinSigData, authSigData } from "../../shared/connProtocol.js";
+import net from "node:net";
+import { CONN_EKM_LABEL, joinSigData, authSigData, linkAuthSigData } from "../../shared/connProtocol.js";
 import { ConnectionStore } from "./store.js";
 import { ConnListener, type ConnLimits, type ConnPeer } from "./listener.js";
 
@@ -38,7 +39,7 @@ async function rawConn(port: number): Promise<Raw> {
   };
 }
 
-async function setup(opts: { burn?: boolean; limits?: Partial<ConnLimits> } = {}) {
+async function setup(opts: { burn?: boolean; limits?: Partial<ConnLimits>; link?: boolean } = {}) {
   const dataDir = tempDir("conn-listen-");
   const store = new ConnectionStore({ dataDir });
   store.setServerConfig({ enabled: true, port: 0, profile: "tls13-chacha20", spaceId: "sp1", spaceName: "팀", burnOnJoin: opts.burn ?? true, shared: [] });
@@ -50,6 +51,7 @@ async function setup(opts: { burn?: boolean; limits?: Partial<ConnLimits> } = {}
   const listener = new ConnListener({
     store,
     limits: opts.limits,
+    ...(opts.link ? { onLink: () => {} } : {}),
     onPeer: (p) => peers.push(p),
     onPeerGone: () => {},
     handle: (_p, req, reply) => { handled.push(req.op); reply({ ok: true }); },
@@ -249,6 +251,115 @@ test("RT-C15_preauth_slots_per_ip: 한 IP가 인증 전 연결로 자리를 다 
     const again = await rawConn(s.port);
     assert.equal((await again.req("c_hello")).ok, true);
     for (const c of [...held, again]) c.sock.destroy();
+  } finally { await s.listener.close(); }
+});
+
+// ── 독립 리뷰 M2·M3: 입구에서 칸·큐를 혼자 차지하지 못하게 ──
+
+async function tcpHold(port: number, localAddress?: string) {
+  const sock = net.connect({ port, host: "127.0.0.1", ...(localAddress ? { localAddress } : {}) });
+  await new Promise<void>((res, rej) => { sock.once("connect", () => res()); sock.once("error", rej); });
+  sock.on("error", () => {});
+  const closed = new Promise<void>((r) => sock.once("close", () => r()));
+  return { sock, closed };
+}
+const closesSoon = (closed: Promise<void>, ms = 1500) => Promise.race([closed.then(() => "closed"), new Promise((r) => setTimeout(() => r("open"), ms))]);
+
+test("tcp_only_flood_keeps_slot_for_member: TLS 없이 TCP만 여는 한 IP는 인증 전 칸 몇 개만 차지하고 정상 참여는 된다", async () => {
+  const s = await setup();
+  try {
+    const holds = [];
+    for (let i = 0; i < 8; i++) holds.push(await tcpHold(s.port, "127.0.0.2"));
+    assert.deepEqual(await Promise.all(holds.slice(4).map((h) => closesSoon(h.closed))), Array(4).fill("closed"));
+    assert.deepEqual(await Promise.all(holds.slice(0, 4).map((h) => closesSoon(h.closed, 50))), Array(4).fill("open"));
+    assert.ok(s.logs.includes("preauth_per_ip"));
+    const c = await rawConn(s.port);
+    assert.equal((await join(c, s.token, generateSigningKeys())).res.ok, true);
+    c.sock.destroy();
+    for (const h of holds) h.sock.destroy();
+  } finally { await s.listener.close(); }
+});
+
+test("preauth_total_cap: 여러 IP가 모여도 인증 전 연결은 전체 상한까지만, 닫히면 자리가 돌아온다", async () => {
+  const s = await setup({ limits: { maxPreAuthPerIp: 100, maxPreAuthTotal: 3 } });
+  try {
+    const member = await rawConn(s.port);
+    assert.equal((await join(member, s.token, generateSigningKeys())).res.ok, true); // 인증된 연결은 세지 않음
+    const holds = [];
+    for (let i = 0; i < 3; i++) holds.push(await tcpHold(s.port));
+    const extra = await tcpHold(s.port);
+    assert.equal(await closesSoon(extra.closed), "closed");
+    assert.ok(s.logs.includes("preauth_total"));
+    holds[0].sock.destroy();
+    await holds[0].closed;
+    await new Promise((r) => setTimeout(r, 100));
+    const again = await rawConn(s.port);
+    assert.equal((await again.req("c_hello")).ok, true);
+    assert.equal((await member.req("c_list")).ok, true);
+    again.sock.destroy(); member.sock.destroy();
+    for (const h of holds) h.sock.destroy();
+  } finally { await s.listener.close(); }
+});
+
+test("second_c_hello_closes: 인증 전 c_hello는 연결당 한 번", async () => {
+  const s = await setup();
+  try {
+    const c = await rawConn(s.port);
+    assert.equal((await c.req("c_hello")).ok, true);
+    c.sock.write(encodeFrame({ op: "c_hello", id: 99 }));
+    assert.equal(await closesSoon(c.closed), "closed");
+  } finally { await s.listener.close(); }
+});
+
+test("unread_events_hit_write_queue: 읽지 않는 구성원의 보내기 큐는 상한에서 끊긴다", async () => {
+  const s = await setup({ limits: { writeQueue: 64 * 1024 } });
+  try {
+    const c = await rawConn(s.port);
+    assert.equal((await join(c, s.token, generateSigningKeys())).res.ok, true);
+    c.sock.pause();
+    const text = "x".repeat(16 * 1024);
+    for (let i = 0; i < 4000 && !s.logs.includes("write_queue_full"); i++) {
+      s.peers[0].send({ event: "msg", text } as never);
+      await new Promise((r) => setImmediate(r));
+    }
+    assert.ok(s.logs.includes("write_queue_full"));
+    c.sock.resume();
+    assert.equal(await closesSoon(c.closed), "closed");
+  } finally { await s.listener.close(); }
+});
+
+test("member_third_socket_drops_oldest: 구성원 한 명의 소켓은 둘까지, 넘으면 가장 오래된 것을 끊는다", async () => {
+  const s = await setup();
+  try {
+    const k = generateSigningKeys();
+    const first = await rawConn(s.port);
+    const { res } = await join(first, s.token, k);
+    const second = await rawConn(s.port);
+    assert.equal((await auth(second, res.memberId, k)).ok, true);
+    assert.equal(await closesSoon(first.closed, 50), "open");
+    const third = await rawConn(s.port);
+    assert.equal((await auth(third, res.memberId, k)).ok, true);
+    assert.equal(await closesSoon(first.closed), "closed");
+    assert.equal((await third.req("c_list")).ok, true);
+    assert.equal((await second.req("c_list")).ok, true);
+    second.sock.destroy(); third.sock.destroy();
+  } finally { await s.listener.close(); }
+});
+
+test("link_third_socket_drops_oldest: 서버 연결의 소켓도 둘까지", async () => {
+  const s = await setup({ link: true });
+  try {
+    const k = generateSigningKeys();
+    s.store.addLink({ spaceId: "link1", spaceName: "이웃", serverKey: k.publicKeyB64, dir: "in", addedAt: 1, removed: false });
+    const linkAuth = async (c: Raw) => {
+      const h = await c.req("c_hello");
+      return c.req("l_auth", { spaceId: "link1", sig: signB64(k.privateKeyPem, linkAuthSigData(h.challenge, c.ekm(), "link1")) });
+    };
+    const conns = [await rawConn(s.port), await rawConn(s.port), await rawConn(s.port)];
+    for (const c of conns) assert.equal((await linkAuth(c)).ok, true);
+    assert.equal(await closesSoon(conns[0].closed), "closed");
+    assert.equal(await closesSoon(conns[2].closed, 50), "open");
+    conns[1].sock.destroy(); conns[2].sock.destroy();
   } finally { await s.listener.close(); }
 });
 

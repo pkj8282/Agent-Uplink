@@ -2,8 +2,10 @@
 // 통신 op 허용 목록만 처리한다 — 로컬·관리 op는 이름이 같아도 처리하지 않는다.
 // 참여: 서버가 서명한 초대의 1회용 토큰 + 참여자 Hub 키 서명. 인증: 등록된 Hub 키 서명. 두 서명 모두 이 연결의 도전값과
 // TLS 키 재료(EKM)에 묶여 다른 연결로 옮겨 쓸 수 없다.
+import net from "node:net";
 import tls from "node:tls";
 import { randomBytes, randomUUID } from "node:crypto";
+import { boundedWrite } from "../../shared/boundedWrite.js";
 import { encodeFrame, FrameDecoder, FrameTooLargeError } from "../../shared/framing.js";
 import { selfSignedCertPem } from "../../shared/x509.js";
 import { verifyB64 } from "../../shared/connCrypto.js";
@@ -22,8 +24,15 @@ export interface ConnLimits {
   preAuthMaxFrame: number;
   maxFrame: number;
   attemptsPerIpPerMinute: number;
-  /** 한 IP가 동시에 가질 수 있는 인증 전 연결 수 — 전체 자리를 한 곳이 차지해 구성원이 못 붙는 일을 막는다(RT-C15). */
+  /** 한 IP가 동시에 가질 수 있는 인증 전 연결 수 — 전체 자리를 한 곳이 차지해 구성원이 못 붙는 일을 막는다(RT-C15). TCP가 열리는 순간부터 센다. */
   maxPreAuthPerIp: number;
+  /** 모든 IP를 합친 인증 전 연결 수 — 나머지 자리는 인증된 연결 몫. */
+  maxPreAuthTotal: number;
+  /** 구성원 한 명·서버 연결 하나의 동시 소켓 수 — 넘으면 가장 오래된 것을 끊는다. */
+  maxSocketsPerPeer: number;
+  /** 보내기 큐 상한(바이트): 인증 전 / 인증 뒤. 넘으면 그 연결을 끊는다. */
+  preAuthWriteQueue: number;
+  writeQueue: number;
 }
 
 export const DEFAULT_CONN_LIMITS: ConnLimits = {
@@ -33,6 +42,10 @@ export const DEFAULT_CONN_LIMITS: ConnLimits = {
   maxFrame: 1024 * 1024,
   attemptsPerIpPerMinute: 10,
   maxPreAuthPerIp: 4,
+  maxPreAuthTotal: 8,
+  maxSocketsPerPeer: 2,
+  preAuthWriteQueue: 64 * 1024,
+  writeQueue: 8 * 1024 * 1024,
 };
 
 export interface ConnPeer {
@@ -68,6 +81,7 @@ export class ConnListener {
   private socketsByLink = new Map<string, Set<tls.TLSSocket>>();
   private attempts = new Map<string, number[]>();
   private preAuthByIp = new Map<string, number>();
+  private preAuthOpen = new Set<string>();
 
   constructor(private readonly deps: ConnListenerDeps) {
     this.limits = { ...DEFAULT_CONN_LIMITS, ...deps.limits };
@@ -85,8 +99,12 @@ export class ConnListener {
       handshakeTimeout: this.limits.preAuthTimeoutMs,
     });
     srv.maxConnections = this.limits.maxConnections;
+    srv.on("connection", (raw: net.Socket) => this.onTcp(raw));
     srv.on("secureConnection", (s) => this.onSocket(s));
-    srv.on("tlsClientError", (_e, s) => s.destroy());
+    srv.on("tlsClientError", (_e, s) => {
+      this.releasePreAuth(s.remoteAddress ?? "?", s.remotePort);
+      s.destroy();
+    });
     this.srv = srv;
     return new Promise((resolve, reject) => {
       srv.once("error", reject);
@@ -128,24 +146,45 @@ export class ConnListener {
     return true;
   }
 
-  private onSocket(sock: tls.TLSSocket): void {
-    const ip = sock.remoteAddress ?? "?";
-    const challenge = randomBytes(32).toString("base64");
-    const ekm = sock.exportKeyingMaterial(32, CONN_EKM_LABEL, Buffer.alloc(0)).toString("base64");
+  /** TCP가 열린 순간(TLS 전) 인증 전 칸을 센다 — TLS를 시작하지 않고 칸만 잡는 연결도 상한에 걸린다. */
+  private onTcp(raw: net.Socket): void {
+    const ip = raw.remoteAddress ?? "?";
+    const port = raw.remotePort;
+    raw.on("error", () => {});
     const held = this.preAuthByIp.get(ip) ?? 0;
-    if (held >= this.limits.maxPreAuthPerIp) {
-      this.deps.log("preauth_per_ip", { ip });
-      sock.destroy();
+    if (held >= this.limits.maxPreAuthPerIp || this.preAuthOpen.size >= this.limits.maxPreAuthTotal) {
+      this.deps.log(held >= this.limits.maxPreAuthPerIp ? "preauth_per_ip" : "preauth_total", { ip });
+      raw.destroy();
       return;
     }
     this.preAuthByIp.set(ip, held + 1);
-    let preAuthHeld = true;
-    const releasePreAuth = () => {
-      if (!preAuthHeld) return;
-      preAuthHeld = false;
-      const n = (this.preAuthByIp.get(ip) ?? 1) - 1;
-      if (n <= 0) this.preAuthByIp.delete(ip);
-      else this.preAuthByIp.set(ip, n);
+    this.preAuthOpen.add(`${ip}:${port}`);
+    raw.once("close", () => this.releasePreAuth(ip, port));
+  }
+
+  /** 인증 전 칸을 돌려준다(인증 성공·연결 닫힘·핸드셰이크 실패 어디서 불려도 한 번만). */
+  private releasePreAuth(ip: string, port: number | undefined): void {
+    if (!this.preAuthOpen.delete(`${ip}:${port}`)) return;
+    const n = (this.preAuthByIp.get(ip) ?? 1) - 1;
+    if (n <= 0) this.preAuthByIp.delete(ip);
+    else this.preAuthByIp.set(ip, n);
+  }
+
+  private onSocket(sock: tls.TLSSocket): void {
+    const ip = sock.remoteAddress ?? "?";
+    const remotePort = sock.remotePort;
+    const releasePreAuth = () => this.releasePreAuth(ip, remotePort);
+    const challenge = randomBytes(32).toString("base64");
+    const ekm = sock.exportKeyingMaterial(32, CONN_EKM_LABEL, Buffer.alloc(0)).toString("base64");
+    let helloSeen = false;
+    /** 소켓 집합에 넣고, 상한을 넘으면 가장 오래된 것부터 끊는다(같은 구성원·서버가 칸을 다 차지하지 못하게). */
+    const hold = (set: Set<tls.TLSSocket>) => {
+      set.add(sock);
+      for (const old of set) {
+        if (set.size <= this.limits.maxSocketsPerPeer) break;
+        set.delete(old);
+        old.destroy();
+      }
     };
     let peer: ConnPeer | null = null;
     let link: { rec: LinkRecord; ch: LinkChannel } | null = null;
@@ -170,7 +209,8 @@ export class ConnListener {
     const send = (obj: object) => {
       if (sock.destroyed) return;
       this.deps.tap?.(obj);
-      sock.write(encodeFrame(obj));
+      const limit = peer || link ? this.limits.writeQueue : this.limits.preAuthWriteQueue;
+      if (!boundedWrite(sock, encodeFrame(obj), limit)) this.deps.log("write_queue_full", { ip });
     };
     const becomePeer = (memberId: string, userName: string) => {
       peer = {
@@ -184,7 +224,7 @@ export class ConnListener {
       decoder = new FrameDecoder({ maxFrame: this.limits.maxFrame });
       let set = this.socketsByMember.get(memberId);
       if (!set) this.socketsByMember.set(memberId, (set = new Set()));
-      set.add(sock);
+      hold(set);
       this.deps.onPeer(peer);
     };
 
@@ -196,7 +236,7 @@ export class ConnListener {
       link = { rec, ch };
       let set = this.socketsByLink.get(rec.spaceId);
       if (!set) this.socketsByLink.set(rec.spaceId, (set = new Set()));
-      set.add(sock);
+      hold(set);
       this.deps.onLink?.(rec, ch);
     };
 
@@ -222,6 +262,8 @@ export class ConnListener {
       }
       switch (r.op) {
         case "c_hello":
+          if (helloSeen) { sock.destroy(); return; } // 연결당 한 번 — 응답을 읽지 않고 쏟아붓는 메모리 공격 차단
+          helloSeen = true;
           reply({ ok: true, magic: CONN_MAGIC, version: CONN_VERSION, challenge });
           return;
         case "c_join": {
