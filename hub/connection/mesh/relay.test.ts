@@ -105,3 +105,30 @@ test("relay_flood_limited: 이어진 서버 하나가 중계 쓰기를 쏟아부
   assert.ok(n <= 60, `저장된 중계 쓰기 ${n}개`);
   assert.ok(d.logs.includes("mesh_drop_relay_rate"));
 });
+
+
+test("relay_replay_after_flood_from_other_entry_dropped: 다른 서버가 중복 제거 기억을 밀어내도 캡처한 중계를 다시 넣을 수 없다", async () => {
+  let t = Date.now();
+  const clock = { now: () => t };
+  const a = node("에이", "spA", { ...clock, relayTimeoutMs: 2000 }), d = node("디", "spD", clock);
+  const dch = d.addChannel("디 일반");
+  const captured: any[] = [];
+  connect(a, d, (from, o) => { if (from === "a" && o.event === "relay") captured.push(JSON.parse(JSON.stringify(o))); return true; });
+  await until(() => a.mesh.servers().some((s) => s.spaceId === "spD" && s.channels.length === 1));
+  const r = await a.mesh.relayWrite({ mirrorId: a.mesh.mirrorId("spD", dch), from: "u1", fromName: "n", hubUser: "h", text: "한 번만" });
+  assert.equal(r.ok, true);
+  const m = intruder(d);
+  m.send({ event: "cat", c: signMesh("cat", { origin: "spM", spaceName: "엠", ver: 1, channels: [] }, m.keys) });
+  await settle();
+  for (let batch = 0; batch < 52; batch++) { // 초당 이벤트 예산 안에서 5001개 넘게
+    for (let i = 0; i < 99; i++) m.send({ event: "relay", ttl: 1, q: signMesh("relay", { reqId: `flood-${batch}-${i}`, entry: "spM", entryName: "엠", target: "spZ", ch: "x", from: "a", fromName: "a", hubUser: "u", text: "t", ts: t }, m.keys) });
+    await settle(5);
+    t += 1100;
+  }
+  await settle(50);
+  const before = d.channels.recent(dch, 100).length;
+  m.send(captured[0]);
+  await settle(50);
+  assert.equal(d.channels.recent(dch, 100).length, before);
+  assert.equal(before, 1);
+});

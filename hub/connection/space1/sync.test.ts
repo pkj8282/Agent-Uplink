@@ -372,3 +372,18 @@ test("member_picks_key_matching_roster_check: 퇴출을 여러 번 시도해 열
   await sb.tick();
   assert.deepEqual(b.delivered.map((d) => d.msg.text), ["새 세대 비밀"]);
 });
+
+
+test("join_invite_spacename_guarded: 초대의 공간 이름도 표시 전에 감독한다", async () => {
+  const be = new MemoryBackend();
+  const { sa } = await makeSpace(be);
+  const dec = decodeSpaceInvite(sa.invite("비", 60_000), 0);
+  assert.ok(dec.ok);
+  const b = node(be, "비");
+  const seen: string[] = [];
+  b.deps.guard = (s) => { seen.push(s); return s.replace(/\u200B/g, "[숨김]"); };
+  const ownerKey = (sa as any).d.keys;
+  const code = encodeSpaceInvite({ ...dec.invite, spaceName: "팀\u200B이름" }, ownerKey.privateKeyPem);
+  const sb = await SpaceSync.join(b.deps, code, "ghp_b");
+  assert.equal(sb.status().spaceName.includes("\u200B"), false);
+});

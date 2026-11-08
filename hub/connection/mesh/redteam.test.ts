@@ -77,15 +77,18 @@ test("seq_jump_does_not_block: 번호를 크게 건너뛴 기록은 빈칸으로
   assert.deepEqual(mirror.map((x) => x.seq), [1, 2]);
 });
 
-test("fork_strikes_disconnect: 같은 번호에 다른 내용(갈라짐)을 3번 → 거부하고 그 연결을 끊음", async () => {
+test("fork_never_strikes: 같은 번호에 다른 내용이 와도 벌점·끊김 없이 먼저 받은 것을 유지하고 알린다", async () => {
   const { d } = await world();
   const m = intruder(d);
   m.send({ event: "rec", r: m.rec(1, "").r });
   for (const t of ["갈래1", "갈래2", "갈래3"]) m.send({ event: "rec", r: m.rec(1, "", { text: t }).r });
-  await until(() => m.closed());
-  assert.equal(rejects(d, "record_fork"), 3);
-  assert.ok(d.logs.includes("mesh_link_dropped"));
+  await until(() => d.logs.includes("mesh_fork_detected"));
+  await settle();
+  assert.equal(m.closed(), false);
+  assert.equal(rejects(d, "record_fork"), 0);
+  assert.equal(d.logs.includes("mesh_link_dropped"), false);
   assert.deepEqual(d.channels.recent(d.mesh.mirrorId("spM", m.ch), 10).map((x) => x.text), ["엠 1"]);
+  assert.equal(d.logs.filter((l) => l === "mesh_fork_detected").length, 1); // 사슬당 한 번
 });
 
 test("catalog_key_conflict_rejected: 같은 공간 ID(A)를 다른 키로 주장한 목록 → 거부, A 목록 그대로", async () => {
@@ -211,4 +214,126 @@ test("padded_cat_relay_ack_coord_forwarded_clean: 목록·중계·확인·총괄
   await until(() => ["relay", "ack", "coord"].every((k) => out.some((o) => o.event === k)) && out.some((o) => o.event === "cat" && o.c.body.origin === "spM" && o.c.body.ver === 2));
   assert.equal(out.some((o) => JSON.stringify(o).includes("PADPADPAD")), false);
   assert.equal(dataContains(path.join(d.dataDir, "mesh"), "PADPADPAD"), false);
+});
+
+
+// ── 전달 태그·불일치 신호(사용자 설계) ──
+
+/** 프레임을 모으는 악의 서버. 같은 키로 여러 서버에 붙을 수 있다. */
+function controlled(id: string, keys = generateSigningKeys()) {
+  registerKey(id, keys.publicKeyB64);
+  const seen: any[] = [];
+  const attach = (target: Node) => {
+    const [x, y] = LinkChannel.memoryPair();
+    x.setHandlers({ onRequest: (_r, reply) => reply({ ok: true, heads: [], records: [] }), onEvent: (e) => { seen.push(e); } });
+    target.mesh.attach({ spaceId: id, spaceName: id, serverKey: keys.publicKeyB64 }, y);
+    return (e: object) => x.event(e as { event: string });
+  };
+  const cat = () => ({ event: "cat", c: signMesh("cat", { origin: id, spaceName: id, ver: 1, channels: [{ id: "ch", name: "채널" }] }, keys) });
+  const rec = (text: string, n = 1, prev = "") => signMesh("rec", { origin: id, ch: "ch", n, prev, seq: n, ts: Date.now(), from: "x", fromName: "x", hubUser: "x", via: [], text } as RecordBody, keys);
+  return { id, keys, seen, attach, cat, rec };
+}
+
+test("tag_replaced_on_forward: 전달할 때 태그를 자기 것으로 바꿔 한 칸만 남는다", async () => {
+  const a = node("에이", "spA"), c = node("씨", "spC"), d = node("디", "spD"), e = node("이", "spE");
+  const ach = a.addChannel("일반");
+  const tags: Record<string, any> = {};
+  connect(a, c, (from, o) => { if (from === "a" && o.event === "rec") tags.ac = o; return true; });
+  connect(c, d, (from, o) => { if (from === "a" && o.event === "rec") tags.cd = o; return true; });
+  connect(d, e, (from, o) => { if (from === "a" && o.event === "rec") tags.de = o; return true; });
+  await until(() => e.mesh.servers().some((s) => s.spaceId === "spA"));
+  a.say(ach, "하나");
+  await until(() => e.mirror(a, ach).length === 1);
+  assert.deepEqual(tags.ac.tag, { from: "spA" });
+  assert.deepEqual(tags.cd.tag, { from: "spA" });
+  assert.deepEqual(tags.de.tag, { from: "spC" });
+  assert.equal(tags.de.r.tag, undefined);
+  assert.equal(JSON.stringify(tags.de).includes("spD"), false); // 지나온 전체 경로는 남지 않음
+});
+
+test("tag_format_bounded: 형식이 틀린 태그는 버리고 기록은 받는다", async () => {
+  const d = node("디", "spD"), obs = node("관찰", "spO");
+  const out: any[] = [];
+  connect(d, obs, (from, o) => { if (from === "a" && o.event === "rec") out.push(o); return true; });
+  const m = controlled("spM");
+  const send = m.attach(d);
+  send(m.cat());
+  await until(() => d.mesh.servers().some((s) => s.spaceId === "spM"));
+  send({ event: "rec", r: m.rec("a"), tag: { from: "x".repeat(999) } });
+  await until(() => out.length === 1);
+  assert.deepEqual(out[0].tag, { from: "spM" });
+});
+
+test("fork_report_requires_two_signed_versions: 서명이 없거나 같은 내용인 신호는 무시", async () => {
+  const d = node("디", "spD");
+  const m = controlled("spM");
+  const send = m.attach(d);
+  send(m.cat());
+  await until(() => d.mesh.servers().some((s) => s.spaceId === "spM"));
+  const r1 = m.rec("a");
+  send({ event: "fork", a: r1, b: r1 });
+  send({ event: "fork", a: r1, b: { ...r1, body: { ...r1.body, text: "서명 없음" } } });
+  send({ event: "fork", a: r1, b: signMesh("rec", { ...r1.body, text: "다른 키" }, generateSigningKeys()) });
+  await settle();
+  assert.equal(d.logs.includes("mesh_fork_reported"), false);
+  assert.equal(rejects(d, "record_fork"), 0);
+});
+
+test("fork_report_sent_to_tagged_neighbor_once: 발견하면 내게 준 이웃에게 증거와 함께 한 번만", async () => {
+  const d = node("디", "spD");
+  const m = controlled("spM"), other = controlled("spH");
+  const send = m.attach(d), sendH = other.attach(d);
+  send(m.cat());
+  await until(() => d.mesh.servers().some((s) => s.spaceId === "spM"));
+  const r1 = m.rec("내용1"), r2 = m.rec("내용2");
+  send({ event: "rec", r: r1 });
+  await until(() => d.channels.recent(d.mesh.mirrorId("spM", "ch"), 10).length === 1);
+  sendH({ event: "rec", r: r2, tag: { from: "spK" } });
+  sendH({ event: "rec", r: m.rec("내용3"), tag: { from: "spK" } });
+  await until(() => m.seen.some((e) => e.event === "fork"));
+  await settle();
+  const reports = m.seen.filter((e) => e.event === "fork");
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].tagA, "spM");
+  assert.equal(reports[0].tagB, "spK");
+  assert.deepEqual([reports[0].a.body.text, reports[0].b.body.text], ["내용1", "내용2"]);
+});
+
+test("fork_report_walks_upstream: M → H1, K → H2처럼 전달자가 달라도 각자 자기 이웃에게 알리고 거슬러 올라간다", async () => {
+  const mm = node("엠", "spMM"), k = node("케이", "spK"), h1 = node("에이치1", "spH1"), h2 = node("에이치2", "spH2");
+  const o = controlled("spO");
+  const toM = o.attach(mm), toK = o.attach(k);
+  toM(o.cat()); toK(o.cat());
+  connect(mm, h1); connect(k, h2); connect(h1, h2);
+  await until(() => [h1, h2].every((n) => n.mesh.servers().some((s) => s.spaceId === "spO")));
+  await settle();
+  toM({ event: "rec", r: o.rec("내용1") });
+  toK({ event: "rec", r: o.rec("내용2") });
+  await until(() => o.seen.filter((e) => e.event === "fork").length >= 2);
+  for (const n of [mm, k]) assert.ok(n.logs.includes("mesh_fork_reported"), n.name);
+  for (const n of [h1, h2]) assert.ok(n.logs.includes("mesh_fork_detected"), n.name);
+  for (const n of [mm, k, h1, h2]) assert.equal(n.logs.includes("mesh_link_dropped"), false, n.name);
+});
+
+test("origin_detects_version_it_did_not_sign: 원래 작성 서버는 자기가 쓰지 않은 기록을 알아챈다", async () => {
+  const a = node("에이", "spA");
+  const ach = a.addChannel("일반");
+  const m = controlled("spM");
+  const send = m.attach(a);
+  a.say(ach, "진짜");
+  await until(() => m.seen.some((e) => e.event === "rec"));
+  const real = m.seen.find((e) => e.event === "rec").r;
+  send({ event: "fork", a: real, b: signMesh("rec", { ...real.body, text: "가짜" }, a.keys), tagA: "spX", tagB: "spY" });
+  await until(() => a.logs.includes("mesh_fork_not_signed_by_me"));
+});
+
+test("origin_with_pruned_hash_reports_unknown: 해시가 없으면 확인 불가로 알린다", async () => {
+  const a = node("에이", "spA");
+  const ach = a.addChannel("일반");
+  const m = controlled("spM");
+  const send = m.attach(a);
+  await settle();
+  const body = { origin: "spA", ch: ach, n: 99, prev: "", seq: 99, ts: Date.now(), from: "x", fromName: "x", hubUser: "x", via: [], text: "1" } as RecordBody;
+  send({ event: "fork", a: signMesh("rec", body, a.keys), b: signMesh("rec", { ...body, text: "2" }, a.keys), tagA: "spX", tagB: "spY" });
+  await until(() => a.logs.includes("mesh_fork_own_unknown"));
 });

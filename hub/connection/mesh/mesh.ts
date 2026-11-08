@@ -158,7 +158,9 @@ const REC_PER_SECOND = 200;
 const OTHER_PER_SECOND = 100;
 const RELAY_TTL = 8;
 const RELAY_MAX_AGE_MS = 10 * 60_000;
-const SEEN_MAX = 5000;
+/** 서버(중계 시작·확인 서명자)별 중복 제거 기억 상한 — 10분 안 정상 최대(3600)보다 크고, 다른 서버 몫을 밀어내지 못한다. */
+const SEEN_PER_ENTRY = 5000;
+const MAX_FORKS_SEEN = 4096;
 const RELAY_PER_10S = 60;
 
 export class Mesh {
@@ -168,7 +170,8 @@ export class Mesh {
   private chains = new Map<string, Chain>();
   private selfCat: { ver: number; key: string; signed: Signed<CatalogBody> | null } = { ver: 0, key: "", signed: null };
   private pulling = new Set<string>();
-  private seen = new Map<string, number>();
+  private seen = new Map<string, Map<string, number>>();
+  private forksSeen = new Set<string>();
   private relayTimes = new Map<string, number[]>();
   private accepted: Record<string, Accepted> = {};
   private cands = new Map<string, Candidate>();
@@ -257,24 +260,43 @@ export class Mesh {
     writeFileAtomic(this.file("dir.json"), JSON.stringify({ pins: this.pins, cats, accepted: this.accepted }, null, 2));
   }
 
-  private appendRecord(origin: string, ch: string, r: Signed<RecordBody>): void {
+  private appendRecord(origin: string, ch: string, r: Signed<RecordBody>, rf?: string): void {
     let c = this.chain(origin, ch);
     if (!c) {
       c = { n: 0, hash: "", hashes: new Map(), file: path.join(this.file("rec"), origin, `${ch}.jsonl`) };
       this.chains.set(`${origin}/${ch}`, c);
     }
     fs.mkdirSync(path.dirname(c.file), { recursive: true });
-    fs.appendFileSync(c.file, JSON.stringify(r) + "\n");
+    fs.appendFileSync(c.file, JSON.stringify(rf ? { ...r, rf } : r) + "\n");
     const h = recordHash(r.body);
     c.hashes.set(r.body.n, h);
     c.n = r.body.n;
     c.hash = h;
   }
 
-  private readRecords(origin: string, ch: string, after: number, limit: number): Signed<RecordBody>[] {
+  /** 이 번호의 내 기록(서명째로)과 내게 준 이웃. */
+  private recordAt(origin: string, ch: string, n: number): { signed: Signed<RecordBody>; rf: string } | null {
     const c = this.chain(origin, ch);
-    if (!c) return [];
+    if (!c) return null;
+    try {
+      for (const line of fs.readFileSync(c.file, "utf8").split("\n")) {
+        if (!line) continue;
+        try {
+          const r = JSON.parse(line) as Signed<RecordBody> & { rf?: string };
+          if (r.body.n !== n) continue;
+          const signed = cleanSigned<RecordBody>(r);
+          if (signed) return { signed, rf: r.rf ?? origin };
+        } catch { /* 손상 줄 */ }
+      }
+    } catch { /* 없음 */ }
+    return null;
+  }
+
+  private readRecords(origin: string, ch: string, after: number, limit: number): { records: Signed<RecordBody>[]; tags: string[] } {
+    const c = this.chain(origin, ch);
+    if (!c) return { records: [], tags: [] };
     const out: Signed<RecordBody>[] = [];
+    const tags: string[] = [];
     let bytes = 0;
     try {
       for (const line of fs.readFileSync(c.file, "utf8").split("\n")) {
@@ -285,13 +307,16 @@ export class Mesh {
           const size = Buffer.byteLength(line);
           // 응답 프레임이 받는 쪽 상한(리스너 1MB)을 넘지 않게 — 기록 하나는 항상 넣는다(기록 하나는 상한보다 작음)
           if (out.length > 0 && bytes + size > PULL_MAX_BYTES) break;
-          out.push(r);
+          const clean = cleanSigned<RecordBody>(r);
+          if (!clean) continue;
+          out.push(clean);
+          tags.push((r as { rf?: string }).rf ?? origin);
           bytes += size;
         } catch { /* 손상 줄 */ }
         if (out.length >= limit) break;
       }
     } catch { /* 없음 */ }
-    return out;
+    return { records: out, tags };
   }
 
   /** 거울을 최근 keep개로 자른다(기록 원본도 같이). 사슬 머리는 남아 다음 기록을 이어 받는다. 지운 메시지 수. */
@@ -516,7 +541,7 @@ export class Mesh {
     const self = this.deps.self();
     const challenge = randomBytes(32).toString("base64");
     this.pendingVerify.set(challenge, { origin, expires: now + VERIFY_ANSWER_MS });
-    this.firstSeen(`vchal:${challenge}`);
+    this.firstSeen("v", `vchal:${challenge}`);
     const body: VChalBody = { verifier: self.spaceId, prover: origin, challenge, ts: now };
     this.flood({ event: "v_chal", m: signMesh<VChalBody>("vchal", body, self.keys), ttl: RELAY_TTL });
   }
@@ -533,7 +558,7 @@ export class Mesh {
     const signer = (m as Signed).signer;
     if (!b || typeof b.verifier !== "string" || typeof b.prover !== "string" || typeof b.challenge !== "string" || b.challenge.length > 128 || typeof b.ts !== "number") return;
     if (this.deps.originOf && this.deps.originOf(signer) !== b.verifier) return;
-    if (!this.firstSeen(`vchal:${b.challenge}`)) return;
+    if (!this.firstSeen("v", `vchal:${b.challenge}`)) return;
     const self = this.deps.self();
     if (b.prover !== self.spaceId) return this.forwardVerify(e, m, from);
     if (Math.abs(this.now - b.ts) > RELAY_MAX_AGE_MS) return;
@@ -541,7 +566,7 @@ export class Mesh {
     if (!held) return; // 코드를 준 서버의 질문에만 답한다
     const sealed = sealVerifyAnswer(held, { verifierId: b.verifier, proverId: self.spaceId, proverKey: self.keys.publicKeyB64, challenge: b.challenge });
     const body: VRespBody = { verifier: b.verifier, prover: self.spaceId, cid: held.cid, challenge: b.challenge, sealed, ts: this.now };
-    this.firstSeen(`vresp:${b.challenge}`);
+    this.firstSeen("v", `vresp:${b.challenge}`);
     this.flood({ event: "v_resp", m: signMesh<VRespBody>("vresp", body, self.keys), ttl: RELAY_TTL });
   }
 
@@ -552,7 +577,7 @@ export class Mesh {
     const signer = (m as Signed).signer;
     if (!b || typeof b.verifier !== "string" || typeof b.prover !== "string" || typeof b.cid !== "string" || typeof b.challenge !== "string" || b.challenge.length > 128 || !b.sealed || typeof b.sealed !== "object") return;
     if (this.deps.originOf && this.deps.originOf(signer) !== b.prover) return;
-    if (!this.firstSeen(`vresp:${b.challenge}`)) return;
+    if (!this.firstSeen("v", `vresp:${b.challenge}`)) return;
     if (b.verifier !== this.deps.self().spaceId) return this.forwardVerify(e, m, from);
     const pending = this.pendingVerify.get(b.challenge);
     if (!pending || pending.origin !== b.prover || pending.expires <= this.now) return;
@@ -676,9 +701,9 @@ export class Mesh {
     if (req.op === "l_pull") {
       const { origin, ch, after, limit } = req as { origin?: unknown; ch?: unknown; after?: unknown; limit?: unknown };
       if (typeof origin !== "string" || typeof ch !== "string" || typeof after !== "number") return reply({ ok: false, code: "bad_request" });
-      if (!this.shareable(origin, ch)) return reply({ ok: true, records: [] });
+      if (!this.shareable(origin, ch)) return reply({ ok: true, records: [], tags: [] });
       const n = typeof limit === "number" && limit > 0 ? Math.min(limit, PULL_BATCH) : PULL_BATCH;
-      return reply({ ok: true, records: this.readRecords(origin, ch, after, n) });
+      return reply({ ok: true, ...this.readRecords(origin, ch, after, n) });
     }
     reply({ ok: false, code: "op_not_allowed" });
   }
@@ -725,8 +750,9 @@ export class Mesh {
         const r = await l.ch.request({ op: "l_pull", origin, ch, after, limit: PULL_BATCH });
         if (!r?.ok || !Array.isArray(r.records) || r.records.length === 0) return;
         let last = after;
-        for (const rec of r.records.slice(0, PULL_BATCH)) {
-          const res = this.handleRecord(rec, l, true);
+        const tags: unknown[] = Array.isArray(r.tags) ? r.tags : [];
+        for (const [i, rec] of r.records.slice(0, PULL_BATCH).entries()) {
+          const res = this.handleRecord(rec, l, true, tags[i]);
           if (res !== "ok" && res !== "dup") return;
           last = (rec as Signed<RecordBody>).body.n;
         }
@@ -746,6 +772,7 @@ export class Mesh {
       l.otherTimes.push(now);
     }
     if (e.event === "cat") return this.onCatalog(e.c, l);
+    if (e.event === "fork") return this.onForkReport(e, l);
     if (e.event === "v_chal") return this.onVerifyChallenge(e, l);
     if (e.event === "v_resp") return this.onVerifyResponse(e, l);
     if (e.event === "relay") return this.onRelay(e, l);
@@ -755,7 +782,7 @@ export class Mesh {
       l.recTimes = l.recTimes.filter((t) => now - t < 1000);
       if (l.recTimes.length >= REC_PER_SECOND) { this.deps.log("mesh_drop_rate", { spaceId: l.info.spaceId }); return; }
       l.recTimes.push(now);
-      this.handleRecord(e.r, l, false);
+      this.handleRecord(e.r, l, false, (e.tag as { from?: unknown } | undefined)?.from);
       return;
     }
     this.deps.onOtherEvent?.(e, l);
@@ -764,7 +791,7 @@ export class Mesh {
   // ───────── 기록 ─────────
 
   /** 받은 기록 하나를 검증·저장·전달. 결과 코드를 돌려준다. */
-  private handleRecord(raw: unknown, from: MeshLink, pulled: boolean): string {
+  private handleRecord(raw: unknown, from: MeshLink, pulled: boolean, tagIn?: unknown): string {
     raw = this.sanitize(raw);
     if (raw === null) return "bad";
     const b = openMesh<RecordBody>("rec", raw);
@@ -777,16 +804,73 @@ export class Mesh {
     const c = this.chain(b.origin, b.ch);
     const res = checkChain(c && c.n > 0 ? { n: c.n, hash: c.hash } : undefined, b, (n) => c?.hashes.get(n));
     if (res === "dup") return "dup";
-    if (res === "fork") { this.strike(from, "record_fork"); return "fork"; }
+    if (res === "fork") {
+      // 서명은 진짜라 전달자의 잘못이 아니고, 복원한 정상 서버도 이렇게 보일 수 있다 — 벌점 없이 먼저 받은 것을 유지하고 알린다.
+      this.onFork(raw as Signed<RecordBody>, from, tagIn);
+      return "fork";
+    }
     if (res === "gap") {
       if (!pulled) void this.pull(from, b.origin, b.ch, c!.n);
       return "gap";
     }
-    this.appendRecord(b.origin, b.ch, raw as Signed<RecordBody>);
+    this.appendRecord(b.origin, b.ch, raw as Signed<RecordBody>, from.info.spaceId);
     this.ingest(b);
     this.deps.onRecord?.(b);
-    for (const l of this.links) if (l !== from) l.ch.event({ event: "rec", r: raw as object });
+    for (const l of this.links) if (l !== from) l.ch.event({ event: "rec", r: raw as object, tag: { from: from.info.spaceId } });
     return "ok";
+  }
+
+  private nameOf(id: string): string {
+    return this.cats.get(id)?.body.spaceName ?? id.slice(0, 16);
+  }
+
+  private firstFork(key: string): boolean {
+    if (this.forksSeen.has(key)) return false;
+    this.forksSeen.add(key);
+    if (this.forksSeen.size > MAX_FORKS_SEEN) this.forksSeen.delete(this.forksSeen.values().next().value as string);
+    return true;
+  }
+
+  /** 같은 번호의 다른 내용을 내가 직접 발견했다: 알리고, 내게 준 이웃에게 증거와 함께 한 번 전한다. */
+  private onFork(other: Signed<RecordBody>, from: MeshLink, tagIn: unknown): void {
+    const b = other.body;
+    if (!this.firstFork(`${b.origin}/${b.ch}`)) return;
+    const otherVia = typeof tagIn === "string" && SPACE_ID_RE.test(tagIn) ? tagIn : from.info.spaceId;
+    const mine = this.recordAt(b.origin, b.ch, b.n) ?? this.recordAt(b.origin, b.ch, b.n - 1);
+    const mineVia = mine?.rf ?? "";
+    this.deps.log("mesh_fork_detected", { origin: b.origin, originName: this.nameOf(b.origin), ch: b.ch, n: b.n, mineVia: mineVia ? this.nameOf(mineVia) : "", otherVia: this.nameOf(otherVia) });
+    if (!mine) return;
+    for (const l of this.links) {
+      if (l.info.spaceId === mine.rf && mine.rf !== this.deps.self().spaceId) { l.ch.event({ event: "fork", a: mine.signed, b: other, tagA: mine.rf, tagB: otherVia }); break; }
+    }
+  }
+
+  /** 이웃이 보낸 불일치 신호. 같은 사슬의 서로 다른 두 기록이 서명째로 있어야 믿는다(가짜 신호 차단). */
+  private onForkReport(e: { [k: string]: unknown }, from: MeshLink): void {
+    const a = cleanSigned<RecordBody>(this.sanitize(e.a));
+    const b = cleanSigned<RecordBody>(this.sanitize(e.b));
+    if (!a || !b) return;
+    const ab = openMesh<RecordBody>("rec", a), bb = openMesh<RecordBody>("rec", b);
+    if (!ab || !bb || !validRecordBody(ab, this.now) || !validRecordBody(bb, this.now) || ab.origin !== bb.origin || ab.ch !== bb.ch) return;
+    const self = this.deps.self();
+    const key = ab.origin === self.spaceId ? self.keys.publicKeyB64 : this.pins[ab.origin];
+    if (!key || a.signer !== key || b.signer !== key) return;
+    const ha = recordHash(ab), hb = recordHash(bb);
+    const sameNumber = ab.n === bb.n && ha !== hb;
+    const brokenLink = (bb.n === ab.n + 1 && bb.prev !== ha) || (ab.n === bb.n + 1 && ab.prev !== hb);
+    if (!sameNumber && !brokenLink) return;
+    if (!this.firstFork(`${ab.origin}/${ab.ch}`)) return;
+    if (ab.origin === self.spaceId) {
+      const c = this.chain(ab.origin, ab.ch);
+      const mineA = c?.hashes.get(ab.n), mineB = c?.hashes.get(bb.n);
+      const unknown = mineA === undefined && mineB === undefined;
+      this.deps.log(unknown ? "mesh_fork_own_unknown" : "mesh_fork_not_signed_by_me", { origin: ab.origin, ch: ab.ch, n: ab.n });
+      return;
+    }
+    this.deps.log("mesh_fork_reported", { origin: ab.origin, originName: this.nameOf(ab.origin), ch: ab.ch, n: ab.n, by: this.nameOf(from.info.spaceId) });
+    const up = this.recordAt(ab.origin, ab.ch, ab.n)?.rf;
+    if (!up || up === self.spaceId || up === from.info.spaceId) return;
+    for (const l of this.links) if (l.info.spaceId === up) { l.ch.event({ event: "fork", a, b, tagA: up, tagB: typeof e.tagB === "string" && SPACE_ID_RE.test(e.tagB) ? e.tagB : from.info.spaceId }); break; }
   }
 
   private ingest(b: RecordBody): void {
@@ -817,16 +901,18 @@ export class Mesh {
     };
     const signed = signMesh<RecordBody>("rec", body, self.keys);
     this.appendRecord(self.spaceId, chId, signed);
-    for (const l of this.links) l.ch.event({ event: "rec", r: signed });
+    for (const l of this.links) l.ch.event({ event: "rec", r: signed, tag: { from: self.spaceId } });
   }
 
   // ───────── 중계 쓰기 ─────────
 
   /** 처음 보는 것만 true(중복 제거 기억, 상한 SEEN_MAX). */
-  private firstSeen(key: string): boolean {
-    if (this.seen.has(key)) return false;
-    this.seen.set(key, this.now);
-    if (this.seen.size > SEEN_MAX) this.seen.delete(this.seen.keys().next().value as string);
+  private firstSeen(scope: string, key: string): boolean {
+    let m = this.seen.get(scope);
+    if (!m) this.seen.set(scope, (m = new Map()));
+    if (m.has(key)) return false;
+    m.set(key, this.now);
+    if (m.size > SEEN_PER_ENTRY) m.delete(m.keys().next().value as string);
     return true;
   }
 
@@ -843,7 +929,7 @@ export class Mesh {
     if (this.deps.policy?.noWrite?.(self.spaceId, o.hubUser)) return Promise.resolve({ ok: false, code: "relay_write_blocked" });
     const body: RelayBody = { reqId: randomUUID(), entry: self.spaceId, entryName: self.spaceName, target: p.origin, ch: p.ch, from: o.from, fromName: o.fromName, hubUser: o.hubUser, text: o.text, ts: this.now };
     const q = signMesh<RelayBody>("relay", body, self.keys);
-    this.firstSeen(`relay:${body.reqId}`);
+    this.firstSeen(self.spaceId, `relay:${body.reqId}`);
     return new Promise((resolve) => {
       const t = setTimeout(() => { if (this.pendingRelay.delete(body.reqId)) resolve({ ok: false, code: "relay_timeout" }); }, this.deps.relayTimeoutMs ?? 15_000);
       t.unref?.();
@@ -867,7 +953,7 @@ export class Mesh {
     if ((e.q as Signed).signer !== key) return this.strike(from, "relay_forged");
     if (Math.abs(this.now - b.ts) > RELAY_MAX_AGE_MS) { this.deps.log("mesh_drop_relay_stale", { entry: b.entry }); return; }
     if (this.deps.policy?.blocked(b.entry)) return;
-    if (!this.firstSeen(`relay:${b.reqId}`)) return;
+    if (!this.firstSeen(b.entry, `relay:${b.reqId}`)) return;
     if (b.target !== self.spaceId) {
       const ttl = typeof e.ttl === "number" ? Math.min(e.ttl, RELAY_TTL) - 1 : 0;
       if (ttl > 0) this.flood({ event: "relay", q: e.q, ttl }, from);
@@ -875,7 +961,7 @@ export class Mesh {
     }
     const ack = (r: { ok: true; seq: number } | { ok: false; code: string }) => {
       const body: AckBody = { reqId: b.reqId, entry: b.entry, target: self.spaceId, ...r };
-      this.firstSeen(`ack:${b.reqId}`);
+      this.firstSeen(self.spaceId, `ack:${b.reqId}`);
       this.flood({ event: "ack", a: signMesh<AckBody>("ack", body, self.keys) });
     };
     if (!this.ownListed(b.ch)) { this.deps.log("mesh_reject_relay_unshared", { entry: b.entry }); return ack({ ok: false, code: "channel_forbidden" }); }
@@ -909,7 +995,7 @@ export class Mesh {
     if (!b || typeof b.reqId !== "string" || typeof b.target !== "string" || typeof b.entry !== "string") return this.strike(from, "ack_bad");
     const key = this.pins[b.target];
     if (!key || (e.a as Signed).signer !== key) return this.strike(from, "ack_forged");
-    if (!this.firstSeen(`ack:${b.reqId}`)) return;
+    if (!this.firstSeen(b.target, `ack:${b.reqId}`)) return;
     if (b.entry === this.deps.self().spaceId) {
       const p = this.pendingRelay.get(b.reqId);
       if (!p) return;

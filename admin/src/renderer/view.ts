@@ -300,6 +300,10 @@ export function connEventLine(e: ConnEvent): string {
   if (e.code === "link_removed") return tr("ev_link_removed");
   if (e.code === "link_connect_failed") return tr("ev_link_failed", { detail: connErrorMessage(typeof d.code === "string" ? d.code : undefined, s(d.code)) });
   if (e.code === "mesh_link_dropped") return tr("ev_mesh_link_dropped");
+  if (e.code === "mesh_fork_detected") return tr("ev_mesh_fork", { origin: s(d.originName), n: Number(d.n) || 0, mine: s(d.mineVia), other: s(d.otherVia) });
+  if (e.code === "mesh_fork_reported") return tr("ev_mesh_fork_reported", { origin: s(d.originName), n: Number(d.n) || 0, by: s(d.by) });
+  if (e.code === "mesh_fork_not_signed_by_me") return tr("ev_mesh_fork_not_signed_by_me", { n: Number(d.n) || 0 });
+  if (e.code === "mesh_fork_own_unknown") return tr("ev_mesh_fork_own_unknown", { n: Number(d.n) || 0 });
   if (e.code === "mesh_candidate") return tr("ev_mesh_candidate", { name: s(String(d.origin ?? "").slice(0, 16)) });
   if (e.code === "mesh_server_accepted") return tr("ev_mesh_server_accepted", { name: s(String(d.origin ?? "").slice(0, 16)) });
   if (e.code === "mesh_verify_failed") return tr("ev_mesh_verify_failed", { name: s(String(d.origin ?? "").slice(0, 16)) });

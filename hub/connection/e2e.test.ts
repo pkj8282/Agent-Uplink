@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { startHubPair, startTestHub, TestClient } from "../testing.js";
 import { MAX_TEXT_LENGTH } from "../../shared/protocol.js";
 import { generateSigningKeys, newJoinToken } from "../../shared/connCrypto.js";
-import { encodeInvite } from "../../shared/invite.js";
+import { decodeInvite, encodeInvite } from "../../shared/invite.js";
 
 async function login(port: number, uuid: string, area?: "connection"): Promise<TestClient> {
   const c = new TestClient(port);
@@ -324,4 +324,21 @@ test("join_same_id_same_key_keeps_space: 같은 초대를 실수로 다시 붙�
     assert.equal(JSON.stringify(p.mB.joinedForTest()), before);
     await p.until(() => p.mB.hasLiveConnection());
   } finally { p.A.hub.stop(); p.B.hub.stop(); }
+});
+
+
+test("join_reply_spacename_guarded: 서버가 보낸 공간 이름·초대의 이름에 든 숨은 문자·줄바꿈은 감독한다", async () => {
+  const p = await startHubPair();
+  const C = await startTestHub({ connBackoffMs: [50, 100] });
+  try {
+    C.hub.conn.setUserName("씨");
+    const store = (p.mA as any).store;
+    store.setServerConfig({ ...store.serverConfig(), spaceName: "팀\u200B\u{E0041}\n몰래" });
+    const d = decodeInvite(p.mA.createInvite("씨", "127.0.0.1", 60_000).code, Date.now());
+    assert.ok(d.ok);
+    const code = encodeInvite({ ...d.invite, hostUser: "주인\u200B\n가짜" }, store.identity().privateKeyPem);
+    assert.equal((await C.hub.conn.join(code)).ok, true);
+    const j = C.hub.conn.status().joined[0];
+    for (const v of [j.spaceName, j.hostUser]) assert.equal(/[\u200B\n]|\u{E0041}/u.test(v), false, JSON.stringify(v));
+  } finally { p.A.hub.stop(); p.B.hub.stop(); C.hub.stop(); }
 });

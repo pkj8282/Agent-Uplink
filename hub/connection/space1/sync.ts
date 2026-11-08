@@ -118,7 +118,7 @@ export class SpaceSync {
     const env = raw ? openEnvelope(raw.toString("utf8"), inv.ownerKey) : { ok: false as const };
     if (!env.ok || env.body.spaceId !== inv.spaceId) throw new Error("space_not_found");
     const x = generateWrapKeys();
-    const cfg: Config = { v: 1, spaceId: inv.spaceId, spaceName: inv.spaceName, role: "member", repo: inv.repo, ...(inv.branch ? { branch: inv.branch } : {}), ownerKey: inv.ownerKey, intervalSec: 30 };
+    const cfg: Config = { v: 1, spaceId: inv.spaceId, spaceName: d.guard(inv.spaceName.slice(0, 64), "spaceName"), role: "member", repo: inv.repo, ...(inv.branch ? { branch: inv.branch } : {}), ownerKey: inv.ownerKey, intervalSec: 30 };
     const sec: Secrets = { token, xPriv: x.privatePem, xPub: x.publicB64, epochKeys: {}, invites: [] };
     const s = new SpaceSync(d, path.join(d.spacesDir, inv.spaceId), cfg, sec, SpaceSync.emptyState());
     await backend.put(`${root}/requests/${s.myHubId}-${s.now()}.json`, Buffer.from(makeJoinRequest(inv, d.keys, x.publicB64, s.now())));

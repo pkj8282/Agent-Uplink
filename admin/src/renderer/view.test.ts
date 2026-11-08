@@ -629,3 +629,20 @@ test("서버 인정 화면 문구(ko/en)", () => {
     setLang("ko");
   }
 });
+
+
+test("갈라진 사슬 경고는 단정하지 않는다(ko/en)", () => {
+  const line = connEventLine({ ts: 1, code: "mesh_fork_detected", detail: { originName: "엠", n: 7, mineVia: "에이치", otherVia: "케이" } });
+  assert.match(line, /복원이나 오류/);
+  assert.match(line, /조작/);
+  assert.match(line, /케이/);
+  assert.match(connEventLine({ ts: 1, code: "mesh_fork_not_signed_by_me", detail: { n: 7 } }), /키/);
+  setLang("en");
+  try {
+    for (const code of ["mesh_fork_detected", "mesh_fork_reported", "mesh_fork_not_signed_by_me", "mesh_fork_own_unknown"]) {
+      assert.equal(hasHangul(connEventLine({ ts: 1, code, detail: { originName: "m", n: 1, mineVia: "a", otherVia: "b" } })), false, code);
+    }
+  } finally {
+    setLang("ko");
+  }
+});

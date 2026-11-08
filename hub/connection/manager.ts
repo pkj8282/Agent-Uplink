@@ -676,6 +676,9 @@ export class ConnectionManager implements ConnStatusSource {
     if (had && had.serverKey !== d.invite.serverKey) return { ok: false, code: "space_key_changed" };
     const r = await joinSpace(d.invite, this.store.identity(), this.userName());
     if (!r.ok) return had ? { ok: true, spaceId: had.spaceId } : r; // 이미 있는 공간: 같은 초대를 다시 넣은 것 — 기존 연결을 그대로 둔다
+    // 이름은 서버·초대를 보낸 쪽이 정한 값 — 표시되기 전에 감독한다
+    const clean = (v: string) => { const n = validateName(v, "server", (s) => this.g(s, "conn_join", "spaceName").replace(/[\r\n]+/g, " ")); return n.ok ? n.name : "?"; };
+    r.space = { ...r.space, spaceName: clean(r.space.spaceName), hostUser: clean(r.space.hostUser) };
     this.store.addJoined(r.space);
     this.ensureStarted();
     this.startSpace(r.space);
