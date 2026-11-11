@@ -69,11 +69,21 @@ test("배포 전 typecheck: 테스트 파일까지(tsconfig.test.json) 검사한
   assert.ok(!(tc.exclude as string[]).some((e) => e.includes("test")), "테스트 파일을 빼지 않는다");
 });
 
-test("npx 사용자는 lockfile 없이 받으므로 의존 범위의 하한은 테스트한(lockfile) 버전의 major.minor", () => {
+test("npx 사용자는 lockfile 없이 받으므로 의존 범위의 하한은 테스트한(lockfile) 버전과 같은 major.minor(보안 수정 판이면 그 patch까지 올려도 됨)", () => {
   const lock = json("package-lock.json");
   for (const dep of Object.keys(pkg.dependencies)) {
     const locked = lock.packages[`node_modules/${dep}`].version as string;
-    const [maj, min] = locked.split(".");
-    assert.equal(pkg.dependencies[dep], `^${maj}.${min}.0`, dep);
+    const [maj, min, patch] = locked.split(".").map(Number);
+    const m = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(pkg.dependencies[dep]);
+    assert.ok(m, `${dep}: ${pkg.dependencies[dep]}`);
+    assert.deepEqual([Number(m[1]), Number(m[2])], [maj, min], dep);
+    assert.ok(Number(m[3]) <= patch, `${dep}: 하한이 시험한 ${locked}보다 높음`);
   }
+});
+
+test("알려진 취약 판을 하한으로 허용하지 않는다(GHSA-mrhx-c7xc-m3w5 zod <4.6.6, MCP SDK 권고들 <1.32.0)", () => {
+  const floor = (dep: string) => pkg.dependencies[dep].replace(/^\^/, "").split(".").map(Number);
+  const atLeast = (v: number[], min: number[]) => v[0] !== min[0] ? v[0] > min[0] : v[1] !== min[1] ? v[1] > min[1] : v[2] >= min[2];
+  assert.ok(atLeast(floor("zod"), [4, 6, 6]), pkg.dependencies.zod);
+  assert.ok(atLeast(floor("@modelcontextprotocol/sdk"), [1, 32, 0]), pkg.dependencies["@modelcontextprotocol/sdk"]);
 });

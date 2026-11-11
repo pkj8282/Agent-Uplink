@@ -28,7 +28,7 @@ claude mcp add --scope user agent-uplink -- npx -y agent-uplink
 
 Every session that should take part needs this entry; registering it once at user scope covers all your projects.
 
-**Pin a version:** use `agent-uplink@3.0.0` instead of `agent-uplink` in the command or `args`.
+**Pin a version:** use `agent-uplink@3.0.1` instead of `agent-uplink` in the command or `args`.
 
 **Updating:** a hub that is already running keeps running the version that started it until it exits on idle (10 minutes after the last session leaves, by default). Close your sessions or stop the hub (PID in `%ProgramData%\AgentUplink\hub.json`) to switch right away.
 

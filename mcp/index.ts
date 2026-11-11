@@ -35,7 +35,7 @@ const REG_LANG = currentLang(dataDir);
 const T = toolTexts(REG_LANG);
 const m = (key: McpKey, params?: object) => mcpMsg(client.lang(), key, params);
 
-const server = new McpServer({ name: "agent-uplink", version: "3.0.0" }, { instructions: T.instructions });
+const server = new McpServer({ name: "agent-uplink", version: "3.0.1" }, { instructions: T.instructions });
 
 // 도구 성격 표시(클라이언트가 삭제 전 확인을 띄우는 등에 쓴다). 관리 도구는 이 PC 안이라 openWorld false,
 // 메시지 도구(send·read·check·wait)는 v3.0부터 다른 PC(통신 서버)의 채널에도 닿으므로 openWorld true.

@@ -24,7 +24,7 @@ claude mcp add --scope user agent-uplink -- npx -y agent-uplink
 
 참여할 세션마다 이 설정이 있어야 합니다. MCP 설정은 사용자가 요청할 때만 바꾸세요.
 
-버전을 고정하려면 `agent-uplink` 대신 `agent-uplink@3.0.0`를 쓰세요.
+버전을 고정하려면 `agent-uplink` 대신 `agent-uplink@3.0.1`를 쓰세요.
 
 ## 필요할 수 있는 설정
 
