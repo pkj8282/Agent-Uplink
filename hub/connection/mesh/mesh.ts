@@ -185,8 +185,6 @@ const MAX_REJECTED = 256;
 const VERIFY_ANSWER_MS = 15_000;
 const MAX_CHANNELS = 100;
 const PULL_BATCH = 500;
-/** 내 채널 기록 원본(mesh/rec/<나>/…)은 최근 이만큼 남긴다(v3.1). 줄이 두 배를 넘을 때마다 자른다(매번 다시 쓰지 않게). */
-const OWN_CHAIN_KEEP = 500;
 /** 당기기 응답 한 번의 기록 바이트 상한 — 받는 쪽 프레임 상한(1MB)보다 넉넉히 작게. */
 const PULL_MAX_BYTES = 640 * 1024;
 const STRIKES_TO_DROP = 3;
@@ -338,22 +336,6 @@ export class Mesh {
     c.hashes.set(r.body.n, h);
     c.n = r.body.n;
     c.hash = h;
-    if (origin === this.deps.self().spaceId && c.hashes.size > OWN_CHAIN_KEEP * 2) this.trimChain(c, OWN_CHAIN_KEEP);
-  }
-
-  /** 사슬 파일을 최근 keep개로 다시 쓴다(사슬 머리는 남아 다음 번호를 잇는다). 자른 기준 번호, 자를 게 없으면 0. */
-  private trimChain(c: Chain, keep: number): number {
-    if (c.n <= keep) return 0;
-    const cutoff = c.n - keep;
-    try {
-      const lines = fs.readFileSync(c.file, "utf8").split("\n").filter((line) => {
-        if (!line) return false;
-        try { return (JSON.parse(line) as Signed<RecordBody>).body.n > cutoff; } catch { return false; }
-      });
-      writeFileAtomic(c.file, lines.length ? `${lines.join("\n")}\n` : "");
-    } catch { /* 없음 */ }
-    for (const n of [...c.hashes.keys()]) if (n <= cutoff) c.hashes.delete(n);
-    return cutoff;
   }
 
   /** 이 번호의 내 기록(서명째로)과 내게 준 이웃. */
@@ -374,12 +356,9 @@ export class Mesh {
     return null;
   }
 
-  private readRecords(origin: string, ch: string, after: number, limit: number): { records: Signed<RecordBody>[]; tags: string[]; from?: number } {
+  private readRecords(origin: string, ch: string, after: number, limit: number): { records: Signed<RecordBody>[]; tags: string[] } {
     const c = this.chain(origin, ch);
     if (!c) return { records: [], tags: [] };
-    // 원본을 잘라 요청한 구간이 없으면 '여기부터 있음'을 알린다(v3.1) — 당기는 쪽이 끊김(gap)에 멈추지 않고 이어 받는다
-    const oldest = c.hashes.size ? Math.min(...c.hashes.keys()) : 0;
-    const from = oldest > after + 1 ? oldest : undefined;
     const out: Signed<RecordBody>[] = [];
     const tags: string[] = [];
     let bytes = 0;
@@ -401,16 +380,24 @@ export class Mesh {
         if (out.length >= limit) break;
       }
     } catch { /* 없음 */ }
-    return from !== undefined && out.length > 0 && out[0].body.n === from ? { records: out, tags, from } : { records: out, tags };
+    return { records: out, tags };
   }
 
   /** 거울을 최근 keep개로 자른다(기록 원본도 같이). 사슬 머리는 남아 다음 기록을 이어 받는다. 지운 메시지 수. */
   trim(mirrorId: string, keep: number): number {
     const m = /^m\.([A-Za-z0-9_-]{1,64})\.([A-Za-z0-9_-]{1,128})$/.exec(mirrorId);
     const c = m ? this.chain(m[1], m[2]) : undefined;
-    if (!m || !c) return 0;
-    const cutoff = this.trimChain(c, keep);
-    return cutoff > 0 ? this.deps.channels.prune(mirrorId, (msg) => msg.seq > cutoff) : 0;
+    if (!m || !c || c.n <= keep) return 0;
+    const cutoff = c.n - keep;
+    try {
+      const lines = fs.readFileSync(c.file, "utf8").split("\n").filter((line) => {
+        if (!line) return false;
+        try { return (JSON.parse(line) as Signed<RecordBody>).body.n > cutoff; } catch { return false; }
+      });
+      writeFileAtomic(c.file, lines.length ? `${lines.join("\n")}\n` : "");
+    } catch { /* 없음 */ }
+    for (const n of [...c.hashes.keys()]) if (n <= cutoff) c.hashes.delete(n);
+    return this.deps.channels.prune(mirrorId, (msg) => msg.seq > cutoff);
   }
 
   // ───────── 목록 ─────────
@@ -954,16 +941,6 @@ export class Mesh {
       for (let rounds = 0; rounds < 1000 && !l.ch.isClosed; rounds++) {
         const r = await l.ch.request({ op: "l_pull", origin, ch, after, limit: PULL_BATCH });
         if (!r?.ok || !Array.isArray(r.records) || r.records.length === 0) return;
-        // 상대 원본이 잘려 내가 가진 머리 다음부터는 없다(v3.1): 첫 기록이 그 번호일 때만 믿고, 처음 받는 사슬처럼 그 번호부터 잇는다(경고 아님)
-        const first = (r.records[0] as Signed<RecordBody> | undefined)?.body?.n;
-        if (typeof r.from === "number" && r.from > after + 1 && first === r.from) {
-          const c = this.chain(origin, ch);
-          if (c && c.n > 0 && c.n < r.from - 1) {
-            this.deps.log("mesh_chain_trimmed", { origin, ch, from: r.from, had: c.n });
-            c.n = 0;
-            c.hash = "";
-          }
-        }
         let last = after;
         const tags: unknown[] = Array.isArray(r.tags) ? r.tags : [];
         for (const [i, rec] of r.records.slice(0, PULL_BATCH).entries()) {
