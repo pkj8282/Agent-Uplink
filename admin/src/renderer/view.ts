@@ -617,3 +617,21 @@ export function multiPeers(st: ConnStatus | null): PeerRow[] {
   for (const s of st.mesh?.servers ?? []) rows.push({ kind: "mesh-server", name: s.spaceName, detail: "", online: linked.has(s.spaceId) ? linked.get(s.spaceId)! : null });
   return rows;
 }
+
+const MULTI_KIND_KEY = { comms: "kind_comms", space1: "kind_space1", mesh: "kind_mesh" } as const;
+const PEER_KEY = { "comms-account": "peer_comms_account", "space1-pc": "peer_space1_pc", "mesh-server": "peer_mesh_server" } as const;
+
+/** 다중 연결 채널 줄의 방식 표시와 '공간 공유 중' 표시. */
+export function multiChannelLine(r: MultiChannelRow): { kind: string; flag: string | null } {
+  return { kind: tr(MULTI_KIND_KEY[r.kind]), flag: r.sharedLocal ? tr("shared_by_space") : null };
+}
+
+/** 다른 PC 줄(보기 전용 — 버튼·동작 정보를 만들지 않는다). status: null = 알 수 없음(공간 PC·간접 서버). */
+export function peerLine(r: PeerRow): { kind: string; name: string; detail: string; status: string | null } {
+  return { kind: tr(PEER_KEY[r.kind]), name: r.name, detail: r.detail, status: r.online === null ? null : tr(r.online ? "peer_online" : "peer_offline") };
+}
+
+/** 공간(방식 1)으로 공유 중인 내 로컬 서버(관리자 쪽). */
+export function sharedServerIds(st: ConnStatus | null): Set<string> {
+  return new Set((st?.spaces1 ?? []).filter((s) => s.role === "owner" && s.localServerId).map((s) => s.localServerId!));
+}

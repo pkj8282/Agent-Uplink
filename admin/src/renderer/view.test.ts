@@ -730,3 +730,40 @@ test("multi_peers_null_status_empty: 통신 상태가 없으면(옛 Hub·꺼짐)
   assert.deepEqual(multiPeers(null), []);
   assert.deepEqual(multiPeers(baseSt()), []);
 });
+
+// ───── v3.1 Task 7: 다중 연결 줄 문구 ─────
+import { multiChannelLine, peerLine, sharedServerIds } from "./view.js";
+
+test("peer_line_has_no_delete_for_remote: 다른 PC 줄은 보기 전용 — 버튼·동작 정보 없이 글자만", () => {
+  setLang("ko");
+  const l = peerLine({ kind: "comms-account", name: "비서", detail: "비 · 팀", online: true });
+  assert.deepEqual(Object.keys(l).sort(), ["detail", "kind", "name", "status"]);
+  assert.deepEqual(l, { kind: "통신 계정", name: "비서", detail: "비 · 팀", status: "접속 중" });
+  assert.equal(peerLine({ kind: "space1-pc", name: "철수", detail: "공간", online: null }).status, null);
+  assert.equal(peerLine({ kind: "mesh-server", name: "망", detail: "", online: false }).status, "끊김");
+  setLang("en");
+  assert.equal(peerLine({ kind: "space1-pc", name: "x", detail: "", online: null }).kind, "Space member PC");
+  assert.equal(peerLine({ kind: "mesh-server", name: "x", detail: "", online: true }).status, "Connected");
+  setLang("ko");
+});
+
+test("multi_channel_line_marks_kind_ko_en: 다중 연결 채널 줄에 방식 표시(한/영)", () => {
+  setLang("ko");
+  assert.deepEqual(multiChannelLine({ kind: "comms", serverName: "S", channelId: "c", channelName: "n", deletable: true }), { kind: "통신", flag: null });
+  assert.deepEqual(multiChannelLine({ kind: "space1", serverName: "S", channelId: "c", channelName: "n", deletable: false, sharedLocal: true }), { kind: "공간", flag: "공간 공유 중" });
+  assert.deepEqual(multiChannelLine({ kind: "mesh", serverName: "S", channelId: "c", channelName: "n", deletable: false }), { kind: "서버 연결", flag: null });
+  setLang("en");
+  assert.deepEqual(multiChannelLine({ kind: "space1", serverName: "S", channelId: "c", channelName: "n", deletable: false, sharedLocal: true }), { kind: "Space", flag: "Shared to a space" });
+  assert.equal(hasHangul(JSON.stringify(multiChannelLine({ kind: "mesh", serverName: "S", channelId: "c", channelName: "n", deletable: false }))), false);
+  setLang("ko");
+});
+
+test("shared_local_server_line_ko_en: 공간으로 공유 중인 로컬 서버 id(관리자 쪽만)", () => {
+  const st = { server: null, members: [], joined: [], userName: null, comms: [], events: [], storage: null, mesh: null,
+    spaces1: [
+      { spaceId: "a", spaceName: "A", role: "owner", state: "active", repo: "r", epoch: 1, members: [], lastSyncAt: null, lastError: null, channels: [], localServerId: "srv1" },
+      { spaceId: "b", spaceName: "B", role: "member", state: "active", repo: "r", epoch: 1, members: [], lastSyncAt: null, lastError: null, channels: [] },
+    ] } as unknown as ConnStatus;
+  assert.deepEqual([...sharedServerIds(st)], ["srv1"]);
+  assert.deepEqual([...sharedServerIds(null)], []);
+});

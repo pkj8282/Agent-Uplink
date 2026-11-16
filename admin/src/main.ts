@@ -319,7 +319,10 @@ async function collectReport(win: BrowserWindow): Promise<Record<string, unknown
       const [sec, sub] = v.split("/");
       await win.webContents.executeJavaScript(`(() => { document.querySelector('[data-nav="${sec}"]').click(); ${sub ? `document.querySelector('#panel-${sec} > .subtabs [data-sub="${sub}"]').click();` : ""} })()`);
       await new Promise((r) => setTimeout(r, 150));
-      fs.writeFileSync(path.join(shots, `${v.replace("/", "-")}.png`), (await win.webContents.capturePage()).toPNG());
+      // 캡처는 GPU 상태에 따라 가끔 실패한다(UnknownVizError) — 한 번 더 해 보고, 그래도 안 되면 그 화면만 건너뛴다
+      for (let tries = 0; tries < 2; tries++) {
+        try { fs.writeFileSync(path.join(shots, `${v.replace("/", "-")}.png`), (await win.webContents.capturePage()).toPNG()); break; } catch { await new Promise((r) => setTimeout(r, 300)); }
+      }
     }
   }
   return report;

@@ -1,4 +1,4 @@
-import type { AdminApi, AdminConfig, BackupCandidate, ConnStatus, IpcResult, MeshCommand, MeshStatus, RestoreInput, RestoreResult, SecurityFinding, Snapshot, SnapshotServer, TrashItem } from "../types.js";
+import type { AdminApi, AdminConfig, BackupCandidate, ConnStatus, IpcResult, MeshCommand, MeshStatus, RestoreInput, RestoreResult, SecurityFinding, Snapshot, SnapshotAccount, SnapshotDm, SnapshotServer, TrashItem } from "../types.js";
 import {
   ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf,
   emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage,
@@ -8,6 +8,7 @@ import {
   parseMeshCaseForm, meshCaseLabel, meshUploadLine, meshInviteConfirm, meshRemoveConfirm, meshAcceptConfirm, meshUnacceptConfirm, meshCommandWhat, meshCommandConfirm,
   parseRestoreForm, backupCandidateLine, backupRestoreConfirm, backupRestoreDone,
   meshCandidateConfirm, meshCandidateRejectConfirm, meshForgetConfirm, parseVerifyLabel, parseVerifyCodeInput,
+  splitAccounts, multiChannels, multiPeers, multiChannelLine, peerLine, sharedServerIds,
 } from "./view.js";
 import type { FormMessage } from "./view.js";
 import { NAV, panelId, isMultiView, parseNavMemory, type NavMemory, type SectionId } from "./nav.js";
@@ -91,7 +92,8 @@ async function refresh(): Promise<void> {
   setState("ready");
   showBanner("");
   if (formState.acceptsRefresh()) renderConfig(r.data.config); // 저장 안 된 수정은 덮어쓰지 않는다
-  renderServers(r.data);
+  lastSnapshot = r.data;
+  renderServers(r.data, sharedServerIds(c.ok ? c.data : null));
   renderAccounts(r.data);
   renderTrash(r.data);
   renderSecurity(r.data);
@@ -100,6 +102,7 @@ async function refresh(): Promise<void> {
   lastServers = r.data.servers;
   renderSpace1(c, lastServers);
   renderMesh(c);
+  renderMulti(c.ok ? c.data : null, r.data);
   restoreFocus();
 }
 
@@ -181,7 +184,7 @@ byId("empty-trash").addEventListener("click", async () => {
   showOpMsg(r.ok ? { text: tr("trash_emptied", { count: r.data.removed }), kind: "ok" } : { text: opErrorMessage(r.code, r.error), kind: "err" });
 });
 
-function renderServers(s: Snapshot): void {
+function renderServers(s: Snapshot, sharedBySpace: Set<string>): void {
   const list = byId("server-list");
   list.replaceChildren();
   if (s.servers.length === 0) { list.append(el("li", tr("no_servers"), "empty")); return; }
@@ -193,6 +196,7 @@ function renderServers(s: Snapshot): void {
       el("span", srv.name, "name"),
       el("span", srv.id, "id"),
       el("span", tr("server_channels", { count: srv.channels.length }), "meta"),
+      ...(sharedBySpace.has(srv.id) ? [el("span", tr("shared_by_space"), "flag")] : []),
       deleteButton(tr("btn_delete_server"), deleteConfirmMessage({ kind: "server", name: srv.name, channelCount: srv.channels.length }),
         () => window.admin.deleteServer(srv.id)),
     );
@@ -214,10 +218,16 @@ function renderServers(s: Snapshot): void {
 }
 
 function renderAccounts(s: Snapshot): void {
-  const accounts = byId("account-list");
+  const local = splitAccounts(s.accounts, s.dms).local;
+  renderAccountRows(byId("account-list"), local.accounts, s, tr("no_accounts"));
+  renderDmRows(byId("dm-list"), local.dms, s, tr("no_dms"));
+}
+
+/** 계정 줄(로컬·이 PC의 연결 계정 공통 — 둘 다 이 PC의 것이라 지울 수 있다). */
+function renderAccountRows(accounts: HTMLElement, list: SnapshotAccount[], s: Snapshot, emptyText: string): void {
   accounts.replaceChildren();
-  if (s.accounts.length === 0) accounts.append(el("li", tr("no_accounts"), "empty"));
-  for (const a of s.accounts) {
+  if (list.length === 0) accounts.append(el("li", emptyText, "empty"));
+  for (const a of list) {
     const n = dmCountOf(a.uuid, s.dms);
     const li = el("li", undefined, "row");
     li.dataset.kind = "account";
@@ -233,18 +243,61 @@ function renderAccounts(s: Snapshot): void {
     );
     accounts.append(li);
   }
-  const dms = byId("dm-list");
+}
+
+/** DM 줄. withLocal: 로컬 계정이 낀 연결 DM에 표시를 단다. */
+function renderDmRows(dms: HTMLElement, list: SnapshotDm[], s: Snapshot, emptyText: string, withLocal?: (d: SnapshotDm) => boolean): void {
   dms.replaceChildren();
-  if (s.dms.length === 0) dms.append(el("li", tr("no_dms"), "empty"));
-  for (const d of s.dms) {
+  if (list.length === 0) dms.append(el("li", emptyText, "empty"));
+  for (const d of list) {
     const li = el("li", undefined, "row");
     li.dataset.kind = "dm";
     const names = memberNames(d, s.accounts);
-    li.append(
-      el("span", names, "name"), el("span", d.label, "meta"), el("span", d.channelId, "id"),
-      deleteButton(tr("btn_delete_dm"), deleteConfirmMessage({ kind: "dm", names }), () => window.admin.deleteDm(d.channelId)),
-    );
+    li.append(el("span", names, "name"), el("span", d.label, "meta"), el("span", d.channelId, "id"));
+    if (withLocal?.(d)) li.append(el("span", tr("dm_with_local"), "flag"));
+    li.append(deleteButton(tr("btn_delete_dm"), deleteConfirmMessage({ kind: "dm", names }), () => window.admin.deleteDm(d.channelId)));
     dms.append(li);
+  }
+}
+
+// --- 다중 연결 목록(v3.1): 서버 및 채널 ▸ 다중 연결, 계정 및 DM ▸ 다중 연결 ---
+let lastSnapshot: Snapshot | null = null;
+
+function renderMulti(st: ConnStatus | null, s: Snapshot): void {
+  // 채널: 방식 1·2·3 한 목록, 지우기는 내 통신 채널만(다른 PC 채널엔 버튼 없음)
+  const chList = byId("multi-channel-list");
+  chList.replaceChildren();
+  const rows = multiChannels(st);
+  if (rows.length === 0) chList.append(el("li", tr("multi_empty"), "empty"));
+  for (const r of rows) {
+    const line = multiChannelLine(r);
+    const li = el("li", undefined, "row");
+    li.dataset.kind = "multi-channel";
+    li.append(el("span", line.kind, "meta"), el("span", r.serverName, "name"), el("span", `# ${r.channelName}`, "name"), el("span", r.channelId, "id"));
+    if (line.flag) li.append(el("span", line.flag, "flag"));
+    if (r.deletable) {
+      li.append(deleteButton(tr("btn_delete"), deleteConfirmMessage({ kind: "channel", name: r.channelName, serverName: r.serverName }),
+        () => window.admin.connDeleteChannel(r.channelId)));
+    }
+    chList.append(li);
+  }
+  // 계정: 이 PC의 연결 계정(지울 수 있음) + 다른 PC(보기 전용) + 연결 계정의 DM
+  const multi = splitAccounts(s.accounts, s.dms).multi;
+  renderAccountRows(byId("conn-account-list"), multi.accounts, s, tr("no_conn_accounts"));
+  const connIds = new Set(multi.accounts.map((a) => a.uuid));
+  renderDmRows(byId("conn-dm-list"), multi.dms, s, tr("no_conn_dms"), (d) => d.members.some((m) => !connIds.has(m)));
+  const peers = byId("peer-list");
+  peers.replaceChildren();
+  const pr = multiPeers(st);
+  if (pr.length === 0) peers.append(el("li", tr("multi_empty"), "empty"));
+  for (const p of pr) {
+    const line = peerLine(p);
+    const li = el("li", undefined, "row");
+    li.dataset.kind = "peer";
+    li.append(el("span", line.kind, "meta"), el("span", line.name, "name"));
+    if (line.detail) li.append(el("span", line.detail, "meta"));
+    if (line.status) li.append(el("span", line.status, p.online ? "meta online" : "meta"));
+    peers.append(li);
   }
 }
 
@@ -475,6 +528,7 @@ async function pollConnNow(): Promise<void> {
     renderConn(r);
     renderSpace1(r, lastServers);
     renderMesh(r);
+    if (lastSnapshot) renderMulti(r.ok ? r.data : null, lastSnapshot);
   } finally {
     connPolling = false;
   }

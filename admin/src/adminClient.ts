@@ -152,7 +152,7 @@ export class AdminClient {
   // ───── 통신(v3.0) ─────
   async connStatus(): Promise<ConnStatus> {
     const r = await this.call("admin_conn_status", {});
-    return { server: r.server ?? null, members: r.members ?? [], joined: r.joined ?? [], userName: r.userName ?? null, comms: r.comms ?? [], events: r.events ?? [], storage: r.storage ?? null, spaces1: r.spaces1 ?? [], mesh: r.mesh ?? null };
+    return { server: r.server ?? null, members: r.members ?? [], joined: r.joined ?? [], userName: r.userName ?? null, comms: r.comms ?? [], events: r.events ?? [], storage: r.storage ?? null, spaces1: r.spaces1 ?? [], mesh: r.mesh ?? null, ...(Array.isArray(r.remoteAccounts) ? { remoteAccounts: r.remoteAccounts } : {}) };
   }
   async connSetUser(name: string): Promise<string> { return (await this.call("admin_conn_set_user", { name })).name; }
   async connEnableServer(o: { port: number; bindHost?: string; profile: ConnProfile; spaceName: string; burnOnJoin: boolean }): Promise<number> {

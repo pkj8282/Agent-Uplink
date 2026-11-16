@@ -560,3 +560,28 @@ test("hold_requires_our_hub: 대기 연결도 Hub 증명 확인 뒤에만 열린
     await assert.rejects(wrong.hold());
   } finally { t.hub.stop(); }
 });
+
+test("conn_status_passes_remote_accounts: 관리 앱 클라이언트가 통신 상태의 다른 PC 계정(v3.1)을 버리지 않는다", async () => {
+  const A = await startHub();
+  const B = await startHub();
+  try {
+    const { freePort } = await import("../../hub/testing.js");
+    const rawReq = async (t: typeof A, op: string, p: object = {}) => {
+      const c = new Raw(t.port); await c.ready();
+      const token = fs.readFileSync(path.join(t.dataDir, "admin.key"), "utf8").trim();
+      const r: any = await c.req(op, { token, ...p }); c.close(); return r;
+    };
+    await rawReq(A, "admin_conn_set_user", { name: "에이" });
+    await rawReq(A, "admin_conn_enable_server", { port: await freePort(), bindHost: "127.0.0.1", profile: "tls13-chacha20", spaceName: "팀", burnOnJoin: false });
+    const inv = await rawReq(A, "admin_conn_create_invite", { label: "비", host: "127.0.0.1", expiresInMs: 60_000 });
+    await rawReq(B, "admin_conn_set_user", { name: "비" });
+    await rawReq(B, "admin_conn_join", { code: inv.code });
+    for (let i = 0; i < 150; i++) { if ((await rawReq(B, "admin_conn_status")).joined[0]?.connected) break; await new Promise((r) => setTimeout(r, 20)); }
+    const bc = new Raw(B.port); await bc.ready();
+    assert.equal((await bc.req("login", { uuid: "b-conn", name: "비서", area: "connection" })).ok, true);
+    let st: any;
+    for (let i = 0; i < 200; i++) { st = await A.client.connStatus(); if (st.remoteAccounts?.length) break; await new Promise((r) => setTimeout(r, 20)); }
+    assert.deepEqual(st.remoteAccounts?.map((a: any) => [a.name, a.remote.hubUser]), [["비서", "비"]]);
+    bc.close();
+  } finally { A.hub.stop(); B.hub.stop(); }
+});
