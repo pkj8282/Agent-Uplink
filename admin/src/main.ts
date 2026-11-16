@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AdminClient, HubNotRunningError, HubOpError, resolveAdminTarget, toResult } from "./adminClient.js";
-import { startHub } from "./hubStart.js";
+import { checkLaunch, startHub } from "./hubStart.js";
 import { isTrustedFrame } from "./ipcGuard.js";
 import { isViewerUrl } from "./auth.js";
 import type { ConfigPatch, IpcResult, MeshCaseChoice, MeshCommand, RestoreInput } from "./types.js";
@@ -82,6 +82,7 @@ handle("admin:startHub", () => toResult(async () => {
   if (!r.ok) throw new HubOpError(msg(r.code === "launch_untrusted" ? "hub_start_untrusted" : r.code === "no_launch_info" ? "hubdown_no_launch" : "hub_start_failed"), r.code);
   return { started: r.started };
 }));
+handle("admin:launchAvailable", async () => { const c = checkLaunch(dataDir); return { ok: true, data: { code: c.ok ? null : c.code } }; });
 // 언어: Hub가 꺼져 있어도 동작해야 한다(첫 실행 언어 선택) — 읽기는 파일, 쓰기는 Hub가 켜져 있으면 Hub로(기록자는 Hub), 꺼져 있으면 파일에 직접.
 handle("admin:getLanguage", async () => ({ ok: true, data: readLanguageFile(dataDir) }));
 handle("admin:setLanguage", (arg) => toResult(async () => {
@@ -281,7 +282,7 @@ async function collectReport(win: BrowserWindow): Promise<Record<string, unknown
     lang: document.documentElement.lang,
     langPicker: !document.getElementById("lang-picker").hidden,
     title: document.title,
-    connTab: !!document.querySelector("[data-tab=conn]"),
+    connTab: !!document.querySelector("[data-nav=multi]"),
     connUnsupported: !document.getElementById("conn-unsupported").hidden,
     connState: document.getElementById("conn-server-state").textContent,
     connMembers: document.querySelectorAll("[data-kind=conn-member]").length,
@@ -298,12 +299,29 @@ async function collectReport(win: BrowserWindow): Promise<Record<string, unknown
   if (report.state === "lang") return report; // 언어 선택 화면에는 설정 입력이 보이지 않는다
   // inert 전환 뒤 포커스 복원 확인: 설정 입력에 포커스 → 새로고침 → 끝난 뒤 포커스 위치
   report.focusAfterRefresh = await win.webContents.executeJavaScript(`(async () => {
+    document.querySelector("[data-nav=limits]").click();
     document.getElementById("cfg-max").focus();
     document.getElementById("refresh").click();
     for (let i = 0; i < 50 && document.body.dataset.state === "loading"; i++) await new Promise((r) => setTimeout(r, 100));
     await new Promise((r) => setTimeout(r, 100));
     return document.activeElement ? document.activeElement.id : "";
   })()`);
+  // 스모크 전용(v3.1): UPLINK_ADMIN_SMOKE_SHOTS="<폴더>"면 칸마다(하위 탭 포함) 화면을 PNG로 남긴다 — 재배치 눈 확인용.
+  const shots = process.env.UPLINK_ADMIN_SMOKE_SHOTS;
+  if (shots) {
+    const views: string[] = await win.webContents.executeJavaScript(`[...document.querySelectorAll("[data-nav]")].flatMap((b) => {
+      const p = document.getElementById("panel-" + b.dataset.nav);
+      const subs = p ? [...p.querySelectorAll(":scope > .subtabs [data-sub]")].map((x) => b.dataset.nav + "/" + x.dataset.sub) : [];
+      return subs.length ? subs : [b.dataset.nav];
+    })`);
+    fs.mkdirSync(shots, { recursive: true });
+    for (const v of views) {
+      const [sec, sub] = v.split("/");
+      await win.webContents.executeJavaScript(`(() => { document.querySelector('[data-nav="${sec}"]').click(); ${sub ? `document.querySelector('#panel-${sec} > .subtabs [data-sub="${sub}"]').click();` : ""} })()`);
+      await new Promise((r) => setTimeout(r, 150));
+      fs.writeFileSync(path.join(shots, `${v.replace("/", "-")}.png`), (await win.webContents.capturePage()).toPNG());
+    }
+  }
   return report;
 }
 

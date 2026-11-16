@@ -10,6 +10,7 @@ import {
   meshCandidateConfirm, meshCandidateRejectConfirm, meshForgetConfirm, parseVerifyLabel, parseVerifyCodeInput,
 } from "./view.js";
 import type { FormMessage } from "./view.js";
+import { NAV, panelId, isMultiView, parseNavMemory, type NavMemory, type SectionId } from "./nav.js";
 import { getLang, setLang, tr } from "./lang.js";
 import { PICKER, type AdminKey } from "../messages.js";
 import { localeOf, type Lang } from "../i18n.js";
@@ -63,13 +64,14 @@ function setState(state: ViewState): void {
   document.body.dataset.state = state;
   main.inert = state !== "ready";
   byId("status").textContent = state === "loading" ? tr("status_loading") : "";
+  updateLangBar();
 }
 
 /** 다시 그린 뒤 포커스 복원: 원래 요소가 남아 있으면 그것, 다시 그려져 사라졌거나 비활성이면 현재 탭 버튼. */
 function restoreFocus(): void {
   if (!lastFocus) return;
   const keep = lastFocus.isConnected && !(lastFocus as HTMLButtonElement).disabled;
-  const target = keep ? lastFocus : document.querySelector<HTMLElement>('[data-tab][aria-selected="true"]');
+  const target = keep ? lastFocus : document.querySelector<HTMLElement>('[data-nav][aria-current="page"]');
   lastFocus = null;
   target?.focus();
 }
@@ -82,7 +84,8 @@ async function refresh(): Promise<void> {
   if (!snapshotSeq.isLatest(t)) return; // 더 나중에 시작한 새로고침이 있으면 이 결과는 버린다
   if (!r.ok) {
     setState(r.hubDown ? "hubdown" : "error");
-    showBanner(r.hubDown ? r.error : tr("load_failed", { detail: r.error }));
+    if (r.hubDown) { showBanner(""); void showHubDown(r.error); }
+    else showBanner(tr("load_failed", { detail: r.error }));
     return;
   }
   setState("ready");
@@ -301,10 +304,12 @@ function renderConn(c: IpcResult<ConnStatus>): void {
     unsupported.textContent = c.code === "old_hub_no_op" ? connUnsupportedMessage() : tr("conn_failed", { detail: c.error });
     unsupported.hidden = false;
     body.hidden = true;
+    byId("storage-body").hidden = true; // 저장소도 통신 상태에서 온다(옛 Hub·실패면 숨김)
     return;
   }
   unsupported.hidden = true;
   body.hidden = false;
+  byId("storage-body").hidden = false;
   const s = c.data;
   const enabled = s.server?.enabled === true;
 
@@ -455,11 +460,12 @@ function renderConn(c: IpcResult<ConnStatus>): void {
   }
 }
 
-// 통신 탭 자동 갱신: 탭이 보이고 화면이 준비됐을 때 2초마다 통신 상태만 다시 받는다(다른 PC 쪽 변화 — 참여·끊김·퇴출).
-// 전체 새로고침(로딩·inert)은 하지 않는다. Hub가 꺼졌으면 전체 새로고침으로 넘겨 hubdown 화면을 띄운다.
+// 다중 연결 화면 자동 갱신: 그 화면이 보이고 준비됐을 때 2초마다(하위 탭을 고른 순간에도) 통신 상태만 다시 받는다
+// (다른 PC 쪽 변화 — 참여·끊김·퇴출). 전체 새로고침(로딩·inert)은 하지 않는다. Hub가 꺼졌으면 전체 새로고침으로 넘겨 hubdown 화면을 띄운다.
 let connPolling = false;
-setInterval(async () => {
-  if (connPolling || document.hidden || (byId("tab-conn").hidden && byId("tab-space1").hidden && byId("tab-mesh").hidden) || document.body.dataset.state !== "ready") return;
+setInterval(() => void pollConnNow(), 2000);
+async function pollConnNow(): Promise<void> {
+  if (connPolling || document.hidden || !isMultiView(nav.section, nav.subs[nav.section] ?? firstSub(nav.section)) || document.body.dataset.state !== "ready") return;
   connPolling = true;
   try {
     const t = snapshotSeq.begin();
@@ -472,7 +478,7 @@ setInterval(async () => {
   } finally {
     connPolling = false;
   }
-}, 2000);
+}
 
 // --- 공간(방식 1, v3.0 4단계) ---
 
@@ -797,22 +803,108 @@ function renderSecurity(s: Snapshot): void {
       list.append(li);
     }
   }
-  if (byId("tab-security").hidden) updateBadge();
+  if (byId("panel-security").hidden) updateBadge();
   else markSecuritySeen();
 }
 
-function selectTab(name: string): void {
-  for (const b of document.querySelectorAll<HTMLButtonElement>("[data-tab]")) {
-    b.setAttribute("aria-selected", String(b.dataset.tab === name));
-  }
-  for (const p of document.querySelectorAll<HTMLElement>(".panel")) p.hidden = p.id !== `tab-${name}`;
-  byId("lang-bar").hidden = name !== "settings";
-  if (name === "security") markSecuritySeen();
+// --- 왼쪽 목록·하위 탭(v3.1) ---
+const NAV_KEY = "agent-uplink.nav";
+const nav: NavMemory = (() => { try { return parseNavMemory(localStorage.getItem(NAV_KEY)); } catch { return parseNavMemory(null); } })();
+
+function firstSub(section: SectionId): string | undefined {
+  return NAV.find((n) => n.id === section)?.subs?.[0]?.id;
 }
 
-for (const b of document.querySelectorAll<HTMLButtonElement>("[data-tab]")) {
-  b.addEventListener("click", () => selectTab(b.dataset.tab!));
+/** 언어 막대: '앱 설정'을 볼 때, 그리고 Hub가 꺼졌을 때(구석) 보인다. */
+function updateLangBar(): void {
+  byId("lang-bar").hidden = !(nav.section === "app" || document.body.dataset.state === "hubdown");
 }
+
+function selectSection(section: SectionId, sub?: string): void {
+  const item = NAV.find((n) => n.id === section) ?? NAV[0];
+  nav.section = item.id;
+  if (item.subs) nav.subs[item.id] = item.subs.some((x) => x.id === sub) ? sub : nav.subs[item.id] ?? item.subs[0].id;
+  for (const b of document.querySelectorAll<HTMLButtonElement>("[data-nav]")) {
+    if (b.dataset.nav === item.id) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  }
+  for (const n of NAV) {
+    byId(panelId(n.id)).hidden = n.id !== item.id;
+    if (!n.subs) continue;
+    const cur = nav.subs[n.id] ?? n.subs[0].id;
+    for (const s2 of n.subs) byId(panelId(n.id, s2.id)).hidden = s2.id !== cur;
+    for (const b of byId(panelId(n.id)).querySelectorAll<HTMLButtonElement>(":scope > .subtabs [data-sub]")) b.setAttribute("aria-selected", String(b.dataset.sub === cur));
+  }
+  updateLangBar();
+  if (item.id === "security") markSecuritySeen();
+  try { localStorage.setItem(NAV_KEY, JSON.stringify(nav)); } catch { /* 기억 못 해도 동작에는 영향 없음 */ }
+  if (isMultiView(item.id, nav.subs[item.id])) void pollConnNow();
+}
+
+for (const b of document.querySelectorAll<HTMLButtonElement>("[data-nav]")) {
+  b.addEventListener("click", () => selectSection(b.dataset.nav as SectionId));
+}
+for (const n of NAV) {
+  if (!n.subs) continue;
+  for (const b of byId(panelId(n.id)).querySelectorAll<HTMLButtonElement>(":scope > .subtabs [data-sub]")) {
+    b.addEventListener("click", () => selectSection(n.id, b.dataset.sub));
+  }
+}
+selectSection(nav.section);
+
+// --- 포인터 옆 툴팁(새로고침 아이콘 등, data-tip) ---
+const tip = byId("tip");
+function showTip(target: HTMLElement, x: number, y: number): void {
+  tip.textContent = tr(target.dataset.tip as AdminKey);
+  tip.hidden = false;
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  tip.style.left = `${Math.min(x + 12, window.innerWidth - w - 4)}px`;
+  tip.style.top = `${Math.min(y + 16, window.innerHeight - h - 4)}px`;
+}
+for (const t of document.querySelectorAll<HTMLElement>("[data-tip]")) {
+  t.addEventListener("mousemove", (e) => showTip(t, e.clientX, e.clientY));
+  t.addEventListener("mouseleave", () => { tip.hidden = true; });
+  t.addEventListener("focus", () => { const r = t.getBoundingClientRect(); showTip(t, r.left, r.bottom - 8); });
+  t.addEventListener("blur", () => { tip.hidden = true; });
+  t.addEventListener("click", () => { tip.hidden = true; });
+}
+
+// --- Hub 꺼짐 화면·수동 시작(v3.1) ---
+async function showHubDown(detail: string): Promise<void> {
+  byId("hubdown-detail").textContent = detail;
+  const btn = byId<HTMLButtonElement>("hub-start");
+  const m = byId("hub-start-msg");
+  if (hubStarting) return;
+  const r = await window.admin.launchAvailable();
+  const code = r.ok ? r.data.code : null;
+  btn.hidden = code !== null;
+  btn.disabled = false;
+  m.textContent = code === "no_launch_info" ? tr("hubdown_no_launch") : code === "launch_untrusted" ? tr("hub_start_untrusted") : "";
+}
+
+let hubStarting = false;
+byId("hub-start").addEventListener("click", async () => {
+  const btn = byId<HTMLButtonElement>("hub-start");
+  const m = byId("hub-start-msg");
+  btn.disabled = true;
+  hubStarting = true;
+  m.textContent = tr("hub_starting");
+  try {
+    const r = await window.admin.startHub();
+    if (!r.ok) { m.textContent = r.error; btn.disabled = false; return; }
+    // Hub는 보안 준비가 끝나야 hello에 답한다 — 준비될 때까지 몇 번 다시 본다
+    for (let i = 0; i < 20; i++) {
+      await new Promise((res) => setTimeout(res, 1000));
+      await refresh();
+      if (document.body.dataset.state !== "hubdown") return;
+      m.textContent = tr("hub_starting");
+    }
+    m.textContent = tr("hub_start_failed");
+    btn.disabled = false;
+  } finally {
+    hubStarting = false;
+  }
+});
 
 byId("refresh").addEventListener("click", () => void refresh());
 

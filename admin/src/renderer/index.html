@@ -16,286 +16,350 @@
     </div>
   </div>
   <header class="top">
-    <h1 data-i18n="window_title"></h1>
+    <h1>Agent Uplink</h1>
     <span id="status" class="status" aria-live="polite"></span>
-    <button id="refresh" type="button" data-i18n="btn_refresh"></button>
+    <button id="refresh" type="button" class="icon" data-i18n-aria="btn_refresh" data-tip="btn_refresh">⟳</button>
     <button id="open-viewer" type="button" data-i18n="btn_open_viewer"></button>
   </header>
+  <div id="tip" class="tip" role="tooltip" hidden></div>
   <div id="banner" class="banner" role="alert" hidden></div>
   <div id="save-blocked" class="banner" role="alert" hidden></div>
   <div id="op-msg" class="opmsg" role="status" hidden><span id="op-msg-text"></span><button id="op-msg-close" type="button" data-i18n="btn_close" data-i18n-aria="aria_close_message"></button></div>
-  <nav class="tabs" role="tablist">
-    <button type="button" role="tab" data-tab="settings" aria-selected="true" data-i18n="tab_settings"></button>
-    <button type="button" role="tab" data-tab="servers" aria-selected="false" data-i18n="tab_servers"></button>
-    <button type="button" role="tab" data-tab="accounts" aria-selected="false" data-i18n="tab_accounts"></button>
-    <button type="button" role="tab" data-tab="trash" aria-selected="false" data-i18n="tab_trash"></button>
-    <button type="button" role="tab" data-tab="conn" aria-selected="false" data-i18n="tab_conn"></button>
-    <button type="button" role="tab" data-tab="space1" aria-selected="false" data-i18n="tab_space1"></button>
-    <button type="button" role="tab" data-tab="mesh" aria-selected="false" data-i18n="tab_mesh"></button>
-    <button type="button" role="tab" data-tab="security" aria-selected="false"><span data-i18n="tab_security"></span><span id="security-badge" class="badge" hidden></span></button>
-  </nav>
-  <!-- Language stays usable with the hub down, so it lives outside the inert main (shown on the Settings tab only). -->
-  <div id="lang-bar" class="form langbar">
-    <label><span data-i18n="settings_language"></span> <select id="cfg-lang"><option value="ko"></option><option value="en"></option></select></label>
-    <span id="lang-msg" class="msg"></span>
+  <!-- Hub 꺼짐(v3.1): 왼쪽 목록·본문 대신 가운데 문구 + 수동 시작. 언어 막대는 구석에 남는다. -->
+  <div id="hubdown" class="hubdown">
+    <p id="hubdown-title" class="hubdown-title" data-i18n="hubdown_title"></p>
+    <p id="hubdown-detail" class="hint"></p>
+    <div class="actions center"><button id="hub-start" type="button" data-i18n="btn_hub_start"></button></div>
+    <p id="hub-start-msg" class="hint" role="status"></p>
   </div>
-  <main inert>
-    <section id="tab-settings" class="panel">
-      <form id="config-form" class="form">
-        <label><span data-i18n="cfg_max"></span> <input id="cfg-max" type="text" inputmode="numeric" autocomplete="off"></label>
-        <label><span data-i18n="cfg_batch"></span> <input id="cfg-batch" type="text" inputmode="numeric" autocomplete="off"></label>
-        <label class="check"><input id="cfg-dev-delete" type="checkbox"> <span data-i18n="cfg_dev_delete"></span> <code>allowDevDelete</code></label>
-        <p class="hint" data-i18n="cfg_hint"></p>
-        <div class="actions"><button type="submit" data-i18n="btn_save"></button><span id="config-msg" class="msg"></span></div>
-      </form>
-    </section>
-    <section id="tab-servers" class="panel" hidden>
-      <ul id="server-list" class="list"></ul>
-    </section>
-    <section id="tab-accounts" class="panel" hidden>
-      <h2 data-i18n="heading_accounts"></h2>
-      <ul id="account-list" class="list"></ul>
-      <h2 data-i18n="heading_dms"></h2>
-      <ul id="dm-list" class="list"></ul>
-    </section>
-    <section id="tab-trash" class="panel" hidden>
-      <div class="trash-head"><span id="trash-summary" class="meta"></span><button id="empty-trash" type="button" class="danger" data-i18n="btn_empty_trash"></button></div>
-      <ul id="trash-list" class="list"></ul>
-    </section>
-    <section id="tab-conn" class="panel" hidden>
-      <p id="conn-unsupported" class="hint" hidden></p>
-      <div id="conn-body">
-        <h2 data-i18n="conn_user_heading"></h2>
-        <form id="conn-user-form" class="form inline">
-          <input id="conn-user" type="text" autocomplete="off" maxlength="64">
-          <button type="submit" data-i18n="btn_save"></button>
-          <p class="hint" data-i18n="conn_user_hint"></p>
-        </form>
-
-        <h2 data-i18n="conn_server_heading"></h2>
-        <p id="conn-server-state" class="meta"></p>
-        <form id="conn-server-form" class="form">
-          <label><span data-i18n="conn_port"></span> <input id="conn-port" type="text" inputmode="numeric" autocomplete="off" value="47900"></label>
-          <label><span data-i18n="conn_profile"></span> <select id="conn-profile"><option value="tls13-chacha20">TLS 1.3 · ChaCha20-Poly1305</option><option value="tls13-aes256gcm">TLS 1.3 · AES-256-GCM</option></select></label>
-          <label><span data-i18n="conn_space"></span> <input id="conn-space" type="text" autocomplete="off" maxlength="64"></label>
-          <label class="check"><input id="conn-burn" type="checkbox"> <span data-i18n="conn_burn_label"></span></label>
-          <div class="actions"><button type="submit" data-i18n="btn_conn_enable"></button><button id="conn-disable" type="button" class="danger" data-i18n="btn_conn_disable"></button></div>
-        </form>
-
-        <h2 data-i18n="conn_comms_heading"></h2>
-        <p class="hint" data-i18n="conn_comms_hint"></p>
-        <ul id="conn-comms" class="list"></ul>
-        <form id="conn-add-server-form" class="form inline">
-          <input id="conn-new-server" type="text" autocomplete="off" maxlength="64" data-i18n-ph="conn_new_server_ph">
-          <button type="submit" data-i18n="btn_conn_add_server"></button>
-          <button id="conn-save-shared" type="button" data-i18n="btn_conn_save_shared"></button>
-        </form>
-
-        <h2 data-i18n="conn_invite_heading"></h2>
-        <form id="conn-invite-form" class="form">
-          <label><span data-i18n="conn_invite_label"></span> <input id="conn-inv-label" type="text" autocomplete="off" maxlength="64"></label>
-          <label><span data-i18n="conn_invite_host"></span> <input id="conn-inv-host" type="text" autocomplete="off" maxlength="253" class="wide"></label>
-          <p class="hint" data-i18n="conn_host_hint"></p>
-          <label><span data-i18n="conn_invite_days"></span> <input id="conn-inv-days" type="text" inputmode="numeric" autocomplete="off" value="7"></label>
-          <div class="actions"><button id="conn-inv-submit" type="submit" data-i18n="btn_conn_invite"></button><span id="conn-inv-needs" class="hint" data-i18n="conn_invite_needs_server" hidden></span></div>
-        </form>
-        <div id="conn-inv-out" class="form" hidden>
-          <textarea id="conn-inv-code" readonly rows="4" spellcheck="false"></textarea>
-          <p class="hint" data-i18n="conn_invite_code_hint"></p>
-          <div class="actions"><button id="conn-inv-copy" type="button" data-i18n="btn_copy"></button><span id="conn-inv-copy-msg" class="msg"></span></div>
-        </div>
-
-        <h2 data-i18n="storage_heading"></h2>
-        <p class="hint" data-i18n="storage_hint"></p>
-        <p id="storage-state" class="meta"></p>
-        <form id="storage-kind-form" class="form">
-          <label><span data-i18n="storage_kind"></span> <select id="storage-kind"><option value="github" data-i18n="storage_kind_github"></option><option value="supabase" data-i18n="storage_kind_supabase"></option></select></label>
-        </form>
-        <form id="supabase-form" class="form" hidden>
-          <p class="hint" data-i18n="supabase_hint"></p>
-          <label><span data-i18n="supabase_url"></span> <input id="supabase-url" type="text" autocomplete="off" maxlength="200" class="wide"></label>
-          <label><span data-i18n="supabase_key"></span> <input id="supabase-key" type="password" autocomplete="off" maxlength="1000" class="wide"></label>
-          <label><span data-i18n="supabase_bucket"></span> <input id="supabase-bucket" type="text" autocomplete="off" maxlength="63"></label>
-          <label><span data-i18n="storage_interval"></span> <input id="supabase-interval" type="text" inputmode="numeric" autocomplete="off" value="5"></label>
-          <div class="actions"><button type="submit" data-i18n="btn_storage_set"></button></div>
-        </form>
-        <form id="storage-form" class="form">
-          <label><span data-i18n="storage_repo"></span> <input id="storage-repo" type="text" autocomplete="off" maxlength="141" class="wide"></label>
-          <label><span data-i18n="storage_token"></span> <input id="storage-token" type="password" autocomplete="off" maxlength="500" class="wide"></label>
-          <label><span data-i18n="storage_interval"></span> <input id="storage-interval" type="text" inputmode="numeric" autocomplete="off" value="5"></label>
-          <div class="actions">
-            <button type="submit" data-i18n="btn_storage_set"></button>
-            <button id="storage-upload" type="button" data-i18n="btn_storage_upload"></button>
-            <button id="storage-verify" type="button" data-i18n="btn_storage_verify"></button>
-            <button id="storage-clear" type="button" class="danger" data-i18n="btn_storage_clear"></button>
-          </div>
-        </form>
-        <div id="storage-recovery" class="form" hidden>
-          <p class="name" data-i18n="storage_recovery_title"></p>
-          <textarea id="storage-recovery-key" readonly rows="2" spellcheck="false"></textarea>
-          <p class="hint" data-i18n="storage_recovery_hint"></p>
-          <div class="actions"><button id="storage-recovery-copy" type="button" data-i18n="btn_copy"></button><span id="storage-recovery-msg" class="msg"></span></div>
-        </div>
-        <p id="storage-verify-result" class="meta"></p>
-        <form id="prune-form" class="form">
-          <p class="name" data-i18n="prune_heading"></p>
-          <label class="check"><input id="prune-enabled" type="checkbox"> <span data-i18n="prune_enabled"></span></label>
-          <label><span data-i18n="prune_days"></span> <input id="prune-days" type="text" inputmode="numeric" autocomplete="off" value="30"></label>
-          <div class="actions"><button type="submit" data-i18n="btn_prune_save"></button></div>
-        </form>
-        <h2 data-i18n="brestore_heading"></h2>
-        <p class="hint" data-i18n="brestore_hint"></p>
-        <form id="restore-form" class="form">
-          <label><span data-i18n="storage_kind"></span> <select id="restore-kind"><option value="github" data-i18n="storage_kind_github"></option><option value="supabase" data-i18n="storage_kind_supabase"></option></select></label>
-          <div id="restore-gh" class="form">
-            <label><span data-i18n="storage_repo"></span> <input id="restore-repo" type="text" autocomplete="off" maxlength="141" class="wide"></label>
-            <label><span data-i18n="storage_token"></span> <input id="restore-token" type="password" autocomplete="off" maxlength="500" class="wide"></label>
-          </div>
-          <div id="restore-sb" class="form" hidden>
-            <label><span data-i18n="supabase_url"></span> <input id="restore-url" type="text" autocomplete="off" maxlength="200" class="wide"></label>
-            <label><span data-i18n="supabase_key"></span> <input id="restore-key" type="password" autocomplete="off" maxlength="1000" class="wide"></label>
-            <label><span data-i18n="supabase_bucket"></span> <input id="restore-bucket" type="text" autocomplete="off" maxlength="63"></label>
-          </div>
-          <label><span data-i18n="brestore_recovery"></span> <textarea id="restore-recovery" rows="2" spellcheck="false" autocomplete="off"></textarea></label>
-          <label><span data-i18n="brestore_name"></span> <input id="restore-name" type="text" autocomplete="off" maxlength="64"></label>
-          <div class="actions"><button type="submit" data-i18n="btn_brestore_scan"></button></div>
-        </form>
-        <ul id="restore-candidates" class="list"></ul>
-        <p id="restore-result" class="meta"></p>
-
-
-        <h2 data-i18n="conn_members_heading"></h2>
-        <ul id="conn-members" class="list"></ul>
-
-        <h2 data-i18n="conn_join_heading"></h2>
-        <form id="conn-join-form" class="form">
-          <textarea id="conn-join-code" rows="3" spellcheck="false" data-i18n-ph="conn_join_ph"></textarea>
-          <div class="actions"><button type="submit" data-i18n="btn_conn_join"></button></div>
-        </form>
-        <h2 data-i18n="conn_joined_heading"></h2>
-        <ul id="conn-joined" class="list"></ul>
-
-        <h2 data-i18n="conn_events_heading"></h2>
-        <ul id="conn-events" class="list"></ul>
+  <div class="layout">
+    <nav class="side" data-i18n-aria="nav_label">
+      <button type="button" data-nav="app" aria-current="page" data-i18n="nav_app"></button>
+      <button type="button" data-nav="limits" data-i18n="nav_limits"></button>
+      <button type="button" data-nav="servers" data-i18n="nav_servers"></button>
+      <button type="button" data-nav="accounts" data-i18n="nav_accounts"></button>
+      <button type="button" data-nav="security"><span data-i18n="nav_security"></span><span id="security-badge" class="badge" hidden></span></button>
+      <button type="button" data-nav="multi" data-i18n="nav_multi"></button>
+      <button type="button" data-nav="trash" data-i18n="nav_trash"></button>
+    </nav>
+    <div class="content">
+      <!-- Language stays usable with the hub down, so it lives outside the inert main (shown on App settings, and in the corner when the hub is down). -->
+      <div id="lang-bar" class="form langbar">
+        <label><span data-i18n="settings_language"></span> <select id="cfg-lang"><option value="ko"></option><option value="en"></option></select></label>
+        <span id="lang-msg" class="msg"></span>
       </div>
-    </section>
-    <section id="tab-space1" class="panel" hidden>
-      <p class="hint" data-i18n="s1_intro"></p>
-      <h2 data-i18n="s1_list_heading"></h2>
-      <ul id="s1-list" class="list"></ul>
-      <div id="s1-invite-out" class="form" hidden>
-        <textarea id="s1-invite-code" readonly rows="4" spellcheck="false"></textarea>
-        <p class="hint" data-i18n="conn_invite_code_hint"></p>
-        <div class="actions"><button id="s1-invite-copy" type="button" data-i18n="btn_copy"></button><span id="s1-invite-copy-msg" class="msg"></span></div>
-      </div>
-      <h2 data-i18n="s1_create_heading"></h2>
-      <form id="s1-create-form" class="form">
-        <p class="hint" data-i18n="s1_create_hint"></p>
-        <label><span data-i18n="s1_space_name"></span> <input id="s1-name" type="text" autocomplete="off" maxlength="64"></label>
-        <label><span data-i18n="s1_local_server"></span> <select id="s1-server"></select></label>
-        <label><span data-i18n="s1_repo"></span> <input id="s1-repo" type="text" autocomplete="off" maxlength="141" class="wide"></label>
-        <label><span data-i18n="s1_token"></span> <input id="s1-token" type="password" autocomplete="off" maxlength="500" class="wide"></label>
-        <label><span data-i18n="s1_interval"></span> <input id="s1-interval" type="text" inputmode="numeric" autocomplete="off" value="30"></label>
-        <div class="actions"><button type="submit" data-i18n="btn_s1_create"></button></div>
-      </form>
-      <h2 data-i18n="s1_join_heading"></h2>
-      <form id="s1-join-form" class="form">
-        <textarea id="s1-join-code" rows="3" spellcheck="false" data-i18n-ph="s1_join_ph"></textarea>
-        <label><span data-i18n="s1_token"></span> <input id="s1-join-token" type="password" autocomplete="off" maxlength="500" class="wide"></label>
-        <div class="actions"><button type="submit" data-i18n="btn_s1_join"></button></div>
-      </form>
-    </section>
-    <section id="tab-mesh" class="panel" hidden>
-      <p class="hint" data-i18n="mesh_intro"></p>
-      <p id="mesh-unavailable" class="hint" hidden></p>
-      <div id="mesh-body">
-        <h2 data-i18n="mesh_links_heading"></h2>
-        <ul id="mesh-links" class="list"></ul>
-        <h2 data-i18n="mesh_servers_heading"></h2>
-        <ul id="mesh-servers" class="list"></ul>
-        <h2 data-i18n="mesh_cand_heading"></h2>
-        <p class="hint" data-i18n="mesh_cand_hint"></p>
-        <ul id="mesh-candidates" class="list"></ul>
-        <h2 data-i18n="mesh_verify_heading"></h2>
-        <p class="hint" data-i18n="mesh_verify_hint"></p>
-        <h3 data-i18n="mesh_verify_managed"></h3>
-        <form id="mesh-verify-create-form" class="form">
-          <label><span data-i18n="mesh_verify_label"></span> <input id="mesh-verify-label" type="text" autocomplete="off" maxlength="64"></label>
-          <div class="actions"><button type="submit" data-i18n="btn_mesh_verify_create"></button></div>
-        </form>
-        <div id="mesh-verify-out" class="form" hidden>
-          <textarea id="mesh-verify-code" readonly rows="3" spellcheck="false"></textarea>
-          <p class="hint" data-i18n="mesh_verify_code_hint"></p>
-          <div class="actions"><button id="mesh-verify-copy" type="button" data-i18n="btn_copy"></button><span id="mesh-verify-copy-msg" class="msg"></span></div>
-        </div>
-        <ul id="mesh-verify-managed" class="list"></ul>
-        <h3 data-i18n="mesh_verify_held"></h3>
-        <form id="mesh-verify-register-form" class="form">
-          <textarea id="mesh-verify-input" rows="3" spellcheck="false" autocomplete="off" data-i18n-ph="mesh_verify_ph"></textarea>
-          <div class="actions"><button type="submit" data-i18n="btn_mesh_verify_register"></button></div>
-        </form>
-        <ul id="mesh-verify-held" class="list"></ul>
-        <h2 data-i18n="mesh_shared_heading"></h2>
-        <p class="hint" data-i18n="mesh_shared_hint"></p>
-        <div id="mesh-shared" class="form"></div>
-        <div class="actions"><button id="mesh-save-shared" type="button" data-i18n="btn_mesh_save_shared"></button></div>
-        <h2 data-i18n="mesh_invite_heading"></h2>
-        <form id="mesh-invite-form" class="form">
-          <p class="hint" data-i18n="mesh_invite_hint"></p>
-          <label><span data-i18n="mesh_inv_label"></span> <input id="mesh-inv-label" type="text" autocomplete="off" maxlength="64"></label>
-          <label><span data-i18n="conn_invite_host"></span> <input id="mesh-inv-host" type="text" autocomplete="off" maxlength="253" class="wide"></label>
-          <p class="hint" data-i18n="conn_host_hint"></p>
-          <label><span data-i18n="conn_invite_days"></span> <input id="mesh-inv-days" type="text" inputmode="numeric" autocomplete="off" value="7"></label>
-          <div class="actions"><button type="submit" data-i18n="btn_mesh_invite"></button></div>
-        </form>
-        <div id="mesh-inv-out" class="form" hidden>
-          <textarea id="mesh-inv-code" readonly rows="4" spellcheck="false"></textarea>
-          <p class="hint" data-i18n="conn_invite_code_hint"></p>
-          <div class="actions"><button id="mesh-inv-copy" type="button" data-i18n="btn_copy"></button><span id="mesh-inv-copy-msg" class="msg"></span></div>
-        </div>
-        <h2 data-i18n="mesh_join_heading"></h2>
-        <form id="mesh-join-form" class="form">
-          <textarea id="mesh-join-code" rows="3" spellcheck="false" data-i18n-ph="mesh_join_ph"></textarea>
-          <div class="actions"><button type="submit" data-i18n="btn_mesh_join"></button></div>
-        </form>
-        <h2 data-i18n="mesh_case_heading"></h2>
-        <p class="hint" data-i18n="mesh_case_hint"></p>
-        <form id="mesh-case-form" class="form">
-          <select id="mesh-case">
-            <option value="distributed" data-i18n="case_distributed"></option>
-            <option value="main" data-i18n="case_main"></option>
-            <option value="single" data-i18n="case_single"></option>
-          </select>
-          <label><span data-i18n="mesh_case_main"></span> <select id="mesh-case-main"></select></label>
-          <fieldset id="mesh-case-standby"><legend data-i18n="mesh_case_standby"></legend><div id="mesh-case-standby-list"></div></fieldset>
-          <div class="actions"><button type="submit" data-i18n="btn_mesh_save_case"></button><button id="mesh-cmd-case" type="button" data-i18n="btn_mesh_cmd_case" hidden></button></div>
-        </form>
-        <p id="mesh-effective" class="hint"></p>
-        <p id="mesh-upload" class="hint"></p>
-        <h2 data-i18n="mesh_coord_heading"></h2>
-        <p class="hint" data-i18n="mesh_coord_hint"></p>
-        <div class="actions"><button id="mesh-declare" type="button"></button><span id="mesh-is-coord" class="meta"></span></div>
-        <h3 data-i18n="mesh_coordinators"></h3>
-        <ul id="mesh-coords" class="list"></ul>
-        <form id="mesh-cmd-form" class="form" hidden>
-          <h3 data-i18n="mesh_cmd_heading"></h3>
-          <select id="mesh-cmd-type">
-            <option value="cut" data-i18n="cmd_cut"></option>
-            <option value="unshare" data-i18n="cmd_unshare"></option>
-            <option value="noWrite" data-i18n="cmd_nowrite"></option>
-          </select>
-          <label><span data-i18n="mesh_cmd_target"></span> <select id="mesh-cmd-target"></select></label>
-          <label><span data-i18n="mesh_cmd_hubuser"></span> <input id="mesh-cmd-user" type="text" autocomplete="off" maxlength="64"></label>
-          <div class="actions"><button type="submit" data-i18n="btn_mesh_cmd"></button></div>
-        </form>
-        <h3 data-i18n="mesh_effects_heading"></h3>
-        <ul id="mesh-effects" class="list"></ul>
-      </div>
-    </section>
-    <section id="tab-security" class="panel" hidden>
-      <p class="hint" data-i18n="security_intro"></p>
-      <ul id="security-list" class="list"></ul>
-    </section>
-  </main>
+      <main id="main-area" inert>
+        <section id="panel-app" class="panel">
+          <p class="hint" data-i18n="app_hint"></p>
+        </section>
+
+        <section id="panel-limits" class="panel" hidden>
+          <form id="config-form" class="form">
+            <label><span data-i18n="cfg_max"></span> <input id="cfg-max" type="text" inputmode="numeric" autocomplete="off"></label>
+            <label><span data-i18n="cfg_batch"></span> <input id="cfg-batch" type="text" inputmode="numeric" autocomplete="off"></label>
+            <label class="check"><input id="cfg-dev-delete" type="checkbox"> <span data-i18n="cfg_dev_delete"></span> <code>allowDevDelete</code></label>
+            <p class="hint" data-i18n="cfg_hint"></p>
+            <div class="actions"><button type="submit" data-i18n="btn_save"></button><span id="config-msg" class="msg"></span></div>
+          </form>
+        </section>
+
+        <section id="panel-servers" class="panel" hidden>
+          <div class="subtabs" role="tablist">
+            <button type="button" role="tab" data-sub="local" aria-selected="true" data-i18n="sub_local"></button>
+            <button type="button" role="tab" data-sub="multi" aria-selected="false" data-i18n="sub_multi"></button>
+          </div>
+          <section id="panel-servers-local" class="subpanel">
+            <ul id="server-list" class="list"></ul>
+          </section>
+          <section id="panel-servers-multi" class="subpanel" hidden>
+            <p class="hint" data-i18n="multi_channels_hint"></p>
+            <ul id="multi-channel-list" class="list"></ul>
+          </section>
+        </section>
+
+        <section id="panel-accounts" class="panel" hidden>
+          <div class="subtabs" role="tablist">
+            <button type="button" role="tab" data-sub="local" aria-selected="true" data-i18n="sub_local"></button>
+            <button type="button" role="tab" data-sub="multi" aria-selected="false" data-i18n="sub_multi"></button>
+          </div>
+          <section id="panel-accounts-local" class="subpanel">
+            <h2 data-i18n="heading_accounts"></h2>
+            <ul id="account-list" class="list"></ul>
+            <h2 data-i18n="heading_dms"></h2>
+            <ul id="dm-list" class="list"></ul>
+          </section>
+          <section id="panel-accounts-multi" class="subpanel" hidden>
+            <h2 data-i18n="heading_conn_accounts"></h2>
+            <ul id="conn-account-list" class="list"></ul>
+            <h2 data-i18n="heading_peers"></h2>
+            <p class="hint" data-i18n="peers_hint"></p>
+            <ul id="peer-list" class="list"></ul>
+            <h2 data-i18n="heading_conn_dms"></h2>
+            <ul id="conn-dm-list" class="list"></ul>
+          </section>
+        </section>
+
+        <section id="panel-security" class="panel" hidden>
+          <p class="hint" data-i18n="security_intro"></p>
+          <ul id="security-list" class="list"></ul>
+        </section>
+
+        <section id="panel-multi" class="panel" hidden>
+          <div class="subtabs" role="tablist">
+            <button type="button" role="tab" data-sub="comms" aria-selected="true" data-i18n="sub_comms"></button>
+            <button type="button" role="tab" data-sub="space1" aria-selected="false" data-i18n="sub_space1"></button>
+            <button type="button" role="tab" data-sub="mesh" aria-selected="false" data-i18n="sub_mesh"></button>
+            <button type="button" role="tab" data-sub="storage" aria-selected="false" data-i18n="sub_storage"></button>
+          </div>
+
+          <section id="panel-multi-comms" class="subpanel">
+            <p id="conn-unsupported" class="hint" hidden></p>
+            <div id="conn-body">
+              <h2 data-i18n="conn_user_heading"></h2>
+              <form id="conn-user-form" class="form inline">
+                <input id="conn-user" type="text" autocomplete="off" maxlength="64">
+                <button type="submit" data-i18n="btn_save"></button>
+                <p class="hint" data-i18n="conn_user_hint"></p>
+              </form>
+
+              <h2 data-i18n="conn_server_heading"></h2>
+              <p id="conn-server-state" class="meta"></p>
+              <form id="conn-server-form" class="form">
+                <label><span data-i18n="conn_port"></span> <input id="conn-port" type="text" inputmode="numeric" autocomplete="off" value="47900"></label>
+                <label><span data-i18n="conn_profile"></span> <select id="conn-profile"><option value="tls13-chacha20">TLS 1.3 · ChaCha20-Poly1305</option><option value="tls13-aes256gcm">TLS 1.3 · AES-256-GCM</option></select></label>
+                <label><span data-i18n="conn_space"></span> <input id="conn-space" type="text" autocomplete="off" maxlength="64"></label>
+                <label class="check"><input id="conn-burn" type="checkbox"> <span data-i18n="conn_burn_label"></span></label>
+                <div class="actions"><button type="submit" data-i18n="btn_conn_enable"></button><button id="conn-disable" type="button" class="danger" data-i18n="btn_conn_disable"></button></div>
+              </form>
+
+              <h2 data-i18n="conn_comms_heading"></h2>
+              <p class="hint" data-i18n="conn_comms_hint"></p>
+              <ul id="conn-comms" class="list"></ul>
+              <form id="conn-add-server-form" class="form inline">
+                <input id="conn-new-server" type="text" autocomplete="off" maxlength="64" data-i18n-ph="conn_new_server_ph">
+                <button type="submit" data-i18n="btn_conn_add_server"></button>
+                <button id="conn-save-shared" type="button" data-i18n="btn_conn_save_shared"></button>
+              </form>
+
+              <h2 data-i18n="conn_invite_heading"></h2>
+              <form id="conn-invite-form" class="form">
+                <label><span data-i18n="conn_invite_label"></span> <input id="conn-inv-label" type="text" autocomplete="off" maxlength="64"></label>
+                <label><span data-i18n="conn_invite_host"></span> <input id="conn-inv-host" type="text" autocomplete="off" maxlength="253" class="wide"></label>
+                <p class="hint" data-i18n="conn_host_hint"></p>
+                <label><span data-i18n="conn_invite_days"></span> <input id="conn-inv-days" type="text" inputmode="numeric" autocomplete="off" value="7"></label>
+                <div class="actions"><button id="conn-inv-submit" type="submit" data-i18n="btn_conn_invite"></button><span id="conn-inv-needs" class="hint" data-i18n="conn_invite_needs_server" hidden></span></div>
+              </form>
+              <div id="conn-inv-out" class="form" hidden>
+                <textarea id="conn-inv-code" readonly rows="4" spellcheck="false"></textarea>
+                <p class="hint" data-i18n="conn_invite_code_hint"></p>
+                <div class="actions"><button id="conn-inv-copy" type="button" data-i18n="btn_copy"></button><span id="conn-inv-copy-msg" class="msg"></span></div>
+              </div>
+
+              <h2 data-i18n="conn_members_heading"></h2>
+              <ul id="conn-members" class="list"></ul>
+
+              <h2 data-i18n="conn_join_heading"></h2>
+              <form id="conn-join-form" class="form">
+                <textarea id="conn-join-code" rows="3" spellcheck="false" data-i18n-ph="conn_join_ph"></textarea>
+                <div class="actions"><button type="submit" data-i18n="btn_conn_join"></button></div>
+              </form>
+              <h2 data-i18n="conn_joined_heading"></h2>
+              <ul id="conn-joined" class="list"></ul>
+
+              <h2 data-i18n="conn_events_heading"></h2>
+              <ul id="conn-events" class="list"></ul>
+            </div>
+          </section>
+
+          <section id="panel-multi-space1" class="subpanel" hidden>
+            <p class="hint" data-i18n="s1_intro"></p>
+            <h2 data-i18n="s1_list_heading"></h2>
+            <ul id="s1-list" class="list"></ul>
+            <div id="s1-invite-out" class="form" hidden>
+              <textarea id="s1-invite-code" readonly rows="4" spellcheck="false"></textarea>
+              <p class="hint" data-i18n="conn_invite_code_hint"></p>
+              <div class="actions"><button id="s1-invite-copy" type="button" data-i18n="btn_copy"></button><span id="s1-invite-copy-msg" class="msg"></span></div>
+            </div>
+            <h2 data-i18n="s1_create_heading"></h2>
+            <form id="s1-create-form" class="form">
+              <p class="hint" data-i18n="s1_create_hint"></p>
+              <label><span data-i18n="s1_space_name"></span> <input id="s1-name" type="text" autocomplete="off" maxlength="64"></label>
+              <label><span data-i18n="s1_local_server"></span> <select id="s1-server"></select></label>
+              <label><span data-i18n="s1_repo"></span> <input id="s1-repo" type="text" autocomplete="off" maxlength="141" class="wide"></label>
+              <label><span data-i18n="s1_token"></span> <input id="s1-token" type="password" autocomplete="off" maxlength="500" class="wide"></label>
+              <label><span data-i18n="s1_interval"></span> <input id="s1-interval" type="text" inputmode="numeric" autocomplete="off" value="30"></label>
+              <div class="actions"><button type="submit" data-i18n="btn_s1_create"></button></div>
+            </form>
+            <h2 data-i18n="s1_join_heading"></h2>
+            <form id="s1-join-form" class="form">
+              <textarea id="s1-join-code" rows="3" spellcheck="false" data-i18n-ph="s1_join_ph"></textarea>
+              <label><span data-i18n="s1_token"></span> <input id="s1-join-token" type="password" autocomplete="off" maxlength="500" class="wide"></label>
+              <div class="actions"><button type="submit" data-i18n="btn_s1_join"></button></div>
+            </form>
+          </section>
+
+          <section id="panel-multi-mesh" class="subpanel" hidden>
+            <p class="hint" data-i18n="mesh_intro"></p>
+            <p id="mesh-unavailable" class="hint" hidden></p>
+            <div id="mesh-body">
+              <h2 data-i18n="mesh_links_heading"></h2>
+              <ul id="mesh-links" class="list"></ul>
+              <h2 data-i18n="mesh_servers_heading"></h2>
+              <ul id="mesh-servers" class="list"></ul>
+              <h2 data-i18n="mesh_cand_heading"></h2>
+              <p class="hint" data-i18n="mesh_cand_hint"></p>
+              <ul id="mesh-candidates" class="list"></ul>
+              <h2 data-i18n="mesh_shared_heading"></h2>
+              <p class="hint" data-i18n="mesh_shared_hint"></p>
+              <div id="mesh-shared" class="form"></div>
+              <div class="actions"><button id="mesh-save-shared" type="button" data-i18n="btn_mesh_save_shared"></button></div>
+              <h2 data-i18n="mesh_invite_heading"></h2>
+              <form id="mesh-invite-form" class="form">
+                <p class="hint" data-i18n="mesh_invite_hint"></p>
+                <label><span data-i18n="mesh_inv_label"></span> <input id="mesh-inv-label" type="text" autocomplete="off" maxlength="64"></label>
+                <label><span data-i18n="conn_invite_host"></span> <input id="mesh-inv-host" type="text" autocomplete="off" maxlength="253" class="wide"></label>
+                <p class="hint" data-i18n="conn_host_hint"></p>
+                <label><span data-i18n="conn_invite_days"></span> <input id="mesh-inv-days" type="text" inputmode="numeric" autocomplete="off" value="7"></label>
+                <div class="actions"><button type="submit" data-i18n="btn_mesh_invite"></button></div>
+              </form>
+              <div id="mesh-inv-out" class="form" hidden>
+                <textarea id="mesh-inv-code" readonly rows="4" spellcheck="false"></textarea>
+                <p class="hint" data-i18n="conn_invite_code_hint"></p>
+                <div class="actions"><button id="mesh-inv-copy" type="button" data-i18n="btn_copy"></button><span id="mesh-inv-copy-msg" class="msg"></span></div>
+              </div>
+              <h2 data-i18n="mesh_join_heading"></h2>
+              <form id="mesh-join-form" class="form">
+                <textarea id="mesh-join-code" rows="3" spellcheck="false" data-i18n-ph="mesh_join_ph"></textarea>
+                <div class="actions"><button type="submit" data-i18n="btn_mesh_join"></button></div>
+              </form>
+
+              <!-- 자주 안 쓰는 것(v3.1): 인증 코드·운영 방식·총괄 — 접기만, 기능은 그대로 -->
+              <details id="mesh-advanced" class="advanced">
+                <summary data-i18n="mesh_advanced"></summary>
+                <h2 data-i18n="mesh_verify_heading"></h2>
+                <p class="hint" data-i18n="mesh_verify_hint"></p>
+                <h3 data-i18n="mesh_verify_managed"></h3>
+                <form id="mesh-verify-create-form" class="form">
+                  <label><span data-i18n="mesh_verify_label"></span> <input id="mesh-verify-label" type="text" autocomplete="off" maxlength="64"></label>
+                  <div class="actions"><button type="submit" data-i18n="btn_mesh_verify_create"></button></div>
+                </form>
+                <div id="mesh-verify-out" class="form" hidden>
+                  <textarea id="mesh-verify-code" readonly rows="3" spellcheck="false"></textarea>
+                  <p class="hint" data-i18n="mesh_verify_code_hint"></p>
+                  <div class="actions"><button id="mesh-verify-copy" type="button" data-i18n="btn_copy"></button><span id="mesh-verify-copy-msg" class="msg"></span></div>
+                </div>
+                <ul id="mesh-verify-managed" class="list"></ul>
+                <h3 data-i18n="mesh_verify_held"></h3>
+                <form id="mesh-verify-register-form" class="form">
+                  <textarea id="mesh-verify-input" rows="3" spellcheck="false" autocomplete="off" data-i18n-ph="mesh_verify_ph"></textarea>
+                  <div class="actions"><button type="submit" data-i18n="btn_mesh_verify_register"></button></div>
+                </form>
+                <ul id="mesh-verify-held" class="list"></ul>
+                <h2 data-i18n="mesh_case_heading"></h2>
+                <p class="hint" data-i18n="mesh_case_hint"></p>
+                <form id="mesh-case-form" class="form">
+                  <select id="mesh-case">
+                    <option value="distributed" data-i18n="case_distributed"></option>
+                    <option value="main" data-i18n="case_main"></option>
+                    <option value="single" data-i18n="case_single"></option>
+                  </select>
+                  <label><span data-i18n="mesh_case_main"></span> <select id="mesh-case-main"></select></label>
+                  <fieldset id="mesh-case-standby"><legend data-i18n="mesh_case_standby"></legend><div id="mesh-case-standby-list"></div></fieldset>
+                  <div class="actions"><button type="submit" data-i18n="btn_mesh_save_case"></button><button id="mesh-cmd-case" type="button" data-i18n="btn_mesh_cmd_case" hidden></button></div>
+                </form>
+                <p id="mesh-effective" class="hint"></p>
+                <p id="mesh-upload" class="hint"></p>
+                <h2 data-i18n="mesh_coord_heading"></h2>
+                <p class="hint" data-i18n="mesh_coord_hint"></p>
+                <div class="actions"><button id="mesh-declare" type="button"></button><span id="mesh-is-coord" class="meta"></span></div>
+                <h3 data-i18n="mesh_coordinators"></h3>
+                <ul id="mesh-coords" class="list"></ul>
+                <form id="mesh-cmd-form" class="form" hidden>
+                  <h3 data-i18n="mesh_cmd_heading"></h3>
+                  <select id="mesh-cmd-type">
+                    <option value="cut" data-i18n="cmd_cut"></option>
+                    <option value="unshare" data-i18n="cmd_unshare"></option>
+                    <option value="noWrite" data-i18n="cmd_nowrite"></option>
+                  </select>
+                  <label><span data-i18n="mesh_cmd_target"></span> <select id="mesh-cmd-target"></select></label>
+                  <label><span data-i18n="mesh_cmd_hubuser"></span> <input id="mesh-cmd-user" type="text" autocomplete="off" maxlength="64"></label>
+                  <div class="actions"><button type="submit" data-i18n="btn_mesh_cmd"></button></div>
+                </form>
+                <h3 data-i18n="mesh_effects_heading"></h3>
+                <ul id="mesh-effects" class="list"></ul>
+              </details>
+            </div>
+          </section>
+
+          <section id="panel-multi-storage" class="subpanel" hidden>
+            <div id="storage-body">
+              <h2 data-i18n="storage_heading"></h2>
+              <p class="hint" data-i18n="storage_hint"></p>
+              <p id="storage-state" class="meta"></p>
+              <form id="storage-kind-form" class="form">
+                <label><span data-i18n="storage_kind"></span> <select id="storage-kind"><option value="github" data-i18n="storage_kind_github"></option><option value="supabase" data-i18n="storage_kind_supabase"></option></select></label>
+              </form>
+              <form id="supabase-form" class="form" hidden>
+                <p class="hint" data-i18n="supabase_hint"></p>
+                <label><span data-i18n="supabase_url"></span> <input id="supabase-url" type="text" autocomplete="off" maxlength="200" class="wide"></label>
+                <label><span data-i18n="supabase_key"></span> <input id="supabase-key" type="password" autocomplete="off" maxlength="1000" class="wide"></label>
+                <label><span data-i18n="supabase_bucket"></span> <input id="supabase-bucket" type="text" autocomplete="off" maxlength="63"></label>
+                <label><span data-i18n="storage_interval"></span> <input id="supabase-interval" type="text" inputmode="numeric" autocomplete="off" value="5"></label>
+                <div class="actions"><button type="submit" data-i18n="btn_storage_set"></button></div>
+              </form>
+              <form id="storage-form" class="form">
+                <label><span data-i18n="storage_repo"></span> <input id="storage-repo" type="text" autocomplete="off" maxlength="141" class="wide"></label>
+                <label><span data-i18n="storage_token"></span> <input id="storage-token" type="password" autocomplete="off" maxlength="500" class="wide"></label>
+                <label><span data-i18n="storage_interval"></span> <input id="storage-interval" type="text" inputmode="numeric" autocomplete="off" value="5"></label>
+                <div class="actions">
+                  <button type="submit" data-i18n="btn_storage_set"></button>
+                  <button id="storage-upload" type="button" data-i18n="btn_storage_upload"></button>
+                  <button id="storage-verify" type="button" data-i18n="btn_storage_verify"></button>
+                  <button id="storage-clear" type="button" class="danger" data-i18n="btn_storage_clear"></button>
+                </div>
+              </form>
+              <div id="storage-recovery" class="form" hidden>
+                <p class="name" data-i18n="storage_recovery_title"></p>
+                <textarea id="storage-recovery-key" readonly rows="2" spellcheck="false"></textarea>
+                <p class="hint" data-i18n="storage_recovery_hint"></p>
+                <div class="actions"><button id="storage-recovery-copy" type="button" data-i18n="btn_copy"></button><span id="storage-recovery-msg" class="msg"></span></div>
+              </div>
+              <p id="storage-verify-result" class="meta"></p>
+              <form id="prune-form" class="form">
+                <p class="name" data-i18n="prune_heading"></p>
+                <label class="check"><input id="prune-enabled" type="checkbox"> <span data-i18n="prune_enabled"></span></label>
+                <label><span data-i18n="prune_days"></span> <input id="prune-days" type="text" inputmode="numeric" autocomplete="off" value="30"></label>
+                <div class="actions"><button type="submit" data-i18n="btn_prune_save"></button></div>
+              </form>
+              <h2 data-i18n="brestore_heading"></h2>
+              <p class="hint" data-i18n="brestore_hint"></p>
+              <form id="restore-form" class="form">
+                <label><span data-i18n="storage_kind"></span> <select id="restore-kind"><option value="github" data-i18n="storage_kind_github"></option><option value="supabase" data-i18n="storage_kind_supabase"></option></select></label>
+                <div id="restore-gh" class="form">
+                  <label><span data-i18n="storage_repo"></span> <input id="restore-repo" type="text" autocomplete="off" maxlength="141" class="wide"></label>
+                  <label><span data-i18n="storage_token"></span> <input id="restore-token" type="password" autocomplete="off" maxlength="500" class="wide"></label>
+                </div>
+                <div id="restore-sb" class="form" hidden>
+                  <label><span data-i18n="supabase_url"></span> <input id="restore-url" type="text" autocomplete="off" maxlength="200" class="wide"></label>
+                  <label><span data-i18n="supabase_key"></span> <input id="restore-key" type="password" autocomplete="off" maxlength="1000" class="wide"></label>
+                  <label><span data-i18n="supabase_bucket"></span> <input id="restore-bucket" type="text" autocomplete="off" maxlength="63"></label>
+                </div>
+                <label><span data-i18n="brestore_recovery"></span> <textarea id="restore-recovery" rows="2" spellcheck="false" autocomplete="off"></textarea></label>
+                <label><span data-i18n="brestore_name"></span> <input id="restore-name" type="text" autocomplete="off" maxlength="64"></label>
+                <div class="actions"><button type="submit" data-i18n="btn_brestore_scan"></button></div>
+              </form>
+              <ul id="restore-candidates" class="list"></ul>
+              <p id="restore-result" class="meta"></p>
+            </div>
+          </section>
+        </section>
+
+        <section id="panel-trash" class="panel" hidden>
+          <div class="trash-head"><span id="trash-summary" class="meta"></span><button id="empty-trash" type="button" class="danger" data-i18n="btn_empty_trash"></button></div>
+          <ul id="trash-list" class="list"></ul>
+        </section>
+      </main>
+    </div>
+  </div>
 </body>
 </html>

@@ -11,7 +11,7 @@
 * { box-sizing: border-box; }
 /* hidden은 항상 숨김 — .form·label 등의 display 규칙이 숨김을 덮지 않게 한다. */
 [hidden] { display: none !important; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", "Malgun Gothic", sans-serif; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 "Segoe UI", "Malgun Gothic", sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
 .top { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--line); }
 .top h1 { margin: 0; font-size: 17px; font-weight: 600; }
 button { font: inherit; padding: 5px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); cursor: pointer; }
@@ -20,10 +20,29 @@ button:disabled { opacity: .5; cursor: default; }
 button.danger { color: var(--danger); }
 button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .banner { margin: 12px 20px 0; padding: 10px 14px; border-radius: 6px; background: var(--warn-bg); color: var(--warn-text); white-space: pre-wrap; }
-.tabs { display: flex; gap: 4px; padding: 12px 20px 0; border-bottom: 1px solid var(--line); }
-.tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); padding: 8px 12px; }
-.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
-.tabs .badge { margin-left: 6px; padding: 0 6px; border-radius: 8px; background: var(--warn-bg); color: var(--warn-text); font-size: 11px; }
+/* v3.1: 왼쪽 목록 + 오른쪽 화면(하위 탭) */
+.layout { display: flex; align-items: flex-start; flex: 1; }
+.side { display: flex; flex-direction: column; gap: 2px; flex: 0 0 180px; padding: 12px 8px; border-right: 1px solid var(--line); align-self: stretch; }
+.side button { border: none; border-radius: 6px; background: none; color: var(--muted); padding: 7px 12px; text-align: left; }
+.side button[aria-current="page"] { color: var(--text); background: var(--panel); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
+.side .badge { margin-left: 6px; padding: 0 6px; border-radius: 8px; background: var(--warn-bg); color: var(--warn-text); font-size: 11px; }
+.content { flex: 1; min-width: 0; }
+.subtabs { display: flex; gap: 4px; margin: -4px 0 14px; border-bottom: 1px solid var(--line); }
+.subtabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); padding: 7px 12px; }
+.subtabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+details.advanced { margin-top: 18px; border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; }
+details.advanced > summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+details.advanced[open] > summary { margin-bottom: 8px; }
+/* 새로고침 아이콘 + 포인터 옆 툴팁 */
+button.icon { font-size: 16px; line-height: 1; padding: 5px 9px; margin-right: 8px; }
+.tip { position: fixed; z-index: 10; pointer-events: none; padding: 3px 8px; border-radius: 4px; background: var(--text); color: var(--bg); font-size: 12px; white-space: nowrap; }
+/* Hub 꺼짐: 가운데 문구 + 수동 시작, 왼쪽 목록·본문은 숨기고 언어 막대만 구석에 */
+.hubdown { display: grid; place-content: center; gap: 12px; min-height: 60vh; text-align: center; padding: 0 20px; }
+body:not([data-state="hubdown"]) .hubdown { display: none; }
+body[data-state="hubdown"] .side, body[data-state="hubdown"] main { display: none; }
+body[data-state="hubdown"] .langbar { position: fixed; top: 64px; right: 20px; padding: 0; }
+.hubdown-title { margin: 0; font-size: 17px; font-weight: 600; }
+.actions.center { justify-content: center; }
 main { padding: 16px 20px; }
 body:not([data-state="ready"]) main { opacity: .45; } /* 조작 차단은 main.inert가 맡는다 */
 .status { margin-left: auto; margin-right: 12px; color: var(--muted); font-size: 13px; }
@@ -58,17 +77,17 @@ body:not([data-state="ready"]) main { opacity: .45; } /* 조작 차단은 main.i
 .form select { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); width: 140px; }
 .langbar { padding: 16px 20px 0; }
 .langbar[hidden] { display: none; }
-#tab-settings > .form { padding-top: 16px; border-top: 1px solid var(--line); max-width: 460px; }
+#panel-limits > .form { max-width: 460px; }
 /* 첫 실행 언어 선택: 언어를 정하기 전에는 다른 화면을 숨긴다. */
 .picker { display: grid; place-content: center; gap: 16px; min-height: 100vh; text-align: center; }
 .picker[hidden] { display: none; }
 .picker-title { margin: 0; font-size: 17px; font-weight: 600; }
 .picker-buttons { display: flex; gap: 12px; justify-content: center; }
 .picker-buttons button { min-width: 120px; padding: 8px 16px; }
-body[data-state="lang"] .top, body[data-state="lang"] nav, body[data-state="lang"] main,
-body[data-state="lang"] .banner, body[data-state="lang"] .opmsg, body[data-state="lang"] .langbar { display: none; }
+body[data-state="lang"] .top, body[data-state="lang"] .layout, body[data-state="lang"] .hubdown,
+body[data-state="lang"] .banner, body[data-state="lang"] .opmsg { display: none; }
 /* 문구를 채우기 전(언어 확인 중)에는 빈 라벨이 깜빡이지 않게 가린다. */
-body[data-i18n-pending] .top, body[data-i18n-pending] nav, body[data-i18n-pending] main, body[data-i18n-pending] .langbar { visibility: hidden; }
+body[data-i18n-pending] .top, body[data-i18n-pending] .layout, body[data-i18n-pending] .hubdown { visibility: hidden; }
 
 /* 통신 탭(v3.0) */
 .form.inline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: none; }
@@ -77,7 +96,7 @@ body[data-i18n-pending] .top, body[data-i18n-pending] nav, body[data-i18n-pendin
 .form textarea { font: 12px/1.4 Consolas, monospace; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); width: 100%; max-width: 460px; resize: vertical; }
 .row input[type="text"] { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); width: 140px; }
 .row label.check { display: flex; align-items: center; gap: 6px; }
-#tab-conn .meta { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
+#panel-multi-comms .meta, #panel-multi-storage .meta { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
 /* 서버 연결 탭(v3.0 5단계): 경우 선택은 설명이 길어 넓게, 예비 서버 묶음은 다른 칸과 같은 테두리 */
 #mesh-case { width: auto; max-width: 100%; }
 #mesh-case-standby { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin: 0; }
