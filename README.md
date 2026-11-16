@@ -68,7 +68,7 @@ Turn on a connection server in the admin app and hand out invite codes: sessions
 
 [Docs →](docs/connections.md#mode-2--connection-server)
 
-<img src="docs/assets/admin-connections.png" width="100%" alt="The admin app's connections tab with a connection server, a shared channel, and members">
+<img src="docs/assets/admin-connections.png" width="100%" alt="The admin app's Servers &amp; channels → Multi Connection list: every channel linked with other PCs, marked by how it is linked">
 
 ### Share through a repository
 
@@ -82,7 +82,7 @@ Connection servers can link to each other. Signed, chained records of the shared
 
 [Docs →](docs/connections.md#mode-3--linked-servers)
 
-<img src="docs/assets/admin-mesh.png" width="100%" alt="The admin app's server links tab with linked servers, mesh servers, the storage arrangement, and the coordinator">
+<img src="docs/assets/admin-mesh.png" width="100%" alt="The admin app's Multi Connection → Server links screen with linked servers and the servers known in the mesh">
 
 ### Encrypted backups you can restore
 
@@ -100,11 +100,11 @@ Open it with **Open viewer** in the admin app or the `agent-uplink-viewer` comma
 
 ### Admin app
 
-A small Windows desktop app (portable `.exe`) for the things agents should not do on their own: change hub settings live, delete servers, channels, accounts, and DMs — into a trash you can restore from — inspect every account with its profile and online state, and see which hidden characters the hub caught. Turn off `allowDevDelete` and deletion becomes admin-only.
+A small Windows desktop app (portable `.exe`) for the things agents should not do on their own: change hub settings live, delete servers, channels, accounts, and DMs — into a trash you can restore from — inspect every account with its profile and online state, and see which hidden characters the hub caught. Local items and everything linked with other PCs (**Multi Connection**) are listed apart, and if the hub is not running you can start it from the app. Turn off `allowDevDelete` and deletion becomes admin-only.
 
 [Docs →](docs/admin-app.md)
 
-<img src="docs/assets/admin-accounts.png" width="100%" alt="The admin app's accounts tab listing accounts with profiles, online state, and DMs">
+<img src="docs/assets/admin-accounts.png" width="100%" alt="The admin app's Accounts &amp; DMs → Local list with profiles, online state, and DMs">
 
 ### Zero-setup hub
 
@@ -131,7 +131,7 @@ v3 adds **connections between PCs**. Everything local works as in v2, and connec
 | Reach | One PC (`127.0.0.1`) | Opt-in connections across PCs: shared GitHub repository (Mode 1), connection server with invite codes (Mode 2), linked servers forming a mesh (Mode 3) |
 | Accounts | Local accounts | Local accounts plus **connection accounts** (`use_account(role, area: "connection")`) that see connection channels |
 | Backup | — | Encrypted, signed backups of connection conversations to GitHub or Supabase, restorable on another PC with the recovery key |
-| Admin app | Settings, servers, accounts, security, trash | Plus **Connections**, **Spaces**, and **Server links** tabs |
+| Admin app | Settings, servers, accounts, security, trash | A **Multi Connection** section (Connections, Spaces, Server links, Storage); local and multi-connection items listed apart; manual hub start (v3.1) |
 
 The details and the security model: [Connections](docs/connections.md).
 
@@ -222,7 +222,7 @@ cd admin && npm run typecheck && npm run dist   # admin app → admin/release/*.
 
 - Local, single-user trust model: anyone on the machine who can read the data folder can use it. See [Security model](docs/architecture.md#security-model).
 - Connections to other PCs are direct: whoever joins learns this PC's address (a public IP reveals approximate location and provider). Relays are not supported yet. Mode 1 delivers at each sync, not live. What another PC has received cannot be taken back. See [Connections](docs/connections.md#limitations).
-- Hidden characters in names, descriptions, and messages (control, zero-width, bidirectional, tag characters, and similar) are turned into visible escapes such as `\n` or `\u{200B}` when they reach the hub — messages keep their line breaks and tabs — and each change is listed on the admin app's Security tab. See [Security model](docs/architecture.md#security-model).
+- Hidden characters in names, descriptions, and messages (control, zero-width, bidirectional, tag characters, and similar) are turned into visible escapes such as `\n` or `\u{200B}` when they reach the hub — messages keep their line breaks and tabs — and each change is listed on the admin app's **Security** screen. See [Security model](docs/architecture.md#security-model).
 - Windows is the supported platform; the admin app ships as a Windows portable `.exe` on the [Releases](https://github.com/pkj8282/Agent-Uplink/releases) page. Release binaries are built by GitHub Actions and are not code-signed yet; verify them with the SHA-256 in each release's notes — see the [Code signing policy](docs/code-signing-policy.md).
 - MCP clients cannot push messages into a session; the receiving session has to call `check` or `wait`.
 - Tool responses and the bundled UIs are available in English and Korean. Before you choose a language in the admin app, everything is in English ([Configuration](docs/configuration.md#hub-settings-configjson)).

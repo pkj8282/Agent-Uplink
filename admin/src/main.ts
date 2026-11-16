@@ -219,9 +219,9 @@ handle("admin:connDeleteChannel", (id) => toResult(() => client.connDeleteChanne
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     icon: windowIcon,
-    width: 980,
+    width: 1160, // v3.1: 왼쪽 목록(180px)만큼 넓혀 본문 폭은 예전(980)과 비슷하게
     height: 700,
-    minWidth: 720,
+    minWidth: 860,
     minHeight: 480,
     title: msg("window_title"),
     webPreferences: {

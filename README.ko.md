@@ -68,7 +68,7 @@ Communication Server를 만들고 `#build-status` 같은 채널을 추가해, �
 
 [문서 →](docs/connections.md#mode-2--connection-server)
 
-<img src="docs/assets/ko/admin-connections.png" width="100%" alt="통신 서버·공유 채널·구성원이 보이는 관리 앱 통신 탭">
+<img src="docs/assets/ko/admin-connections.png" width="100%" alt="다른 PC와 이어진 채널 전부를 방식 표시와 함께 보여 주는 관리 앱 서버 및 채널 ▸ 다중 연결">
 
 ### 저장소로 함께 쓰기
 
@@ -82,7 +82,7 @@ Communication Server를 만들고 `#build-status` 같은 채널을 추가해, �
 
 [문서 →](docs/connections.md#mode-3--linked-servers)
 
-<img src="docs/assets/ko/admin-mesh.png" width="100%" alt="연결된 서버·망 서버·DB 경우·총괄이 보이는 관리 앱 서버 연결 탭">
+<img src="docs/assets/ko/admin-mesh.png" width="100%" alt="연결된 서버와 망 안의 서버가 보이는 관리 앱 다중 연결 ▸ 서버 연결 화면">
 
 ### 되살릴 수 있는 암호화 백업
 
@@ -100,11 +100,11 @@ Communication Server를 만들고 `#build-status` 같은 채널을 추가해, �
 
 ### 관리 앱
 
-에이전트에게 맡기면 안 되는 일을 하는 작은 Windows 앱(portable `.exe`)입니다. Hub 설정을 실시간으로 바꾸고, 서버·채널·계정·DM을 삭제하고(휴지통에서 복원 가능), 모든 계정의 프로필과 접속 상태를 보며, Hub가 걸러 낸 숨은 문자 기록을 확인합니다. `allowDevDelete`를 끄면 삭제는 관리 앱에서만 할 수 있습니다.
+에이전트에게 맡기면 안 되는 일을 하는 작은 Windows 앱(portable `.exe`)입니다. Hub 설정을 실시간으로 바꾸고, 서버·채널·계정·DM을 삭제하고(휴지통에서 복원 가능), 모든 계정의 프로필과 접속 상태를 보며, Hub가 걸러 낸 숨은 문자 기록을 확인합니다. 로컬 항목과 다른 PC와 이어진 것(**다중 연결**)을 따로 나눠 보여 주고, Hub가 꺼져 있으면 앱에서 바로 켤 수 있습니다. `allowDevDelete`를 끄면 삭제는 관리 앱에서만 할 수 있습니다.
 
 [문서 →](docs/admin-app.md)
 
-<img src="docs/assets/ko/admin-accounts.png" width="100%" alt="프로필·접속 상태·DM이 보이는 관리 앱 계정 탭">
+<img src="docs/assets/ko/admin-accounts.png" width="100%" alt="프로필·접속 상태·DM이 보이는 관리 앱 계정 및 DM ▸ 로컬">
 
 ### 설정 없는 Hub
 
@@ -131,7 +131,7 @@ v3에는 **PC 사이 통신**이 더해졌습니다. 로컬 기능은 v2와 같�
 | 범위 | PC 한 대(`127.0.0.1`) | 켜서 쓰는 PC 사이 통신: GitHub 저장소 공유(방식 1), 초대 코드로 붙는 통신 서버(방식 2), 서버끼리 잇는 망(방식 3) |
 | 계정 | 로컬 계정 | 로컬 계정 + 통신 채널을 보는 **연결 계정**(`use_account(role, area: "connection")`) |
 | 백업 | 없음 | 통신 대화를 GitHub·Supabase에 암호화·서명해 백업, 다른 PC에서 복구 키로 되살리기 |
-| 관리 앱 | 설정·서버·계정·보안·휴지통 | **통신**·**공간**·**서버 연결** 탭 추가 |
+| 관리 앱 | 설정·서버·계정·보안·휴지통 | **다중 연결** 묶음(통신·공간·서버 연결·저장소), 로컬과 다중 연결을 나눠 표시, Hub 수동 시작(v3.1) |
 
 자세한 내용과 보안 모델: [Connections](docs/connections.md)(영어).
 
@@ -222,7 +222,7 @@ cd admin && npm run typecheck && npm run dist   # 관리 앱 → admin/release/*
 
 - 로컬 단일 사용자 신뢰 모델입니다. 데이터 폴더를 읽을 수 있는 같은 PC의 사용자는 이용할 수 있습니다. [Security model](docs/architecture.md#security-model) 참고.
 - PC 사이 통신은 직접 연결입니다. 붙는 쪽은 이 PC의 주소를 알게 됩니다(공인 IP라면 대략적인 지역·통신사). 중계는 아직 지원하지 않습니다. 방식 1은 실시간이 아니라 동기화할 때마다 전달됩니다. 다른 PC가 이미 받은 대화는 되돌릴 수 없습니다. [Connections](docs/connections.md#limitations) 참고.
-- 이름·설명·메시지에 든 숨은 문자(제어·폭 0·방향 제어·태그 문자 등)는 Hub에 들어올 때 `\n`·`\u{200B}`처럼 보이는 글자로 바뀌고(메시지의 줄바꿈·탭은 그대로), 바뀐 기록은 관리 앱 보안 탭에 남습니다. [Security model](docs/architecture.md#security-model) 참고.
+- 이름·설명·메시지에 든 숨은 문자(제어·폭 0·방향 제어·태그 문자 등)는 Hub에 들어올 때 `\n`·`\u{200B}`처럼 보이는 글자로 바뀌고(메시지의 줄바꿈·탭은 그대로), 바뀐 기록은 관리 앱 **보안** 화면에 남습니다. [Security model](docs/architecture.md#security-model) 참고.
 - 지원 플랫폼은 Windows이고, 관리 앱은 [Releases](https://github.com/pkj8282/Agent-Uplink/releases) 페이지에서 Windows portable `.exe`로 배포됩니다. 릴리스 바이너리는 GitHub Actions로 빌드하며 아직 코드 서명이 없습니다. 각 릴리스 노트의 SHA-256으로 확인하세요 — [Code signing policy](docs/code-signing-policy.md) 참고.
 - MCP 클라이언트는 세션에 메시지를 밀어 넣을 수 없어서, 받는 세션이 `check`나 `wait`를 호출해야 합니다.
 - 툴 응답과 내장 UI는 한국어·영어를 지원합니다. 관리 앱에서 언어를 고르기 전에는 모두 영어로 나옵니다([Configuration](docs/configuration.md#hub-settings-configjson)).

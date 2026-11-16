@@ -59,7 +59,7 @@ body:not([data-state="ready"]) main { opacity: .45; } /* 조작 차단은 main.i
 .msg.dirty { color: var(--warn-text); }
 .list { list-style: none; margin: 0; padding: 0; }
 .list ul { list-style: none; margin: 0 0 0 18px; padding: 0; }
-.row { display: flex; align-items: center; gap: 12px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); margin-bottom: 6px; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); margin-bottom: 6px; }
 .row .name { font-weight: 600; overflow-wrap: anywhere; }
 .row .id, .row .meta { color: var(--muted); font-size: 12px; font-family: Consolas, monospace; }
 .row button { margin-left: auto; }
@@ -101,3 +101,4 @@ body[data-i18n-pending] .top, body[data-i18n-pending] .layout, body[data-i18n-pe
 #mesh-case { width: auto; max-width: 100%; }
 #mesh-case-standby { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin: 0; }
 #mesh-case-standby legend { padding: 0 4px; color: var(--muted); font-size: 13px; }
+#mesh-body > h2:first-child { margin-top: 14px; }
