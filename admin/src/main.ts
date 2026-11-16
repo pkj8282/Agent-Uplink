@@ -42,9 +42,23 @@ function handle(channel: string, fn: (arg: unknown) => Promise<IpcResult<unknown
 // Hub가 값을 재검증하므로 patch는 그대로 전달한다.
 // 스모크 전용: 새로고침 응답을 늦춰 inert 중 포커스 소실·복원을 재현한다(UPLINK_ADMIN_SMOKE와 함께일 때만).
 const smokeSnapshotDelay = process.env.UPLINK_ADMIN_SMOKE ? Number(process.env.UPLINK_ADMIN_SMOKE_SNAPSHOT_DELAY_MS ?? 0) : 0;
+// 대기 연결(v3.1): 창이 열린 동안 Hub가 유휴 종료하지 않게 연결 하나를 열어 둔다. 끊기면 다음 새로고침 성공 때 다시 연다.
+let held: { close(): void; closed: Promise<void> } | null = null;
+let holding = false;
+function ensureHold(): void {
+  if (held || holding || !mainWindow) return;
+  holding = true;
+  client.hold().then((h) => {
+    if (!mainWindow) { h.close(); return; }
+    held = h;
+    void h.closed.then(() => { if (held === h) held = null; });
+  }, () => { /* Hub 꺼짐 등 — 다음 새로고침에서 다시 */ }).finally(() => { holding = false; });
+}
 handle("admin:snapshot", async () => {
   if (smokeSnapshotDelay > 0) await new Promise((r) => setTimeout(r, smokeSnapshotDelay));
-  return toResult(() => client.snapshot());
+  const r = await toResult(() => client.snapshot());
+  if (r.ok) ensureHold();
+  return r;
 });
 handle("admin:setConfig", (patch) => toResult(() => client.setConfig(patch as ConfigPatch)));
 handle("admin:deleteChannel", (id) => toResult(() => client.deleteChannel(asId(id))));
@@ -217,7 +231,7 @@ function createWindow(): BrowserWindow {
     },
   });
   mainWindow = win; // loadFile 전에 지정해야 첫 로드의 IPC도 신뢰된다
-  win.on("closed", () => { mainWindow = null; });
+  win.on("closed", () => { mainWindow = null; held?.close(); held = null; });
   win.removeMenu();
   // 로컬 관리 UI 전용: 새 창·외부 탐색 차단
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));

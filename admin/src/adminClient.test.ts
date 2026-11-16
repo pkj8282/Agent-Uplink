@@ -513,3 +513,50 @@ test("connRestore는 Hub가 준 최신 여부(head)를 그대로 넘긴다", asy
   (c as any).call = async () => ({ ok: true, serverId: "s", channelCount: 1, messageCount: 2, breaks: [], bad: [], head: "이상한값" });
   assert.equal((await c.connRestore({ kind: "github", repo: "o/r", ghToken: "t", recoveryKey: "k", serverName: "n", spaceId: "a", hubId: "b" })).head, undefined);
 });
+
+// ───── v3.1: 창이 열린 동안 Hub 살려 두기 ─────
+async function idleHub(ms: number) {
+  const t = await startTestHub({ idleShutdownMs: ms });
+  const client = new AdminClient({ port: t.port, keyPath: path.join(t.dataDir, "admin.key"), clientKeyPath: path.join(t.dataDir, "client.key"), dataDir: t.dataDir, timeoutMs: 2000 });
+  return { ...t, client };
+}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const portOpen = (port: number) => new Promise<boolean>((res) => { const s = net.connect(port, "127.0.0.1"); s.once("connect", () => { s.destroy(); res(true); }); s.once("error", () => res(false)); });
+
+test("hold_keeps_hub_alive_past_idle: 대기 연결을 열어 두면 유휴 시간이 지나도 Hub가 꺼지지 않는다", async () => {
+  const t = await idleHub(300);
+  try {
+    const h = await t.client.hold();
+    await sleep(1000);
+    assert.equal(await portOpen(t.port), true);
+    assert.ok(await t.client.snapshot());
+    h.close();
+  } finally { t.hub.stop(); }
+});
+
+test("hub_idles_after_hold_closed: 대기 연결을 닫으면 원래 유휴 규칙대로 꺼진다", async () => {
+  const t = await idleHub(300);
+  try {
+    const h = await t.client.hold();
+    h.close();
+    // 확인용 접속도 연결이라 유휴 타이머를 다시 시작시킨다 → 충분히 기다린 뒤 한 번만 본다
+    await sleep(1200);
+    assert.equal(await portOpen(t.port), false, "닫은 뒤 유휴 시간(0.3초)이 지나면 Hub가 꺼짐");
+  } finally { t.hub.stop(); }
+});
+
+test("hold_reports_close_when_hub_stops: Hub가 꺼지면 대기 연결이 닫혔다고 알린다(관리 앱이 다음 새로고침에서 다시 연다)", async () => {
+  const t = await idleHub(0);
+  const h = await t.client.hold();
+  t.hub.stop();
+  const r = await Promise.race([h.closed.then(() => "closed"), sleep(3000).then(() => "timeout")]);
+  assert.equal(r, "closed");
+});
+
+test("hold_requires_our_hub: 대기 연결도 Hub 증명 확인 뒤에만 열린다(키 없는 폴더면 거부)", async () => {
+  const t = await idleHub(0);
+  try {
+    const wrong = new AdminClient({ port: t.port, keyPath: path.join(tmp(), "admin.key"), timeoutMs: 2000 });
+    await assert.rejects(wrong.hold());
+  } finally { t.hub.stop(); }
+});

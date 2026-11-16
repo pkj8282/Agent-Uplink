@@ -228,7 +228,35 @@ export class AdminClient {
     return (await this.call("viewer_ticket", {})).url;
   }
 
+  /**
+   * 대기 연결(v3.1): Hub 증명·인증까지 마친 연결 하나를 op 없이 열어 둔다. Hub는 연결이 하나라도 있으면
+   * 유휴 종료를 세지 않으므로, 관리 앱 창이 열린 동안 Hub가 꺼지지 않는다. closed는 Hub가 끊었을 때도 풀린다.
+   */
+  async hold(): Promise<{ close(): void; closed: Promise<void> }> {
+    const conn = await this.open();
+    return { close: () => conn.close(), closed: conn.closed };
+  }
+
   private async call(op: string, params: object): Promise<Reply> {
+    const conn = await this.open();
+    try {
+      const r = await conn.request(op, { token: this.readToken(), ...params }, opTimeoutMs(op, this.timeoutMs)).catch((e: unknown) => {
+        if (e instanceof DisconnectedError) throw this.fail("op_dropped");
+        if (e instanceof TimeoutError) throw this.fail("op_timeout", { detail: e.message });
+        throw e;
+      });
+      if (!r.ok) {
+        if (r.code === "unknown_op" || (r.code === undefined && r.error === LEGACY_UNKNOWN_OP)) throw new HubOpError(adminMsg(this.lang(), "old_hub_no_op"), "old_hub_no_op"); // 문장 비교는 code 없는 구버전 Hub만
+        throw new HubOpError(r.error ?? adminMsg(this.lang(), "op_failed", { op }), r.code, r.conflicts);
+      }
+      return r;
+    } finally {
+      conn.close();
+    }
+  }
+
+  /** 접속 → hello 검증 → Hub 증명 확인(v3 핸드셰이크)까지. 실패하면 연결을 닫는다. */
+  private async open(): Promise<Connection> {
     const conn = await this.connect();
     try {
       const hello = await conn.request("hello", {}, this.helloTimeoutMs).catch((e: unknown) => {
@@ -245,18 +273,10 @@ export class AdminClient {
         throw this.fail("version_mismatch", { port: this.port, hub: hello.version, mine: HUB_PROTOCOL_VERSION });
       }
       await this.authenticate(conn, hello.nonce);
-      const r = await conn.request(op, { token: this.readToken(), ...params }, opTimeoutMs(op, this.timeoutMs)).catch((e: unknown) => {
-        if (e instanceof DisconnectedError) throw this.fail("op_dropped");
-        if (e instanceof TimeoutError) throw this.fail("op_timeout", { detail: e.message });
-        throw e;
-      });
-      if (!r.ok) {
-        if (r.code === "unknown_op" || (r.code === undefined && r.error === LEGACY_UNKNOWN_OP)) throw new HubOpError(adminMsg(this.lang(), "old_hub_no_op"), "old_hub_no_op"); // 문장 비교는 code 없는 구버전 Hub만
-        throw new HubOpError(r.error ?? adminMsg(this.lang(), "op_failed", { op }), r.code, r.conflicts);
-      }
-      return r;
-    } finally {
+      return conn;
+    } catch (e) {
       conn.close();
+      throw e;
     }
   }
 
@@ -314,8 +334,11 @@ class Connection {
   private dec = new FrameDecoder();
   private nextId = 1;
   private pending = new Map<number, Pending>();
+  /** 연결이 닫히면(어느 쪽이든) 풀린다. */
+  readonly closed: Promise<void>;
 
   constructor(private readonly sock: net.Socket, private readonly timeoutMs: number, private readonly lang: () => Lang) {
+    this.closed = new Promise((res) => sock.once("close", () => res()));
     sock.on("data", (chunk) => this.dec.push(chunk, (r: Reply | null) => {
       if (!r || typeof r !== "object") return; // 객체가 아닌 프레임(null 등)은 무시
       const p = this.pending.get(r.id);
