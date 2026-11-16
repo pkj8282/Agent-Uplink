@@ -148,6 +148,8 @@ export interface AdminApi {
   restoreTrash(id: string, confirmRename: boolean): Promise<IpcResult<RestoreReport>>;
   emptyTrash(): Promise<IpcResult<{ removed: number }>>;
   openViewer(): Promise<IpcResult<void>>;
+  /** Hub 수동 시작(v3.1). started: false = 이미 떠 있음. 실패 code: no_launch_info | launch_untrusted. */
+  startHub(): Promise<IpcResult<{ started: boolean }>>;
   /** 데이터 폴더 config.json의 언어(Hub가 꺼져 있어도 읽는다). */
   getLanguage(): Promise<IpcResult<LangSetting>>;
   /** 언어 저장: Hub가 켜져 있으면 Hub로, 꺼져 있으면 파일에 직접. */
@@ -198,3 +200,6 @@ export interface AdminApi {
   connDeleteServer(serverId: string): Promise<IpcResult<void>>;
   connDeleteChannel(channelId: string): Promise<IpcResult<void>>;
 }
+
+/** Hub 수동 시작용 실행 정보(v3.1 Hub가 hub.json의 launch에 적음 — hub/launchInfo.ts와 같은 모양). */
+export interface LaunchInfo { execPath: string; execArgv: string[]; entry: string; env: Record<string, string> }

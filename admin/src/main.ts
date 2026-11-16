@@ -2,7 +2,8 @@ import { app, BrowserWindow, ipcMain, shell } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { AdminClient, HubNotRunningError, resolveAdminTarget, toResult } from "./adminClient.js";
+import { AdminClient, HubNotRunningError, HubOpError, resolveAdminTarget, toResult } from "./adminClient.js";
+import { startHub } from "./hubStart.js";
 import { isTrustedFrame } from "./ipcGuard.js";
 import { isViewerUrl } from "./auth.js";
 import type { ConfigPatch, IpcResult, MeshCaseChoice, MeshCommand, RestoreInput } from "./types.js";
@@ -60,6 +61,12 @@ handle("admin:openViewer", () => toResult(async () => {
   const url = await client.viewerTicket();
   if (!isViewerUrl(url)) throw new Error(msg("bad_viewer_url"));
   await shell.openExternal(url);
+}));
+// Hub 수동 시작(v3.1): hub.json의 실행 정보를 검사한 뒤 MCP와 같은 방식으로 띄운다. 이미 떠 있으면 아무것도 안 함.
+handle("admin:startHub", () => toResult(async () => {
+  const r = await startHub(target);
+  if (!r.ok) throw new HubOpError(msg(r.code === "launch_untrusted" ? "hub_start_untrusted" : r.code === "no_launch_info" ? "hubdown_no_launch" : "hub_start_failed"), r.code);
+  return { started: r.started };
 }));
 // 언어: Hub가 꺼져 있어도 동작해야 한다(첫 실행 언어 선택) — 읽기는 파일, 쓰기는 Hub가 켜져 있으면 Hub로(기록자는 Hub), 꺼져 있으면 파일에 직접.
 handle("admin:getLanguage", async () => ({ ok: true, data: readLanguageFile(dataDir) }));
