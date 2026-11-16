@@ -1,5 +1,5 @@
 // 렌더러의 순수 로직(DOM 없음 → Node에서 테스트).
-import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, StorageInput, StorageStatus, SupabaseInput, VerifyResult, Space1CreateInput, Space1JoinInput, Space1Status, MeshCaseChoice, MeshCommand, RestoreInput, BackupCandidate, RestoreResult, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem } from "../types.js";
+import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, StorageInput, StorageStatus, SupabaseInput, VerifyResult, Space1CreateInput, Space1JoinInput, Space1Status, MeshCaseChoice, MeshCommand, RestoreInput, BackupCandidate, RestoreResult, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem, ConnStatus } from "../types.js";
 import { oneLine } from "../text.js";
 import type { AdminKey } from "../messages.js";
 import { getLang, tr } from "./lang.js";
@@ -571,4 +571,49 @@ export function backupRestoreDone(r: Pick<RestoreResult, "channelCount" | "messa
   if (r.head === "behind") parts.push(tr("brestore_head_behind"));
   if (r.head === "missing") parts.push(tr("brestore_head_missing"));
   return parts.join(" · ");
+}
+
+// ───── v3.1: 로컬/다중 연결 분류(관리 앱 '서버 및 채널'·'계정 및 DM') ─────
+
+/** 계정·DM을 로컬/다중 연결로. 연결 계정이 하나라도 낀 DM은 다중 연결. area가 없으면(옛 Hub) 로컬. */
+export function splitAccounts(accounts: SnapshotAccount[], dms: SnapshotDm[]): { local: { accounts: SnapshotAccount[]; dms: SnapshotDm[] }; multi: { accounts: SnapshotAccount[]; dms: SnapshotDm[] } } {
+  const conn = new Set(accounts.filter((a) => a.area === "connection").map((a) => a.uuid));
+  const isMulti = (d: SnapshotDm) => d.members.some((m) => conn.has(m));
+  return {
+    local: { accounts: accounts.filter((a) => !conn.has(a.uuid)), dms: dms.filter((d) => !isMulti(d)) },
+    multi: { accounts: accounts.filter((a) => conn.has(a.uuid)), dms: dms.filter(isMulti) },
+  };
+}
+
+export type MultiChannelRow = { kind: "comms" | "space1" | "mesh"; serverName: string; channelId: string; channelName: string; deletable: boolean; sharedLocal?: boolean };
+const KIND_ORDER = { comms: 0, space1: 1, mesh: 2 } as const;
+
+/** 다른 PC와 이어진 채널 전부(방식 2·1·3). 지울 수 있는 것은 내 통신 채널뿐 — 공간 관리자 쪽은 로컬에서 지운다. */
+export function multiChannels(st: ConnStatus | null): MultiChannelRow[] {
+  if (!st) return [];
+  const rows: MultiChannelRow[] = [];
+  for (const s of st.comms ?? []) for (const c of s.channels) rows.push({ kind: "comms", serverName: s.name, channelId: c.channelId, channelName: c.name, deletable: true });
+  for (const sp of st.spaces1 ?? []) for (const c of sp.channels ?? []) {
+    rows.push({ kind: "space1", serverName: sp.spaceName, channelId: c.channelId, channelName: c.name, deletable: false, ...(sp.role === "owner" ? { sharedLocal: true } : {}) });
+  }
+  const names = new Map((st.mesh?.servers ?? []).map((s) => [s.spaceId, s.spaceName]));
+  for (const g of st.mesh?.channels ?? []) for (const c of g.channels) {
+    rows.push({ kind: "mesh", serverName: names.get(g.spaceId) ?? g.spaceId, channelId: c.id, channelName: c.name, deletable: false });
+  }
+  const cmp = (a: string, b: string) => a.localeCompare(b, localeOf(getLang()));
+  return rows.sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || cmp(a.serverName, b.serverName) || cmp(a.channelName, b.channelName));
+}
+
+export type PeerRow = { kind: "comms-account" | "space1-pc" | "mesh-server"; name: string; detail: string; online: boolean | null };
+
+/** 다른 PC(보기 전용): 통신은 계정 단위, 공간은 구성원 PC 단위, 서버 연결은 서버 단위(v3.1.5에서 계정 단위로). */
+export function multiPeers(st: ConnStatus | null): PeerRow[] {
+  if (!st) return [];
+  const rows: PeerRow[] = [];
+  for (const a of st.remoteAccounts ?? []) rows.push({ kind: "comms-account", name: a.name, detail: `${a.remote.hubUser} · ${a.remote.spaceName}`, online: a.online });
+  for (const sp of st.spaces1 ?? []) for (const m of sp.members) if (!m.me && !m.revoked) rows.push({ kind: "space1-pc", name: m.userName, detail: sp.spaceName, online: null });
+  const linked = new Map<string, boolean>();
+  for (const l of st.mesh?.links ?? []) linked.set(l.spaceId, (linked.get(l.spaceId) ?? false) || l.connected);
+  for (const s of st.mesh?.servers ?? []) rows.push({ kind: "mesh-server", name: s.spaceName, detail: "", online: linked.has(s.spaceId) ? linked.get(s.spaceId)! : null });
+  return rows;
 }

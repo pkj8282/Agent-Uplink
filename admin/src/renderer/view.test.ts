@@ -661,3 +661,72 @@ test("복원 결과의 최신 여부 경고(ko/en)", () => {
     setLang("ko");
   }
 });
+
+// ───── v3.1: 로컬/다중 연결 분류 ─────
+import { splitAccounts, multiChannels, multiPeers } from "./view.js";
+import type { ConnStatus } from "../types.js";
+
+const acc = (uuid: string, area?: "connection") => ({ uuid, name: uuid.toUpperCase(), ...(area ? { area } : {}) });
+const baseSt = (over: Partial<ConnStatus> = {}): ConnStatus => ({ server: null, members: [], joined: [], userName: null, comms: [], events: [], storage: null, spaces1: [], mesh: null, ...over } as ConnStatus);
+
+test("split_accounts_mixed_dm_goes_multi: 연결 계정이 낀 DM은 다중 연결로, 로컬끼리는 로컬로", () => {
+  const accounts = [acc("l1"), acc("l2"), acc("c1", "connection")];
+  const dms = [{ channelId: "d1", members: ["l1", "l2"], label: "" }, { channelId: "d2", members: ["l1", "c1"], label: "" }];
+  const r = splitAccounts(accounts, dms);
+  assert.deepEqual(r.local.accounts.map((a) => a.uuid), ["l1", "l2"]);
+  assert.deepEqual(r.multi.accounts.map((a) => a.uuid), ["c1"]);
+  assert.deepEqual(r.local.dms.map((d) => d.channelId), ["d1"]);
+  assert.deepEqual(r.multi.dms.map((d) => d.channelId), ["d2"]);
+});
+
+test("split_accounts_old_hub_without_area_is_all_local: 영역 표시가 없는 옛 Hub면 전부 로컬", () => {
+  const r = splitAccounts([acc("a"), acc("b")], [{ channelId: "d", members: ["a", "b"], label: "" }]);
+  assert.equal(r.local.accounts.length, 2);
+  assert.equal(r.multi.accounts.length, 0);
+  assert.equal(r.multi.dms.length, 0);
+});
+
+const s1 = (role: "owner" | "member", over: object = {}) => ({ spaceId: "sp", spaceName: "공간", role, state: "active", repo: "me/r", epoch: 1, members: [], lastSyncAt: null, lastError: null, ...over });
+const meshSt = (over: object = {}) => ({ self: "me", shared: [], excluded: [], links: [], servers: [], gov: null, ...over });
+
+test("multi_channels_only_comms_deletable: 내 통신 채널만 지울 수 있고, 공간 구성원·서버 연결 채널은 보기 전용", () => {
+  const st = baseSt({
+    comms: [{ serverId: "cs", name: "통신팀", channels: [{ channelId: "cc", name: "실시간" }] }],
+    spaces1: [s1("member", { channels: [{ channelId: "s1:sp:x", name: "작업방" }] }) as any],
+    mesh: meshSt({ servers: [{ spaceId: "o", spaceName: "남의서버", channelCount: 1, direct: true }], channels: [{ spaceId: "o", channels: [{ id: "k", name: "공지" }] }] }) as any,
+  });
+  const rows = multiChannels(st);
+  assert.deepEqual(rows.map((r) => [r.kind, r.serverName, r.channelName, r.deletable]), [["comms", "통신팀", "실시간", true], ["space1", "공간", "작업방", false], ["mesh", "남의서버", "공지", false]]);
+  assert.equal(rows[0].channelId, "cc");
+});
+
+test("multi_channels_space1_owner_is_shared_local: 관리자 쪽 공간 채널은 '공간 공유 중'인 로컬 채널(보기 전용, 지우기는 로컬에서)", () => {
+  const st = baseSt({ spaces1: [s1("owner", { channels: [{ channelId: "lc", name: "작업방" }], localServerId: "ls" }) as any] });
+  const rows = multiChannels(st);
+  assert.deepEqual(rows.map((r) => [r.kind, r.serverName, r.channelName, r.deletable, r.sharedLocal]), [["space1", "공간", "작업방", false, true]]);
+});
+
+test("multi_channels_old_hub_missing_fields_empty: 옛 Hub(channels·mesh 없음)면 통신 채널만", () => {
+  const st = baseSt({ comms: [{ serverId: "cs", name: "B", channels: [{ channelId: "c2", name: "z" }, { channelId: "c1", name: "a" }] }], spaces1: [s1("member") as any] });
+  assert.deepEqual(multiChannels(st).map((r) => r.channelName), ["a", "z"]);
+  assert.deepEqual(multiChannels(null), []);
+});
+
+test("multi_peers_excludes_me_and_revoked: 다른 PC 목록 — 통신 계정·공간 PC·연결 서버, 나와 퇴출된 PC는 빼고", () => {
+  const st = baseSt({
+    remoteAccounts: [{ uuid: "m:x", name: "비서", description: "", online: true, remote: { spaceName: "팀", hubUser: "비" } }],
+    spaces1: [s1("owner", { members: [{ hubId: "h0", userName: "나", revoked: false, me: true }, { hubId: "h1", userName: "철수", revoked: false, me: false }, { hubId: "h2", userName: "영희", revoked: true, me: false }] }) as any],
+    mesh: meshSt({ servers: [{ spaceId: "o", spaceName: "망서버", channelCount: 0, direct: true }, { spaceId: "p", spaceName: "먼서버", channelCount: 0, direct: false }], links: [{ spaceId: "o", spaceName: "망서버", dir: "out", fingerprint: "f", connected: true }] }) as any,
+  });
+  assert.deepEqual(multiPeers(st).map((p) => [p.kind, p.name, p.detail, p.online]), [
+    ["comms-account", "비서", "비 · 팀", true],
+    ["space1-pc", "철수", "공간", null],
+    ["mesh-server", "망서버", "", true],
+    ["mesh-server", "먼서버", "", null],
+  ]);
+});
+
+test("multi_peers_null_status_empty: 통신 상태가 없으면(옛 Hub·꺼짐) 빈 목록", () => {
+  assert.deepEqual(multiPeers(null), []);
+  assert.deepEqual(multiPeers(baseSt()), []);
+});
