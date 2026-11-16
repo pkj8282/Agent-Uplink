@@ -955,7 +955,7 @@ export class ConnectionManager implements ConnStatusSource {
   status(): {
     server: { enabled: boolean; port: number; profile: ProfileId; spaceName: string; burnOnJoin: boolean; shared: string[]; listening: boolean } | null;
     members: { memberId: string; userName: string; joinedAt: number; revoked: boolean; online: boolean }[];
-    joined: { spaceId: string; spaceName: string; hostUser: string; connected: boolean }[];
+    joined: { spaceId: string; spaceName: string; hostUser: string; connected: boolean; servers: { serverId: string; name: string; channels: { channelId: string; name: string }[] }[] }[];
     userName: string | null;
     storage: ReturnType<Uploader["status"]>;
     spaces1: ReturnType<SpaceSync["status"]>[];
@@ -969,7 +969,12 @@ export class ConnectionManager implements ConnStatusSource {
     return {
       server: cfg ? { enabled: cfg.enabled, port: cfg.port, profile: cfg.profile, spaceName: cfg.spaceName, burnOnJoin: cfg.burnOnJoin, shared: cfg.shared, listening: this.listening } : null,
       members: this.store.members().map((m) => ({ memberId: m.memberId, userName: m.userName, joinedAt: m.joinedAt, revoked: m.revoked, online: online.has(m.memberId) })),
-      joined: this.store.joined().map((j) => ({ spaceId: j.spaceId, spaceName: j.spaceName, hostUser: j.hostUser, connected: !!this.spaces.get(j.spaceId)?.client.connected })),
+      joined: this.store.joined().map((j) => {
+        const st = this.spaces.get(j.spaceId);
+        // 참여한 통신 서버가 공유한 서버·채널(관리 앱 '서버 및 채널 ▸ 다중 연결', v3.1) — 연결 계정 세션이 쓰는 원격 id(r:…)로
+        const servers = (st?.shared ?? []).map((s) => ({ serverId: this.remoteId(j.spaceId, s.serverId), name: s.name, channels: s.channels.map((c) => ({ channelId: this.remoteId(j.spaceId, c.channelId), name: c.name })) }));
+        return { spaceId: j.spaceId, spaceName: j.spaceName, hostUser: j.hostUser, connected: !!st?.client.connected, servers };
+      }),
       userName: this.store.userName(),
       storage: this.uploader.status(),
       spaces1: this.space1Status(),

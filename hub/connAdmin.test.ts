@@ -232,3 +232,26 @@ test("admin_conn_status_lists_remote_comms_accounts: 통신 상태에 다른 PC�
     bc.close(); ac.close(); A.c.close(); B.c.close();
   } finally { A.hub.stop(); B.hub.stop(); }
 });
+
+test("joined_status_lists_shared_channels: 참여한 통신 서버의 공유 채널이 참여자 쪽 통신 상태에 실린다(관리 앱 다중 연결 목록)", async () => {
+  const A = await hubWithToken();
+  const B = await hubWithToken();
+  try {
+    const req = (h: typeof A, op: string, p: object = {}) => (h.c.req(op, { token: h.token, ...p }) as Promise<any>);
+    await req(A, "admin_conn_set_user", { name: "에이" });
+    await req(A, "admin_conn_enable_server", { port: await freePort(), bindHost: "127.0.0.1", profile: "tls13-chacha20", spaceName: "팀", burnOnJoin: false });
+    const srv = await req(A, "admin_conn_create_server", { name: "팀작업" });
+    await req(A, "admin_conn_create_channel", { serverId: srv.serverId, name: "main" });
+    await req(A, "admin_conn_set_shared", { serverIds: [srv.serverId] });
+    const inv = await req(A, "admin_conn_create_invite", { label: "비", host: "127.0.0.1", expiresInMs: 60_000 });
+    await req(B, "admin_conn_set_user", { name: "비" });
+    assert.equal((await req(B, "admin_conn_join", { code: inv.code })).ok, true);
+    let sb: any;
+    for (let i = 0; i < 200; i++) { sb = await req(B, "admin_conn_status"); if (sb.joined[0]?.servers?.[0]?.channels?.length) break; await new Promise((r) => setTimeout(r, 20)); }
+    const s = sb.joined[0].servers[0];
+    assert.equal(s.name, "팀작업");
+    assert.deepEqual(s.channels.map((c: any) => c.name), ["main"]);
+    assert.match(s.channels[0].channelId, /^r:/);
+    A.c.close(); B.c.close();
+  } finally { A.hub.stop(); B.hub.stop(); }
+});

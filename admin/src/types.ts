@@ -40,7 +40,7 @@ export type ConnProfile = "tls13-aes256gcm" | "tls13-chacha20";
 export interface ConnStatus {
   server: { enabled: boolean; port: number; profile: ConnProfile; spaceName: string; burnOnJoin: boolean; shared: string[]; listening: boolean } | null;
   members: { memberId: string; userName: string; joinedAt: number; revoked: boolean; online: boolean }[];
-  joined: { spaceId: string; spaceName: string; hostUser: string; connected: boolean }[];
+  joined: { spaceId: string; spaceName: string; hostUser: string; connected: boolean; /** 그 서버가 공유한 서버·채널(v3.1 Hub, 원격 id). */ servers?: { serverId: string; name: string; channels: { channelId: string; name: string }[] }[] }[];
   userName: string | null;
   /** 이 Hub의 통신 서버·채널(Connection Communications). 1단계 Hub는 없음 → []. */
   comms: ConnCommsServer[];

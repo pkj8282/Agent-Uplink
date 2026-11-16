@@ -592,7 +592,11 @@ const KIND_ORDER = { comms: 0, space1: 1, mesh: 2 } as const;
 export function multiChannels(st: ConnStatus | null): MultiChannelRow[] {
   if (!st) return [];
   const rows: MultiChannelRow[] = [];
-  for (const s of st.comms ?? []) for (const c of s.channels) rows.push({ kind: "comms", serverName: s.name, channelId: c.channelId, channelName: c.name, deletable: true });
+  // 내 통신 서버는 다른 PC에 내보내는 것(참여자 공유·망 공유)만 — 공유 안 한 서버는 아직 이 PC 안에만 있다
+  const out = new Set([...(st.server?.shared ?? []), ...(st.mesh?.shared ?? [])]);
+  for (const s of st.comms ?? []) if (out.has(s.serverId)) for (const c of s.channels) rows.push({ kind: "comms", serverName: s.name, channelId: c.channelId, channelName: c.name, deletable: true });
+  // 내가 참여한 남의 통신 서버의 공유 채널(보기 전용 — 그 PC의 것)
+  for (const j of st.joined ?? []) for (const s of j.servers ?? []) for (const c of s.channels) rows.push({ kind: "comms", serverName: s.name, channelId: c.channelId, channelName: c.name, deletable: false });
   for (const sp of st.spaces1 ?? []) for (const c of sp.channels ?? []) {
     rows.push({ kind: "space1", serverName: sp.spaceName, channelId: c.channelId, channelName: c.name, deletable: false, ...(sp.role === "owner" ? { sharedLocal: true } : {}) });
   }

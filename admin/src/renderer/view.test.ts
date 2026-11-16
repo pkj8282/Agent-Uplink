@@ -691,6 +691,7 @@ const meshSt = (over: object = {}) => ({ self: "me", shared: [], excluded: [], l
 
 test("multi_channels_only_comms_deletable: 내 통신 채널만 지울 수 있고, 공간 구성원·서버 연결 채널은 보기 전용", () => {
   const st = baseSt({
+    server: { enabled: true, port: 1, profile: "tls13-chacha20", spaceName: "t", burnOnJoin: false, shared: ["cs"], listening: true } as any, 
     comms: [{ serverId: "cs", name: "통신팀", channels: [{ channelId: "cc", name: "실시간" }] }],
     spaces1: [s1("member", { channels: [{ channelId: "s1:sp:x", name: "작업방" }] }) as any],
     mesh: meshSt({ servers: [{ spaceId: "o", spaceName: "남의서버", channelCount: 1, direct: true }], channels: [{ spaceId: "o", channels: [{ id: "k", name: "공지" }] }] }) as any,
@@ -707,7 +708,7 @@ test("multi_channels_space1_owner_is_shared_local: 관리자 쪽 공간 채널�
 });
 
 test("multi_channels_old_hub_missing_fields_empty: 옛 Hub(channels·mesh 없음)면 통신 채널만", () => {
-  const st = baseSt({ comms: [{ serverId: "cs", name: "B", channels: [{ channelId: "c2", name: "z" }, { channelId: "c1", name: "a" }] }], spaces1: [s1("member") as any] });
+  const st = baseSt({ server: { enabled: true, port: 1, profile: "tls13-chacha20", spaceName: "t", burnOnJoin: false, shared: ["cs"], listening: true } as any, comms: [{ serverId: "cs", name: "B", channels: [{ channelId: "c2", name: "z" }, { channelId: "c1", name: "a" }] }], spaces1: [s1("member") as any] });
   assert.deepEqual(multiChannels(st).map((r) => r.channelName), ["a", "z"]);
   assert.deepEqual(multiChannels(null), []);
 });
@@ -769,7 +770,7 @@ test("shared_local_server_line_ko_en: 공간으로 공유 중인 로컬 서버 i
 });
 
 test("multi_channels_skips_own_mesh_channels: 망 상태에 든 내 서버 자신의 채널은 '서버 연결' 줄로 다시 나오지 않는다(통신 줄로 이미 있음)", () => {
-  const st = { server: null, members: [], joined: [], userName: null, events: [], storage: null, spaces1: [],
+  const st = { server: { shared: ["cs"] }, members: [], joined: [], userName: null, events: [], storage: null, spaces1: [],
     comms: [{ serverId: "cs", name: "planning", channels: [{ channelId: "cc", name: "schedule" }] }],
     mesh: { self: "me", shared: [], excluded: [], links: [], gov: null,
       servers: [{ spaceId: "o", spaceName: "casey-ops", channelCount: 1, direct: true }],
@@ -777,4 +778,14 @@ test("multi_channels_skips_own_mesh_channels: 망 상태에 든 내 서버 자�
   } as unknown as ConnStatus;
   assert.deepEqual(multiChannels(st).map((r) => [r.kind, r.serverName, r.channelName]), [["comms", "planning", "schedule"], ["mesh", "casey-ops", "status"]]);
   assert.deepEqual(multiPeers(st).map((p) => p.name), ["casey-ops"]);
+});
+
+test("multi_channels_joined_and_only_shared_own: 참여한 남의 통신 채널은 보기 전용으로 넣고, 내 통신 서버는 공유(참여자·망)한 것만", () => {
+  const st = { members: [], userName: null, events: [], storage: null, spaces1: [],
+    server: { enabled: true, port: 1, profile: "tls13-chacha20", spaceName: "팀", burnOnJoin: false, shared: ["s1"], listening: true },
+    comms: [{ serverId: "s1", name: "공유함", channels: [{ channelId: "c1", name: "a" }] }, { serverId: "s2", name: "안함", channels: [{ channelId: "c2", name: "b" }] }, { serverId: "s3", name: "망만", channels: [{ channelId: "c3", name: "c" }] }],
+    joined: [{ spaceId: "sp", spaceName: "남의팀", hostUser: "에이", connected: true, servers: [{ serverId: "r:sp:x", name: "남의서버", channels: [{ channelId: "r:sp:y", name: "일정" }] }] }],
+    mesh: { self: "me", shared: ["s3"], excluded: [], links: [], servers: [], gov: null },
+  } as unknown as ConnStatus;
+  assert.deepEqual(multiChannels(st).map((r) => [r.serverName, r.channelName, r.deletable]), [["남의서버", "일정", false], ["망만", "c", true], ["공유함", "a", true]].sort((x, y) => String(x[0]).localeCompare(String(y[0]), "ko")));
 });
