@@ -391,3 +391,43 @@ test("verify_forged_signer_does_not_burn_victim_budget: 남의 키를 서명자�
   m.send({ event: "v_chal", ttl: 1, m: real });
   await until(() => m.seen.some((e) => e.event === "v_resp"));
 });
+
+// ───── v3.1: 3차 재공격 Minor 7 — 가진 코드 전부(최대 4)로 답하기 ─────
+import { VerifyStore } from "./verify.js";
+import { tempDir } from "../../testing.js";
+
+test("old_code_still_verifies_after_newest_deleted: 확인 쪽이 최신 코드를 지워도 남은 옛 코드로 인정된다(영구 경고 없음)", async () => {
+  const { a, c } = line();
+  await until(() => !!candidate(c, "spA"));
+  const code1 = c.mesh.issueVerifyCode("옛 코드");
+  const code2 = c.mesh.issueVerifyCode("새 코드");
+  assert.equal(c.mesh.deleteVerifyCode("managed", decodeVerifyCode(code2)!.cid), true);
+  assert.equal(a.mesh.registerVerifyCode(code1).ok, true);
+  assert.equal(a.mesh.registerVerifyCode(code2).ok, true); // A가 가진 C의 최신 코드는 C가 지운 것
+  await until(() => known(c, "spA"));
+  assert.equal(c.logs.includes("mesh_verify_failed"), false);
+});
+
+test("unknown_cid_answer_no_warning: 확인 쪽이 모르는(지운) 코드의 답만 오면 경고 없이 후보로 남는다", async () => {
+  const { a, c } = line();
+  await until(() => !!candidate(c, "spA"));
+  c.mesh.issueVerifyCode("다른 서버용"); // 관리 코드가 하나라도 있어야 C가 질문을 보낸다
+  const code = c.mesh.issueVerifyCode("지울 코드");
+  assert.equal(c.mesh.deleteVerifyCode("managed", decodeVerifyCode(code)!.cid), true);
+  assert.equal(a.mesh.registerVerifyCode(code).ok, true);
+  await settle(300);
+  assert.equal(known(c, "spA"), false);
+  assert.equal(candidate(c, "spA")?.warning, false);
+  assert.equal(c.logs.includes("mesh_verify_failed"), false);
+});
+
+test("answers_capped_at_four: 같은 서버가 준 코드가 많아도 최근 4개로만 답한다", () => {
+  const st = new VerifyStore(tempDir("verify-cap-"));
+  const issuer = new VerifyStore(tempDir("verify-cap-i-"));
+  for (let i = 0; i < 6; i++) st.add(decodeVerifyCode(issuer.issue("spC", `c${i}`, i))!, i);
+  st.add(decodeVerifyCode(issuer.issue("spX", "other", 9))!, 9);
+  const all = st.heldAllFor("spC");
+  assert.equal(all.length, 4);
+  assert.deepEqual(all.map((h) => h.addedAt), [5, 4, 3, 2]);
+  assert.deepEqual(st.heldAllFor("nobody"), []);
+});

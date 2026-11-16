@@ -664,12 +664,14 @@ export class Mesh {
     const self = this.deps.self();
     if (b.prover !== self.spaceId) return this.forwardVerify(e, m, from);
     if (Math.abs(this.now - b.ts) > RELAY_MAX_AGE_MS) return;
-    const held = this.verify.heldFor(b.verifier);
-    if (!held) return; // 코드를 준 서버의 질문에만 답한다
-    const sealed = sealVerifyAnswer(held, { verifierId: b.verifier, proverId: self.spaceId, proverKey: self.keys.publicKeyB64, challenge: b.challenge });
-    const body: VRespBody = { verifier: b.verifier, prover: self.spaceId, cid: held.cid, challenge: b.challenge, sealed, ts: this.now };
-    this.firstSeen("v", `vresp:${b.challenge}:${self.keys.publicKeyB64}`);
-    this.flood({ event: "v_resp", m: signMesh<VRespBody>("vresp", body, self.keys), ttl: RELAY_TTL });
+    // 코드를 준 서버의 질문에만, 그 서버가 준 코드 전부(최근 4개)로 답한다(v3.1, 3차 재공격 Minor 7 — 확인 쪽이 최신 코드를
+    // 지웠어도 남은 코드로 인정되게). 3.0.x 확인 쪽은 서명자별 첫 답(최신 코드)만 보므로 전과 같다.
+    for (const held of this.verify.heldAllFor(b.verifier)) {
+      const sealed = sealVerifyAnswer(held, { verifierId: b.verifier, proverId: self.spaceId, proverKey: self.keys.publicKeyB64, challenge: b.challenge });
+      const body: VRespBody = { verifier: b.verifier, prover: self.spaceId, cid: held.cid, challenge: b.challenge, sealed, ts: this.now };
+      this.firstSeen("v", `vresp:${b.challenge}:${self.keys.publicKeyB64}:${held.cid}`);
+      this.flood({ event: "v_resp", m: signMesh<VRespBody>("vresp", body, self.keys), ttl: RELAY_TTL });
+    }
   }
 
   private onVerifyResponse(e: { event: string; [k: string]: unknown }, from: MeshLink): void {
@@ -680,15 +682,16 @@ export class Mesh {
     if (!b || typeof b.verifier !== "string" || typeof b.prover !== "string" || typeof b.cid !== "string" || typeof b.challenge !== "string" || b.challenge.length > 128 || !b.sealed || typeof b.sealed !== "object") return;
     if (this.deps.originOf && this.deps.originOf(signer) !== b.prover) return;
     if (!this.chargeVerify(from, signer)) return;
-    if (!this.firstSeen("v", `vresp:${b.challenge}:${signer}`)) return; // 서명자별 — 다른 서버의 가짜 답이 진짜 답을 태우지 못하게
+    if (!this.firstSeen("v", `vresp:${b.challenge}:${signer}:${b.cid.slice(0, 64)}`)) return; // 서명자·코드별 — 가짜 답이 진짜 답을 태우지 못하게, 한 질문에 코드마다 답이 온다
     if (b.verifier !== this.deps.self().spaceId) return this.forwardVerify(e, m, from);
     const pending = this.pendingVerify.get(b.challenge);
     if (!pending || pending.origin !== b.prover || pending.expires <= this.now) return;
-    this.pendingVerify.delete(b.challenge);
     const cand = this.cands.get(b.prover);
     if (!cand || cand.signer !== signer) return;
     const issued = this.verify.findManaged(b.cid);
-    const ok = !!issued && (!issued.boundTo || issued.boundTo === b.prover)
+    if (!issued) return; // 내가 관리하지 않는(지운) 코드의 답 — 경고 없이 넘기고 같은 질문의 다른 코드 답을 기다린다
+    this.pendingVerify.delete(b.challenge);
+    const ok = (!issued.boundTo || issued.boundTo === b.prover)
       && openVerifyAnswer(issued, { verifierId: b.verifier, proverId: b.prover, proverKey: signer, challenge: b.challenge }, b.sealed);
     if (!ok) {
       if (!cand.warning) this.deps.log("mesh_verify_failed", { origin: b.prover });

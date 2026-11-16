@@ -12,6 +12,8 @@ const PREFIX = "uplink-verify-1.";
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const B64URL_RE = /^[A-Za-z0-9_-]+$/;
 const MAX_CODES = 256;
+/** 한 질문에 답하는 코드 수 상한(같은 서버가 준 코드 중 최근 것부터). */
+const ANSWER_CODES = 4;
 
 export interface VerifySecrets {
   /** 답을 암호화하는 키(32바이트, base64). */
@@ -135,8 +137,9 @@ export class VerifyStore {
     return true;
   }
 
-  heldFor(issuer: string): Held | undefined {
-    return [...this.held].reverse().find((h) => h.issuer === issuer); // 가장 최근에 받은 코드
+  /** 그 서버가 준 코드들(최근에 받은 것부터, 최대 ANSWER_CODES개) — 질문에 코드마다 답한다. */
+  heldAllFor(issuer: string): Held[] {
+    return [...this.held].reverse().filter((h) => h.issuer === issuer).slice(0, ANSWER_CODES);
   }
 
   findManaged(cid: string): Managed | undefined {
