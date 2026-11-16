@@ -597,7 +597,8 @@ export function multiChannels(st: ConnStatus | null): MultiChannelRow[] {
     rows.push({ kind: "space1", serverName: sp.spaceName, channelId: c.channelId, channelName: c.name, deletable: false, ...(sp.role === "owner" ? { sharedLocal: true } : {}) });
   }
   const names = new Map((st.mesh?.servers ?? []).map((s) => [s.spaceId, s.spaceName]));
-  for (const g of st.mesh?.channels ?? []) for (const c of g.channels) {
+  // 망 상태에는 내 서버 자신의 채널도 들어 있다 — 통신 줄로 이미 있으니 빼고 다른 서버 것만
+  for (const g of st.mesh?.channels ?? []) if (g.spaceId !== st.mesh?.self) for (const c of g.channels) {
     rows.push({ kind: "mesh", serverName: names.get(g.spaceId) ?? g.spaceId, channelId: c.id, channelName: c.name, deletable: false });
   }
   const cmp = (a: string, b: string) => a.localeCompare(b, localeOf(getLang()));
@@ -614,7 +615,7 @@ export function multiPeers(st: ConnStatus | null): PeerRow[] {
   for (const sp of st.spaces1 ?? []) for (const m of sp.members) if (!m.me && !m.revoked) rows.push({ kind: "space1-pc", name: m.userName, detail: sp.spaceName, online: null });
   const linked = new Map<string, boolean>();
   for (const l of st.mesh?.links ?? []) linked.set(l.spaceId, (linked.get(l.spaceId) ?? false) || l.connected);
-  for (const s of st.mesh?.servers ?? []) rows.push({ kind: "mesh-server", name: s.spaceName, detail: "", online: linked.has(s.spaceId) ? linked.get(s.spaceId)! : null });
+  for (const s of st.mesh?.servers ?? []) if (s.spaceId !== st.mesh?.self) rows.push({ kind: "mesh-server", name: s.spaceName, detail: "", online: linked.has(s.spaceId) ? linked.get(s.spaceId)! : null });
   return rows;
 }
 

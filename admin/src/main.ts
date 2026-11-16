@@ -318,10 +318,22 @@ async function collectReport(win: BrowserWindow): Promise<Record<string, unknown
     for (const v of views) {
       const [sec, sub] = v.split("/");
       await win.webContents.executeJavaScript(`(() => { document.querySelector('[data-nav="${sec}"]').click(); ${sub ? `document.querySelector('#panel-${sec} > .subtabs [data-sub="${sub}"]').click();` : ""} })()`);
-      await new Promise((r) => setTimeout(r, 150));
+      win.webContents.invalidate(); // 숨은 창에서도 새로 그린 장면을 찍게
+      await new Promise((r) => setTimeout(r, 400));
       // 캡처는 GPU 상태에 따라 가끔 실패한다(UnknownVizError) — 한 번 더 해 보고, 그래도 안 되면 그 화면만 건너뛴다
+      // 보이는 내용 아래까지만 자르고(빈 아래쪽 제외) 폭 980으로 맞춘다(README 이미지와 같은 폭)
+      const h: number = await win.webContents.executeJavaScript(`(() => {
+        const vis = [...document.querySelectorAll(".subpanel, .panel")].filter((e) => !e.hidden && e.offsetParent !== null);
+        const bottom = Math.max(document.querySelector(".side button:last-child").getBoundingClientRect().bottom, ...vis.map((e) => e.getBoundingClientRect().bottom));
+        return Math.min(window.innerHeight, Math.ceil(bottom + 16));
+      })()`);
+      const w: number = await win.webContents.executeJavaScript("window.innerWidth");
       for (let tries = 0; tries < 2; tries++) {
-        try { fs.writeFileSync(path.join(shots, `${v.replace("/", "-")}.png`), (await win.webContents.capturePage()).toPNG()); break; } catch { await new Promise((r) => setTimeout(r, 300)); }
+        try {
+          const img = await win.webContents.capturePage({ x: 0, y: 0, width: w, height: h });
+          fs.writeFileSync(path.join(shots, `${v.replace("/", "-")}.png`), (img.getSize().width > 980 ? img.resize({ width: 980, quality: "best" }) : img).toPNG());
+          break;
+        } catch { await new Promise((r) => setTimeout(r, 300)); }
       }
     }
   }

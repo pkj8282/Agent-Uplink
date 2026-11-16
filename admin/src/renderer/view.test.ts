@@ -767,3 +767,14 @@ test("shared_local_server_line_ko_en: 공간으로 공유 중인 로컬 서버 i
   assert.deepEqual([...sharedServerIds(st)], ["srv1"]);
   assert.deepEqual([...sharedServerIds(null)], []);
 });
+
+test("multi_channels_skips_own_mesh_channels: 망 상태에 든 내 서버 자신의 채널은 '서버 연결' 줄로 다시 나오지 않는다(통신 줄로 이미 있음)", () => {
+  const st = { server: null, members: [], joined: [], userName: null, events: [], storage: null, spaces1: [],
+    comms: [{ serverId: "cs", name: "planning", channels: [{ channelId: "cc", name: "schedule" }] }],
+    mesh: { self: "me", shared: [], excluded: [], links: [], gov: null,
+      servers: [{ spaceId: "o", spaceName: "casey-ops", channelCount: 1, direct: true }],
+      channels: [{ spaceId: "me", channels: [{ id: "cc", name: "schedule" }] }, { spaceId: "o", channels: [{ id: "k", name: "status" }] }] },
+  } as unknown as ConnStatus;
+  assert.deepEqual(multiChannels(st).map((r) => [r.kind, r.serverName, r.channelName]), [["comms", "planning", "schedule"], ["mesh", "casey-ops", "status"]]);
+  assert.deepEqual(multiPeers(st).map((p) => p.name), ["casey-ops"]);
+});
