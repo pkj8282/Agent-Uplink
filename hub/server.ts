@@ -1115,6 +1115,7 @@ export class Hub {
             name: a.name,
             description: a.description ?? "",
             online: this.isOnline(a.uuid),
+            ...(a.area === "connection" ? { area: "connection" as const } : {}),
           })),
           snapshotDms: this.dm.all().map((r) => ({ channelId: r.channelId, members: [...r.members], label: r.label })),
           trash: this.trash.list(),

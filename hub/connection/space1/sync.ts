@@ -546,14 +546,17 @@ export class SpaceSync {
     return this.cfg.intervalSec;
   }
 
-  status(): { spaceId: string; spaceName: string; role: "owner" | "member"; state: State["state"]; repo: string; epoch: number; members: { hubId: string; userName: string; revoked: boolean; me: boolean }[]; lastSyncAt: number | null; lastError: string | null } {
+  status(): { spaceId: string; spaceName: string; role: "owner" | "member"; state: State["state"]; repo: string; epoch: number; members: { hubId: string; userName: string; revoked: boolean; me: boolean }[]; lastSyncAt: number | null; lastError: string | null; channels: { channelId: string; name: string }[]; localServerId?: string } {
     const r = this.st.roster;
     const names = this.st.plain?.names ?? {};
     const members = [
       ...(r?.members ?? []).map((m) => ({ hubId: m.hubId, userName: names[m.hubId] ?? "?", revoked: false, me: m.hubId === this.myHubId })),
       ...(r?.revoked ?? []).map((x) => ({ hubId: x.hubId, userName: names[x.hubId] ?? "?", revoked: true, me: x.hubId === this.myHubId })),
     ];
-    return { spaceId: this.cfg.spaceId, spaceName: this.st.plain?.spaceName ?? this.cfg.spaceName, role: this.cfg.role, state: this.st.state, repo: this.cfg.repo, epoch: r?.epoch ?? 0, members, lastSyncAt: this.st.lastSyncAt, lastError: this.st.lastError };
+    return { spaceId: this.cfg.spaceId, spaceName: this.st.plain?.spaceName ?? this.cfg.spaceName, role: this.cfg.role, state: this.st.state, repo: this.cfg.repo, epoch: r?.epoch ?? 0, members, lastSyncAt: this.st.lastSyncAt, lastError: this.st.lastError,
+      // 관리 앱 '서버 및 채널 ▸ 다중 연결'(v3.1): 구성원은 거울 채널 id, 관리자는 공유한 로컬 채널 id 그대로
+      channels: (this.st.state === "active" ? this.st.plain?.channels ?? [] : []).map((c) => ({ channelId: this.cfg.role === "member" ? this.mirrorId(c.channelId) : c.channelId, name: c.name })),
+      ...(this.cfg.role === "owner" && this.cfg.localServerId ? { localServerId: this.cfg.localServerId } : {}) };
   }
 
   /** 구성원: 세션이 찾을 수 있게 목록에 보일 공간 서버·거울 채널(관리자 쪽은 원래 로컬 서버라 필요 없음). */

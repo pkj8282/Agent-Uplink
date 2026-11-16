@@ -12,7 +12,7 @@ export interface AdminConfig {
 export type ConfigPatch = Partial<Omit<AdminConfig, "language">> & { language?: Lang };
 
 export interface SnapshotServer { id: string; name: string; channels: { id: string; name: string }[]; }
-export interface SnapshotAccount { uuid: string; name: string; description?: string; online?: boolean; }
+export interface SnapshotAccount { uuid: string; name: string; description?: string; online?: boolean; /** 연결 계정(v3.1 Hub). 없으면 로컬. */ area?: "connection"; }
 export interface SnapshotDm { channelId: string; members: string[]; label: string; }
 
 export interface TrashItem {
@@ -52,10 +52,17 @@ export interface ConnStatus {
   spaces1: Space1Status[];
   /** 방식 3 망(v3.0 5단계). 통신 서버가 없거나 이전 Hub → null. */
   mesh: MeshStatus | null;
+  /** 다른 PC의 연결 계정(방식 2, v3.1 Hub). 이전 Hub는 없음. */
+  remoteAccounts?: RemoteAccount[];
 }
+export interface RemoteAccount { uuid: string; name: string; description?: string; online: boolean; remote: { spaceName: string; hubUser: string } }
 export interface Space1Status {
   spaceId: string; spaceName: string; role: "owner" | "member"; state: "pending" | "active" | "revoked"; repo: string; epoch: number;
   members: { hubId: string; userName: string; revoked: boolean; me: boolean }[]; lastSyncAt: number | null; lastError: string | null;
+  /** 공간 채널(v3.1 Hub). 구성원은 거울 채널 id. 이전 Hub는 없음. */
+  channels?: { channelId: string; name: string }[];
+  /** 관리자 쪽: 공간으로 공유한 로컬 서버 id(v3.1 Hub). */
+  localServerId?: string;
 }
 export type RestoreInput = ({ kind: "github"; repo: string; ghToken: string } | { kind: "supabase"; url: string; key: string; bucket: string }) & { recoveryKey: string; serverName: string };
 export interface BackupCandidate { spaceId: string; hubId: string; fragments: number; firstDay: string; lastDay: string; }

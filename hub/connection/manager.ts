@@ -962,6 +962,7 @@ export class ConnectionManager implements ConnStatusSource {
     comms: { serverId: string; name: string; channels: { channelId: string; name: string }[] }[];
     mesh: ReturnType<ConnectionManager["meshStatus"]>;
     events: { ts: number; code: string; detail: object }[];
+    remoteAccounts: AccountInfo[];
   } {
     const cfg = this.store.serverConfig();
     const online = new Set([...this.peers].map((p) => p.memberId));
@@ -975,6 +976,8 @@ export class ConnectionManager implements ConnStatusSource {
       comms: this.comms.servers().map((s) => ({ serverId: s.id, name: s.name, channels: s.channels.map((c) => ({ channelId: c.id, name: c.name })) })),
       mesh: this.meshStatus(),
       events: [...this.alerts(), ...this.events.slice(-50), ...this.noisy].sort((a, b) => a.ts - b.ts),
+      // 다른 PC의 연결 계정(방식 2만 — 방식 1·3은 계정을 주고받지 않음, v3.1.5) — 관리 앱 '계정 및 DM ▸ 다중 연결'
+      remoteAccounts: this.remoteAccounts(),
     };
   }
 

@@ -157,3 +157,16 @@ test("conn_status_includes_spaces1: 통신 상태 응답에 방식 1 공간 목�
     assert.deepEqual(st.spaces1.map((x: any) => [x.spaceName, x.role, x.state]), [["공간", "owner", "active"]]);
   } finally { s.A.hub.stop(); s.B.hub.stop(); }
 });
+
+test("space1_status_carries_channels: 공간 상태에 채널 목록(구성원은 거울 id, 관리자는 공유한 로컬 서버 id)", async () => {
+  const s = await setup();
+  try {
+    const a = (await s.A.req("admin_conn_status")).spaces1[0];
+    const b = (await s.B.req("admin_conn_status")).spaces1[0];
+    assert.deepEqual(a.channels.map((c: any) => c.name), ["작업방"]);
+    assert.deepEqual(b.channels, [{ channelId: `s1:${s.spaceId}:${s.ch}`, name: "작업방" }]);
+    assert.equal(typeof a.localServerId, "string");
+    assert.equal(a.channels[0].channelId, s.ch);
+    assert.equal("localServerId" in b, false);
+  } finally { s.A.hub.stop(); s.B.hub.stop(); }
+});

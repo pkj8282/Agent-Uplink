@@ -180,3 +180,55 @@ test("revoke_logs_and_twice_is_harmless: 퇴출은 사건 한 번, 두 번째 �
     A.c.close(); B.c.close();
   } finally { A.hub.stop(); B.hub.stop(); }
 });
+
+test("admin_snapshot_marks_connection_accounts: 관리 스냅샷 계정에 연결 영역 표시(로컬 계정엔 키 없음)", async () => {
+  const t = await hubWithToken();
+  try {
+    const req = (op: string, p: object = {}) => (t.c.req(op, { token: t.token, ...p }) as Promise<any>);
+    await req("admin_conn_enable_server", { port: await freePort(), bindHost: "127.0.0.1", profile: "tls13-chacha20", spaceName: "팀", burnOnJoin: false });
+    const lc = new TestClient(t.port); await lc.ready();
+    assert.equal((await lc.req("login", { uuid: "loc-1" })).ok, true);
+    const cc = new TestClient(t.port); await cc.ready();
+    assert.equal((await cc.req("login", { uuid: "conn-1", area: "connection" })).ok, true);
+    const snap = await req("admin_snapshot");
+    const byId = new Map((snap.snapshotAccounts as any[]).map((a) => [a.uuid, a]));
+    assert.equal(byId.get("conn-1").area, "connection");
+    assert.equal("area" in byId.get("loc-1"), false);
+    lc.close(); cc.close(); t.c.close();
+  } finally { t.hub.stop(); }
+});
+
+test("admin_conn_status_lists_remote_comms_accounts: 통신 상태에 다른 PC의 연결 계정(방식 2), 퇴출하면 사라짐", async () => {
+  const A = await hubWithToken();
+  const B = await hubWithToken();
+  try {
+    const req = (h: typeof A, op: string, p: object = {}) => (h.c.req(op, { token: h.token, ...p }) as Promise<any>);
+    await req(A, "admin_conn_set_user", { name: "에이" });
+    await req(A, "admin_conn_enable_server", { port: await freePort(), bindHost: "127.0.0.1", profile: "tls13-chacha20", spaceName: "팀", burnOnJoin: false });
+    const inv = await req(A, "admin_conn_create_invite", { label: "비", host: "127.0.0.1", expiresInMs: 60_000 });
+    await req(B, "admin_conn_set_user", { name: "비" });
+    assert.equal((await req(B, "admin_conn_join", { code: inv.code })).ok, true);
+    for (let i = 0; i < 150; i++) { if ((await req(B, "admin_conn_status")).joined[0]?.connected) break; await new Promise((r) => setTimeout(r, 20)); }
+    const bc = new TestClient(B.port); await bc.ready();
+    assert.equal((await bc.req("login", { uuid: "b-conn", name: "비서", area: "connection" })).ok, true);
+    const ac = new TestClient(A.port); await ac.ready();
+    assert.equal((await ac.req("login", { uuid: "a-conn", name: "에이전트", area: "connection" })).ok, true);
+    let sa: any, sb: any;
+    for (let i = 0; i < 200; i++) {
+      sa = await req(A, "admin_conn_status"); sb = await req(B, "admin_conn_status");
+      if (sa.remoteAccounts?.some((x: any) => x.name === "비서") && sb.remoteAccounts?.some((x: any) => x.name === "에이전트")) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    const ra = sa.remoteAccounts.find((x: any) => x.name === "비서");
+    assert.ok(ra, "A가 B의 연결 계정을 본다");
+    assert.equal(ra.remote.hubUser, "비");
+    assert.equal(typeof ra.online, "boolean");
+    const rb = sb.remoteAccounts.find((x: any) => x.name === "에이전트");
+    assert.ok(rb, "B가 참여한 A의 연결 계정을 본다");
+    assert.equal(rb.remote.spaceName, "팀");
+    assert.equal(sa.remoteAccounts.some((x: any) => x.uuid === "a-conn"), false, "내 계정은 다른 PC 목록에 없음");
+    assert.equal((await req(A, "admin_conn_revoke", { memberId: sa.members[0].memberId })).ok, true);
+    assert.equal((await req(A, "admin_conn_status")).remoteAccounts.some((x: any) => x.name === "비서"), false);
+    bc.close(); ac.close(); A.c.close(); B.c.close();
+  } finally { A.hub.stop(); B.hub.stop(); }
+});
