@@ -4,6 +4,8 @@ import { Hub } from "./server.js";
 import { resolveOptions, explainStartupError } from "./options.js";
 import { hubMsg } from "./messages.js";
 import { currentLang } from "../shared/langConfig.js";
+import { fileURLToPath } from "node:url";
+import { launchInfo } from "./launchInfo.js";
 
 async function main(): Promise<void> {
   const opts = resolveOptions(process.env);
@@ -39,7 +41,7 @@ async function main(): Promise<void> {
   try {
     fs.writeFileSync(
       opts.infoPath,
-      JSON.stringify({ tcpPort: opts.tcpPort, httpPort: opts.httpPort, pid: process.pid, startedAt: Date.now() }, null, 2),
+      JSON.stringify({ tcpPort: opts.tcpPort, httpPort: opts.httpPort, pid: process.pid, startedAt: Date.now(), launch: launchInfo({ execPath: process.execPath, execArgv: process.execArgv, entry: fileURLToPath(import.meta.url), env: process.env }) }, null, 2),
     );
   } catch {
     // 정보 파일 실패는 치명적이지 않다
