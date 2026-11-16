@@ -276,7 +276,7 @@ test("K: 뷰어 명령과 관리 앱 탭은 문서와 같다", () => {
   assert.ok(k.includes(viewer));
   const admin = src("docs/admin-app.md");
   for (const tab of ["Security", "Trash"]) assert.ok(admin.includes(`**${tab}**`), tab);
-  assert.match(k, /security tab/);
+  assert.match(k, /Security screen/);
   assert.match(k, /treat it as unconfirmed/);
 });
 
