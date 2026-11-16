@@ -11,9 +11,11 @@ import { checkLaunch, startHub, type SpawnLike } from "./hubStart.js";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const HUB_ENTRY_TS = path.join(REPO, "hub", "index.ts");
 
-function dirWith(launch: unknown, raw?: string): string {
+/** 시험 데이터 폴더: hub.json + (marker면) Hub가 잠근 표식 secured.json. */
+function dirWith(launch: unknown, raw?: string, marker = false): string {
   const d = tempDir("uplink-hubstart-");
   fs.writeFileSync(path.join(d, "hub.json"), raw ?? JSON.stringify({ tcpPort: 1, httpPort: 2, pid: 1, startedAt: 0, ...(launch === undefined ? {} : { launch }) }));
+  if (marker) fs.writeFileSync(path.join(d, "secured.json"), "{}");
   return d;
 }
 const good = (over: object = {}) => ({ execPath: process.execPath, execArgv: ["--import", "tsx"], entry: HUB_ENTRY_TS, env: { UPLINK_IDLE_MINUTES: "0.05" }, ...over });
@@ -56,7 +58,7 @@ test("check_launch_rejects_relative_or_missing_paths: 상대 경로·없는 파�
     { entry: path.join(REPO, "hub", "server.ts") }, // hub/index가 아님
     { entry: path.join(REPO, "cli", "index.ts") },
   ]) assert.deepEqual(checkLaunch(dirWith(good(over))), { ok: false, code: "launch_untrusted" }, JSON.stringify(over));
-  const ok = checkLaunch(dirWith(good()));
+  const ok = checkLaunch(dirWith(good(), undefined, true));
   assert.equal(ok.ok, true);
 });
 
@@ -72,9 +74,9 @@ test("start_hub_uses_arg_array_without_shell: 셸 없이 인자 배열로, 진�
   fs.mkdirSync(weird, { recursive: true });
   const entry = path.join(weird, "index.js");
   fs.writeFileSync(entry, "");
-  const d = dirWith(good({ entry, env: { UPLINK_TCP_PORT: "47999" } }));
+  const d = dirWith(good({ entry, env: { UPLINK_TCP_PORT: "47999" } }), undefined, true);
   const f = fakeSpawn();
-  const r = await startHub(target(d), { spawn: f.spawn, isUp: async () => false });
+  const r = await startHub(target(d), { spawn: f.spawn, isUp: async () => false, owners: async () => true });
   assert.deepEqual(r, { ok: true, started: true });
   assert.equal(f.calls.length, 1);
   assert.equal(f.calls[0].cmd, process.execPath);
@@ -100,13 +102,13 @@ test("start_hub_untrusted_does_not_spawn: 믿을 수 없는 실행 정보면 실
 });
 
 test("start_hub_twice_spawns_once: 동시에 두 번 눌러도 한 번만 띄운다", async () => {
-  const d = dirWith(good());
+  const d = dirWith(good(), undefined, true);
   const f = fakeSpawn();
   let release!: () => void;
   const gate = new Promise<void>((r) => { release = r; });
   const isUp = async () => { await gate; return false; };
-  const p1 = startHub(target(d), { spawn: f.spawn, isUp });
-  const p2 = startHub(target(d), { spawn: f.spawn, isUp });
+  const p1 = startHub(target(d), { spawn: f.spawn, isUp, owners: async () => true });
+  const p2 = startHub(target(d), { spawn: f.spawn, isUp, owners: async () => true });
   release();
   const [r1, r2] = await Promise.all([p1, p2]);
   assert.equal(f.calls.length, 1);
@@ -116,6 +118,7 @@ test("start_hub_twice_spawns_once: 동시에 두 번 눌러도 한 번만 띄운
 test("start_hub_real_spawn_reaches_hello: 실행 정보로 실제 Hub를 띄우면 관리 접속이 된다", async () => {
   const d = tempDir("uplink-hubstart-real-");
   const port = await freePort();
+  fs.writeFileSync(path.join(d, "secured.json"), "{}"); // 실제 소유자 검사(PowerShell)를 거친다 — 내가 만든 폴더
   fs.writeFileSync(path.join(d, "hub.json"), JSON.stringify({ launch: good({ env: { UPLINK_DATA_DIR: d, UPLINK_TCP_PORT: String(port), UPLINK_HTTP_PORT: String(await freePort()), UPLINK_IDLE_MINUTES: "0.05" } }) }));
   const probe = () => new Promise<boolean>((res) => { const s = net.connect(port, "127.0.0.1"); s.once("connect", () => { s.destroy(); res(true); }); s.once("error", () => res(false)); });
   const r = await startHub(target(d, port), { isUp: probe });
@@ -137,4 +140,44 @@ test("start_hub_real_spawn_reaches_hello: 실행 정보로 실제 Hub를 띄우�
   } finally {
     if (pid) try { process.kill(pid); } catch { /* 이미 종료 */ }
   }
+});
+
+// ───── v3.1 최종 리뷰 Critical: 남이 만든 hub.json·실행 인자 막기 ─────
+import { ownersTrusted } from "./hubStart.js";
+const securedDir = (launch: unknown) => dirWith(launch, undefined, true);
+
+test("check_launch_rejects_exec_argv_not_allowlisted: 실행 인자는 없음 또는 --import tsx만(-e·--require·--inspect 거부)", () => {
+  for (const argv of [["-e", "require('child_process').exec('calc')"], ["--require", "evil.js"], ["--inspect=0.0.0.0:9229"], ["--import", "./evil.mjs"], ["--import", "tsx", "--inspect"]]) {
+    assert.deepEqual(checkLaunch(securedDir(good({ execArgv: argv }))), { ok: false, code: "launch_untrusted" }, JSON.stringify(argv));
+  }
+  assert.equal(checkLaunch(securedDir(good({ execArgv: [] }))).ok, true);
+  assert.equal(checkLaunch(securedDir(good())).ok, true);
+});
+
+test("check_launch_requires_secured_marker: Hub가 잠근 적 없는 폴더(secured.json 없음)의 hub.json은 믿지 않는다", () => {
+  assert.deepEqual(checkLaunch(dirWith(good())), { ok: false, code: "launch_untrusted" });
+});
+
+test("start_hub_rejects_foreign_owner: 데이터 폴더·hub.json·표식의 소유자가 나·관리자·SYSTEM이 아니면 실행하지 않는다", async () => {
+  const d = securedDir(good());
+  const f = fakeSpawn();
+  const seen: string[][] = [];
+  const r = await startHub(target(d), { spawn: f.spawn, isUp: async () => false, owners: async (p) => { seen.push(p); return false; } });
+  assert.deepEqual(r, { ok: false, code: "launch_untrusted" });
+  assert.equal(f.calls.length, 0);
+  assert.deepEqual(seen[0].map((p) => path.basename(p)).sort(), [path.basename(d), "hub.json", "secured.json"].sort());
+});
+
+test("start_hub_sets_cwd_to_entry_dir: Hub는 진입 파일 폴더에서 실행(관리 앱 임시 폴더를 잡지 않게)", async () => {
+  const d = securedDir(good());
+  const f = fakeSpawn();
+  assert.deepEqual(await startHub(target(d), { spawn: f.spawn, isUp: async () => false, owners: async () => true }), { ok: true, started: true });
+  assert.equal(f.calls[0].opts.cwd, path.dirname(HUB_ENTRY_TS));
+});
+
+test("owners_trusted_real_check: 내가 만든 폴더·파일은 믿고(Windows), 없는 경로는 믿지 않는다", async (t) => {
+  if (process.platform !== "win32") { t.skip("Windows 전용"); return; }
+  const d = securedDir(good());
+  assert.equal(await ownersTrusted([d, path.join(d, "hub.json"), path.join(d, "secured.json")]), true);
+  assert.equal(await ownersTrusted([path.join(d, "nope.json")]), false);
 });
