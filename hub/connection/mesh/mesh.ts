@@ -843,6 +843,9 @@ export class Mesh {
 
   stop(): void {
     clearInterval(this.verifyTimer);
+    // 기다리던 중계 쓰기는 바로 끝낸다 — 응답 타이머(최대 15초)가 Hub 종료를 붙잡지 않게(각 resolver가 자기 타이머를 지움)
+    for (const resolve of [...this.pendingRelay.values()]) resolve({ ok: false, code: "relay_stopped" });
+    this.pendingRelay.clear();
     for (const l of [...this.links]) l.ch.close();
     this.links.clear();
   }

@@ -64,12 +64,17 @@ test("시작 시간: 꽉 찬 채널 4개(1,000건 × 한글 1,400자) 적재가 
     for (let i = 1; i <= 1000; i++) lines.push(JSON.stringify({ seq: i, ts: i, channelId: id, from: "u1", fromName: "기획", text: body }));
     fs.writeFileSync(path.join(dir, "servers", `${id}.jsonl`), lines.join(String.fromCharCode(10)) + String.fromCharCode(10));
   }
-  const t0 = performance.now();
-  const s = new ChannelStore({ dir });
-  for (const id of ids) s.register({ id, kind: "server", label: `S/${id.slice(0, 4)}`, members: null });
-  const ms = performance.now() - t0;
+  // 부하가 걸린 PC에서 가끔 실패하던 절대 시간 비교 대신(v3.1): 같은 파일을 그냥 읽고 푸는 기준 시간과 비교하고, 3번 중 가장 빠른 값을 쓴다.
+  // 감독 검사가 줄마다 무거워지면(v2.1.2 때 문제) 기준의 여러 배로 늘어나 여전히 잡힌다.
+  const best = (fn: () => void) => Math.min(...[0, 1, 2].map(() => { const t = performance.now(); fn(); return performance.now() - t; }));
+  const base = best(() => { for (const id of ids) for (const l of fs.readFileSync(path.join(dir, "servers", `${id}.jsonl`), "utf8").split(String.fromCharCode(10))) if (l) JSON.parse(l); });
+  let s!: ChannelStore;
+  const ms = best(() => {
+    s = new ChannelStore({ dir });
+    for (const id of ids) s.register({ id, kind: "server", label: `S/${id.slice(0, 4)}`, members: null });
+  });
   assert.equal(s.recent(ids[3], 1)[0].seq, 1000);
-  assert.ok(ms < 1500, `적재 ${ms.toFixed(0)}ms (MCP의 Hub 기동 대기는 약 3초)`);
+  assert.ok(ms < Math.max(1500, base * 8), `적재 ${ms.toFixed(0)}ms, 기준(읽기·풀기) ${base.toFixed(0)}ms (MCP의 Hub 기동 대기는 약 3초)`);
 });
 
 test("prune: 고른 메시지만 파일·메모리에서 지우고, 다음 append는 seq를 이어 간다(v3.0 로컬 정리)", () => {

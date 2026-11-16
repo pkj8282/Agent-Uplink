@@ -149,3 +149,17 @@ test("ack_for_unapproved_target_no_strike: 일부 서버만 승인한 망에서 
   assert.equal(d.logs.includes("mesh_link_dropped"), false);
   assert.equal(d.mesh.links.size, 1);
 });
+
+test("stop_resolves_pending_relay_immediately: 망을 멈추면 기다리던 중계 쓰기가 바로 relay_stopped로 끝난다(종료가 15초 늦지 않게)", async () => {
+  const a = node("에이", "spA", { relayTimeoutMs: 10_000 }), c = node("씨", "spC"), d = node("디", "spD");
+  const dch = d.addChannel("디 일반");
+  connect(a, c); const cutCD = connect(c, d);
+  await until(() => a.mesh.servers().some((s) => s.spaceId === "spD" && s.channels.length === 1));
+  cutCD();
+  await settle(20);
+  const p = a.mesh.relayWrite({ mirrorId: a.mesh.mirrorId("spD", dch), from: "b1", fromName: "비AI", hubUser: "비", text: "기다림" });
+  const t0 = Date.now();
+  a.mesh.stop();
+  assert.deepEqual(await p, { ok: false, code: "relay_stopped" });
+  assert.ok(Date.now() - t0 < 100, `${Date.now() - t0}ms`);
+});
