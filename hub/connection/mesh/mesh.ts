@@ -154,6 +154,8 @@ export interface MeshLink {
   recTimes: number[];
   otherTimes: number[];
   verifyTimes: number[];
+  /** 인증 메시지 예산을 서명 서버별로(v3.1, 3차 재공격 Minor 5) — 한 이웃의 폭주가 같은 연결로 온 다른 서버의 인증을 막지 못하게. */
+  verifyTimesBy: Map<string, number[]>;
   attachedAt: number;
 }
 
@@ -194,6 +196,10 @@ const ATTACH_WINDOW_MS = 5_000;
 const ATTACH_PER_SECOND = 1000;
 /** 인증 질문·답: 별도 예산과 크기 상한(발신자를 몰라도 전달되므로 작게). */
 const VERIFY_PER_SECOND = 100;
+/** 서명 검증 전 연결 전체 상한(검증 비용을 묶는다). 서버별 몫(VERIFY_PER_SECOND)은 서명 확인 뒤에 센다. */
+const VERIFY_PER_LINK_PER_SECOND = 1000;
+/** 연결마다 기억하는 서명 서버 수(넘치면 가장 오래된 것부터 잊음). */
+const VERIFY_SIGNERS_PER_LINK = 64;
 const VERIFY_MAX_BYTES = 4096;
 /** 갈라짐 알림은 서버당 이 시간에 이 개수까지. */
 const FORK_ALERT_WINDOW_MS = 10 * 60_000;
@@ -628,6 +634,18 @@ export class Mesh {
   }
 
   /** 인증 질문·답을 꺼낸다(서명 밖 필드 제거, 크기 상한). */
+  /** 서명을 확인한 인증 메시지를 서명 서버별 몫에 센다(v3.1, 3차 재공격 Minor 5). 넘치면 false. */
+  private chargeVerify(l: MeshLink, signer: string): boolean {
+    const now = this.now;
+    const mine = (l.verifyTimesBy.get(signer) ?? []).filter((t) => now - t < 1000);
+    if (mine.length >= VERIFY_PER_SECOND) { this.deps.log("mesh_drop_verify_rate", { spaceId: l.info.spaceId }); return false; }
+    mine.push(now);
+    l.verifyTimesBy.delete(signer);
+    l.verifyTimesBy.set(signer, mine); // 최근에 쓴 서명자를 뒤로
+    if (l.verifyTimesBy.size > VERIFY_SIGNERS_PER_LINK) l.verifyTimesBy.delete(l.verifyTimesBy.keys().next().value!);
+    return true;
+  }
+
   private verifyMessage(e: { [k: string]: unknown }): unknown | null {
     const m = this.sanitize(e.m);
     if (m === null) return null;
@@ -641,6 +659,7 @@ export class Mesh {
     const signer = (m as Signed).signer;
     if (!b || typeof b.verifier !== "string" || typeof b.prover !== "string" || typeof b.challenge !== "string" || b.challenge.length > 128 || typeof b.ts !== "number") return;
     if (this.deps.originOf && this.deps.originOf(signer) !== b.verifier) return;
+    if (!this.chargeVerify(from, signer)) return;
     if (!this.firstSeen("v", `vchal:${b.challenge}:${signer}`)) return; // 서명자별 — 다른 서버가 같은 질문값으로 선점하지 못하게
     const self = this.deps.self();
     if (b.prover !== self.spaceId) return this.forwardVerify(e, m, from);
@@ -660,6 +679,7 @@ export class Mesh {
     const signer = (m as Signed).signer;
     if (!b || typeof b.verifier !== "string" || typeof b.prover !== "string" || typeof b.cid !== "string" || typeof b.challenge !== "string" || b.challenge.length > 128 || !b.sealed || typeof b.sealed !== "object") return;
     if (this.deps.originOf && this.deps.originOf(signer) !== b.prover) return;
+    if (!this.chargeVerify(from, signer)) return;
     if (!this.firstSeen("v", `vresp:${b.challenge}:${signer}`)) return; // 서명자별 — 다른 서버의 가짜 답이 진짜 답을 태우지 못하게
     if (b.verifier !== this.deps.self().spaceId) return this.forwardVerify(e, m, from);
     const pending = this.pendingVerify.get(b.challenge);
@@ -798,7 +818,7 @@ export class Mesh {
     if (this.deps.originOf && this.deps.originOf(info.serverKey) !== info.spaceId) {
       this.deps.log("mesh_reject_origin_mismatch", { spaceId: info.spaceId });
       ch.close();
-      return { info, ch, strikes: 0, recTimes: [], otherTimes: [], verifyTimes: [], attachedAt: this.now };
+      return { info, ch, strikes: 0, recTimes: [], otherTimes: [], verifyTimes: [], verifyTimesBy: new Map(), attachedAt: this.now };
     }
     if (this.pins[info.spaceId] && this.pins[info.spaceId] !== info.serverKey) {
       this.deps.log("mesh_key_conflict_direct_wins", { spaceId: info.spaceId });
@@ -811,7 +831,7 @@ export class Mesh {
     }
     this.cands.delete(info.spaceId);
     this.rejected.delete(info.spaceId);
-    const l: MeshLink = { info, ch, strikes: 0, recTimes: [], otherTimes: [], verifyTimes: [], attachedAt: this.now };
+    const l: MeshLink = { info, ch, strikes: 0, recTimes: [], otherTimes: [], verifyTimes: [], verifyTimesBy: new Map(), attachedAt: this.now };
     if (this.deps.policy?.blocked(info.spaceId)) {
       this.deps.log("mesh_blocked_link", { spaceId: info.spaceId });
       ch.close();
@@ -936,8 +956,9 @@ export class Mesh {
   private onEvent(l: MeshLink, e: { event: string; [k: string]: unknown }): void {
     if (e.event === "v_chal" || e.event === "v_resp") {
       const now = this.now;
+      // 서명 검증 전 단계는 연결 전체 상한만(검증 비용 상한). 서버별 몫은 서명을 확인한 뒤 chargeVerify에서.
       l.verifyTimes = l.verifyTimes.filter((t) => now - t < 1000);
-      if (l.verifyTimes.length >= VERIFY_PER_SECOND) { this.deps.log("mesh_drop_verify_rate", { spaceId: l.info.spaceId }); return; }
+      if (l.verifyTimes.length >= VERIFY_PER_LINK_PER_SECOND) { this.deps.log("mesh_drop_verify_rate", { spaceId: l.info.spaceId }); return; }
       l.verifyTimes.push(now);
     } else if (e.event !== "rec") {
       const now = this.now;

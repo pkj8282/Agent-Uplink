@@ -349,3 +349,45 @@ test("per_link_cap_keeps_candidate_known_elsewhere: 연결별 상한으로 밀�
   await settle();
   assert.equal(candidate(d, "realX")?.via, "spR");
 });
+
+// ───── v3.1: 3차 재공격 Minor 5 — 인증 예산을 서명 서버별로 ─────
+function attachedNeighbor(target: Node, id = "spM") {
+  const keys = generateSigningKeys();
+  registerKey(id, keys.publicKeyB64);
+  const seen: any[] = [];
+  const [x, y] = LinkChannel.memoryPair();
+  x.setHandlers({ onRequest: (_r, reply) => reply({ ok: true, heads: [], records: [] }), onEvent: (e) => { seen.push(e); } });
+  target.mesh.attach({ spaceId: id, spaceName: "엠", serverKey: keys.publicKeyB64 }, y);
+  return { keys, seen, send: (e: object) => x.event(e as { event: string }) };
+}
+
+test("verify_flood_by_neighbor_does_not_starve_others: 승인된 이웃이 자기 인증 질문을 쏟아부어도 같은 연결로 온 다른 서버의 질문은 처리된다", async () => {
+  const t = Date.now();
+  const a = node("에이", "spA", { ...fast, now: () => t }, manual), c = node("씨", "spC", fast, manual);
+  a.mesh.registerVerifyCode(c.mesh.issueVerifyCode("에이용"));
+  const m = attachedNeighbor(a);
+  for (let i = 0; i < 300; i++) m.send({ event: "v_chal", ttl: 1, m: signMesh("vchal", { verifier: "spM", prover: "spA", challenge: `flood-${i}`, ts: t }, m.keys) });
+  m.send({ event: "v_chal", ttl: 1, m: signMesh("vchal", { verifier: "spC", prover: "spA", challenge: "real", ts: t }, c.keys) });
+  await until(() => m.seen.some((e) => e.event === "v_resp"));
+});
+
+test("verify_link_total_cap_holds: 서명자 값을 계속 바꿔도 한 연결의 인증 메시지는 초당 1000개까지만", async () => {
+  const t = Date.now();
+  const a = node("에이", "spA", { now: () => t }, manual);
+  const m = attachedNeighbor(a);
+  for (let i = 0; i < 1300; i++) m.send({ event: "v_chal", ttl: 1, m: { body: { verifier: `x${i}`, prover: "spZ", challenge: `c${i}`, ts: t }, signer: `fake-signer-${i}`, sig: "AA" } });
+  await settle();
+  const dropped = a.logs.filter((l) => l === "mesh_drop_verify_rate").length;
+  assert.ok(dropped >= 300, `버려진 수 ${dropped}`);
+});
+
+test("verify_forged_signer_does_not_burn_victim_budget: 남의 키를 서명자로 단 가짜(서명 틀림)는 그 서버 몫을 태우지 못한다", async () => {
+  const t = Date.now();
+  const a = node("에이", "spA", { ...fast, now: () => t }, manual), c = node("씨", "spC", fast, manual);
+  a.mesh.registerVerifyCode(c.mesh.issueVerifyCode("에이용"));
+  const m = attachedNeighbor(a);
+  const real = signMesh("vchal", { verifier: "spC", prover: "spA", challenge: "real2", ts: t }, c.keys) as any;
+  for (let i = 0; i < 300; i++) m.send({ event: "v_chal", ttl: 1, m: { ...signMesh("vchal", { verifier: "spC", prover: "spA", challenge: `fake-${i}`, ts: t }, m.keys), signer: real.signer } });
+  m.send({ event: "v_chal", ttl: 1, m: real });
+  await until(() => m.seen.some((e) => e.event === "v_resp"));
+});
