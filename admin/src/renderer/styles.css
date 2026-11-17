@@ -102,3 +102,4 @@ body[data-i18n-pending] .top, body[data-i18n-pending] .layout, body[data-i18n-pe
 #mesh-case-standby { border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; margin: 0; }
 #mesh-case-standby legend { padding: 0 4px; color: var(--muted); font-size: 13px; }
 #mesh-body > h2:first-child { margin-top: 14px; }
+.hubaddr { margin-left: 14px; color: var(--muted); font-size: 12px; font-family: Consolas, monospace; }

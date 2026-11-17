@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("admin", {
   openViewer: () => ipcRenderer.invoke("admin:openViewer"),
   startHub: () => ipcRenderer.invoke("admin:startHub"),
   launchAvailable: () => ipcRenderer.invoke("admin:launchAvailable"),
+  hubInfo: () => ipcRenderer.invoke("admin:hubInfo"),
   getLanguage: () => ipcRenderer.invoke("admin:getLanguage"),
   setLanguage: (lang: string) => ipcRenderer.invoke("admin:setLanguage", lang),
   connStatus: () => ipcRenderer.invoke("admin:connStatus"),

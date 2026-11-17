@@ -27,6 +27,8 @@ npm run dist     # → admin/release/AgentUplinkAdmin-<version>-portable.exe
 
 The app connects to the running hub on `127.0.0.1:47800`. If the hub is not running, the app shows that in the middle of the window with a **Start hub manually** button (see [Starting the hub](#starting-the-hub)). While the app window is open, the hub does not shut down for being idle. The app and the hub must speak the same protocol: the app from v2.0.2 on needs a hub from v2.0.2 on, and asks you to restart an older hub that is still running.
 
+Next to the title, the app shows which hub it is connected to — `127.0.0.1` and the hub's port (47800 unless you changed `UPLINK_TCP_PORT`). That is not the **connection server port** under **Multi Connection → Connections**, which is where other PCs connect.
+
 **Open viewer** at the top opens the [log viewer](viewer.md) in your default browser. The round-arrow button next to it is **Refresh** (hover it to see the label).
 
 ## Starting the hub

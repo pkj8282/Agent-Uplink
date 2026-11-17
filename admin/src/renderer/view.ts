@@ -640,3 +640,8 @@ export function peerLine(r: PeerRow): { kind: string; name: string; detail: stri
 export function sharedServerIds(st: ConnStatus | null): Set<string> {
   return new Set((st?.spaces1 ?? []).filter((s) => s.role === "owner" && s.localServerId).map((s) => s.localServerId!));
 }
+
+/** 맨 위 줄: 지금 붙은 이 PC의 Hub(통신 서버 포트와 헷갈리지 않게, v3.1). */
+export function hubAddressLine(port: number): string {
+  return tr("hub_addr", { port });
+}

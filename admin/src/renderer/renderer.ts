@@ -8,7 +8,7 @@ import {
   parseMeshCaseForm, meshCaseLabel, meshUploadLine, meshInviteConfirm, meshRemoveConfirm, meshAcceptConfirm, meshUnacceptConfirm, meshCommandWhat, meshCommandConfirm,
   parseRestoreForm, backupCandidateLine, backupRestoreConfirm, backupRestoreDone,
   meshCandidateConfirm, meshCandidateRejectConfirm, meshForgetConfirm, parseVerifyLabel, parseVerifyCodeInput,
-  splitAccounts, multiChannels, multiPeers, multiChannelLine, peerLine, sharedServerIds,
+  splitAccounts, multiChannels, multiPeers, multiChannelLine, peerLine, sharedServerIds, hubAddressLine,
 } from "./view.js";
 import type { FormMessage } from "./view.js";
 import { NAV, panelId, isMultiView, parseNavMemory, type NavMemory, type SectionId } from "./nav.js";
@@ -993,8 +993,12 @@ byId<HTMLFormElement>("config-form").addEventListener("submit", async (e) => {
 
 // --- 언어 ---
 
+/** 이 관리 앱이 붙는 Hub 포트(맨 위 줄 표시). boot에서 한 번 받는다. */
+let hubPort: number | null = null;
+
 /** index.html의 고정 라벨(data-i18n)과 창 제목·lang을 현재 언어로 채운다. 언어 이름은 두 언어 공통(PICKER). */
 function applyStatic(): void {
+  byId("hub-addr").textContent = hubPort === null ? "" : hubAddressLine(hubPort);
   for (const e of document.querySelectorAll<HTMLElement>("[data-i18n]")) e.textContent = tr(e.dataset.i18n as AdminKey);
   for (const e of document.querySelectorAll<HTMLElement>("[data-i18n-aria]")) e.setAttribute("aria-label", tr(e.dataset.i18nAria as AdminKey));
   for (const e of document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-i18n-ph]")) e.placeholder = tr(e.dataset.i18nPh as AdminKey);
@@ -1051,6 +1055,8 @@ byId<HTMLSelectElement>("cfg-lang").addEventListener("change", async (e) => {
 });
 
 async function boot(): Promise<void> {
+  const hi = await window.admin.hubInfo();
+  if (hi.ok) hubPort = hi.data.port;
   const g = await window.admin.getLanguage();
   const setting = g.ok ? g.data : "N/A";
   let saveError: string | null = null;

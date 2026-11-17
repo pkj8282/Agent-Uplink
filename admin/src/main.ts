@@ -82,6 +82,7 @@ handle("admin:startHub", () => toResult(async () => {
   if (!r.ok) throw new HubOpError(msg(r.code === "launch_untrusted" ? "hub_start_untrusted" : r.code === "no_launch_info" ? "hubdown_no_launch" : "hub_start_failed"), r.code);
   return { started: r.started };
 }));
+handle("admin:hubInfo", async () => ({ ok: true, data: { port: target.port } }));
 handle("admin:launchAvailable", async () => { const c = await launchStatus(dataDir); return { ok: true, data: { code: c.ok ? null : c.code } }; });
 // 언어: Hub가 꺼져 있어도 동작해야 한다(첫 실행 언어 선택) — 읽기는 파일, 쓰기는 Hub가 켜져 있으면 Hub로(기록자는 Hub), 꺼져 있으면 파일에 직접.
 handle("admin:getLanguage", async () => ({ ok: true, data: readLanguageFile(dataDir) }));

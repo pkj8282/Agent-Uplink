@@ -789,3 +789,26 @@ test("multi_channels_joined_and_only_shared_own: 참여한 남의 통신 채널�
   } as unknown as ConnStatus;
   assert.deepEqual(multiChannels(st).map((r) => [r.serverName, r.channelName, r.deletable]), [["남의서버", "일정", false], ["망만", "c", true], ["공유함", "a", true]].sort((x, y) => String(x[0]).localeCompare(String(y[0]), "ko")));
 });
+
+// ───── v3.1: 포트 혼동 줄이기(사용자 GUI 확인 때 지적) ─────
+import { hubAddressLine } from "./view.js";
+
+test("hub_address_line_ko_en: 맨 위 줄에 지금 붙은 이 PC의 Hub 주소", () => {
+  setLang("ko");
+  assert.equal(hubAddressLine(47800), "이 PC의 Hub · 127.0.0.1:47800");
+  setLang("en");
+  assert.equal(hubAddressLine(47980), "This PC's hub · 127.0.0.1:47980");
+  setLang("ko");
+});
+
+test("conn_port_label_says_connection_server: 통신 서버 포트 칸은 Hub 포트와 헷갈리지 않게 '다른 PC가 붙는 곳'을 말한다", () => {
+  setLang("ko");
+  assert.match(tr("conn_port"), /통신 서버 포트/);
+  assert.match(tr("conn_port"), /다른 PC/);
+  assert.match(tr("conn_state_on", { port: 57110, profile: "tls13-chacha20" }), /통신 서버 포트 57110/);
+  setLang("en");
+  assert.match(tr("conn_port"), /Connection server port/);
+  assert.match(tr("conn_port"), /other PCs/);
+  assert.match(tr("conn_state_on", { port: 57110, profile: "tls13-chacha20" }), /connection server port 57110/);
+  setLang("ko");
+});

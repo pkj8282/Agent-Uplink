@@ -35,3 +35,7 @@ test("hubdown_block_centered: Hub 꺼짐 화면은 가운데 문구+시작 버�
   assert.match(css, /body:not\(\[data-state="hubdown"\]\)\s+\.hubdown\s*\{\s*display:\s*none/);
   assert.match(css, /body\[data-state="hubdown"\]\s+\.side,\s*body\[data-state="hubdown"\]\s+main\s*\{\s*display:\s*none/);
 });
+
+test("hub_address_in_header: 맨 위 줄에 붙은 Hub 주소 자리(제목 옆)", () => {
+  assert.match(html, /<h1>Agent Uplink<\/h1>\s*<span id="hub-addr" class="hubaddr"><\/span>/);
+});
