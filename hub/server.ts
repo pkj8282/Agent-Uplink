@@ -229,6 +229,7 @@ export class Hub {
       maxChannelsPerServer: () => this.config.maxChannelsPerServer,
       lang: () => this.lang(),
       comms: () => this.conn.trashDeps(),
+      memberships: this.memberships,
     });
     // 크래시로 중단된 삭제·복원을 먼저 마무리한다 — 이후 DM 재조정이 삭제 중이던 계정을 되살리지 않도록.
     this.trashOps.recoverPending();
@@ -1150,9 +1151,18 @@ export class Hub {
           snapshotDms: this.dm.all().map((r) => ({ channelId: r.channelId, members: [...r.members], label: r.label })),
           trash: this.trash.list(),
           securityFindings: this.security.recent(100),
+          memberships: this.memberships.all(), // 서버 참가자 종합 리스트(서버 관점, v3.1.1)
           // 손상 원본을 백업하지 못해 이번 실행 동안 저장을 멈춘 색인(데이터 폴더 기준, v3 Minor ①).
           saveBlocked: ([[this.dm, "dm"], [this.servers, "servers"]] as const).filter(([s]) => s.saveBlocked).map(([, sub]) => `${sub}/index.json`),
         });
+        return;
+      }
+
+      case "admin_sync_memberships": {
+        if (!adminAuth()) return;
+        // 혹시 모를 꼬임 대비: 없는 서버 줄·없는 계정 삭제, 새 서버는 빈 줄(기록을 다시 훑어 참가시키지는 않음)
+        const real = [...this.servers.listServers().map((s) => s.id), ...this.conn.space1ServersFor().map((s) => s.serverId)];
+        reply({ ok: true, ...this.memberships.sync({ servers: real, accounts: this.accounts.allUuids() }) });
         return;
       }
 

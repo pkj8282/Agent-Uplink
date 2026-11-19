@@ -134,3 +134,92 @@ test("restored_channel_still_filtered: 휴지통에서 되살린 서버 채널�
     adm.close();
   } finally { s.t.hub.stop(); }
 });
+
+// ───── Task 3: 계정·서버 삭제·복원 때 리스트 편집, 동기화 ─────
+async function admin(t: { port: number; dataDir: string }) {
+  const token = fs.readFileSync(path.join(t.dataDir, "admin.key"), "utf8").trim();
+  const c = new TestClient(t.port); await c.ready();
+  return { c, req: (op: string, p: object = {}) => c.req(op, { token, ...p }) as Promise<any> };
+}
+const memFile = (dir: string) => JSON.parse(fs.readFileSync(path.join(dir, "memberships.json"), "utf8")).servers as Record<string, string[]>;
+const trashIdOf = async (adm: Awaited<ReturnType<typeof admin>>, kind: string) => (await adm.req("admin_snapshot")).trash.find((x: any) => x.kind === kind).id;
+
+test("delete_server_removes_row_restore_brings_back: 서버를 지우면 줄이 빠지고, 되살리면 참가자도 돌아온다", async () => {
+  const s = await twoServers();
+  try {
+    await s.a.req("join_server", { serverId: s.sb });
+    const adm = await admin(s.t);
+    assert.equal((await adm.req("admin_delete_server", { serverId: s.sb })).ok, true);
+    assert.equal(s.sb in memFile(s.t.dataDir), false);
+    assert.equal((await adm.req("admin_restore_trash", { trashId: await trashIdOf(adm, "server") })).ok, true);
+    assert.deepEqual(memFile(s.t.dataDir)[s.sb].sort(), ["a", "b"]);
+    await s.b.req("send", { channelId: s.cb, text: "되살린 서버" });
+    assert.deepEqual(texts(await s.a.req("check")), ["되살린 서버"]);
+    adm.c.close();
+  } finally { s.t.hub.stop(); }
+});
+
+test("delete_account_removes_everywhere_restore_brings_back: 계정을 지우면 모든 서버에서 빠지고, 되살리면 다시 들어간다", async () => {
+  const s = await twoServers();
+  try {
+    await s.a.req("join_server", { serverId: s.sb });
+    const adm = await admin(s.t);
+    assert.equal((await adm.req("admin_delete_account", { uuid: "a" })).ok, true);
+    const m1 = memFile(s.t.dataDir);
+    assert.equal(m1[s.sa].includes("a") || m1[s.sb].includes("a"), false);
+    assert.equal((await adm.req("admin_restore_trash", { trashId: await trashIdOf(adm, "account") })).ok, true);
+    const m2 = memFile(s.t.dataDir);
+    assert.equal(m2[s.sa].includes("a") && m2[s.sb].includes("a"), true);
+    adm.c.close();
+  } finally { s.t.hub.stop(); }
+});
+
+test("restore_skips_vanished: 서버를 되살릴 때 그 사이 지워진 계정은 넣지 않는다", async () => {
+  const s = await twoServers();
+  try {
+    await s.a.req("join_server", { serverId: s.sb });
+    const adm = await admin(s.t);
+    await adm.req("admin_delete_server", { serverId: s.sb });
+    await adm.req("admin_delete_account", { uuid: "a" });
+    assert.equal((await adm.req("admin_restore_trash", { trashId: await trashIdOf(adm, "server") })).ok, true);
+    assert.deepEqual(memFile(s.t.dataDir)[s.sb], ["b"]);
+    adm.c.close();
+  } finally { s.t.hub.stop(); }
+});
+
+test("admin_sync_memberships_counts: 동기화는 유령 서버·계정을 지우고 빠진 서버를 빈 줄로 더한다", async () => {
+  const s = await twoServers();
+  try {
+    const f = path.join(s.t.dataDir, "memberships.json");
+    const m = memFile(s.t.dataDir);
+    m["유령서버"] = ["a"];
+    m[s.sa] = [...m[s.sa], "유령계정"];
+    delete m[s.sb];
+    fs.writeFileSync(f, JSON.stringify({ v: 1, servers: m }));
+    const adm = await admin(s.t);
+    // 파일을 직접 고쳤으니 Hub가 다시 읽도록 재시작 없이 op가 파일 기준으로 맞추는지 보려면 Hub 재시작이 필요 — 여기서는 새 Hub로 연다
+    adm.c.close();
+    s.t.hub.stop();
+    const t2 = await startTestHub({ dataDir: s.t.dataDir });
+    const adm2 = await admin(t2);
+    const r = await adm2.req("admin_sync_memberships");
+    assert.deepEqual([r.ok, r.removedServers, r.removedMembers, r.addedServers], [true, 1, 1, 1]);
+    const after = memFile(t2.dataDir);
+    assert.equal("유령서버" in after, false);
+    assert.equal(after[s.sa].includes("유령계정"), false);
+    assert.deepEqual(after[s.sb], []);
+    adm2.c.close();
+    t2.hub.stop();
+  } catch (e) { s.t.hub.stop(); throw e; }
+});
+
+test("snapshot_has_memberships: 관리 스냅샷에 서버 관점 참가자 리스트", async () => {
+  const s = await twoServers();
+  try {
+    const adm = await admin(s.t);
+    const snap = await adm.req("admin_snapshot");
+    assert.deepEqual(snap.memberships[s.sa], ["a"]);
+    assert.deepEqual(snap.memberships[s.sb], ["b"]);
+    adm.c.close();
+  } finally { s.t.hub.stop(); }
+});

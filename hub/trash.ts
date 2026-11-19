@@ -31,6 +31,8 @@ export interface TrashMeta {
   files: string[];
   /** channel·server만: 통신 서버·채널(Connection Communications)에서 지운 항목(v3.0). */
   area?: "connection";
+  /** v3.1.1 서버 참가자 리스트에서 뺀 것 — server면 계정 uuid들, account면 서버 id들. 되살릴 때 다시 넣는다. */
+  memberships?: string[];
 }
 
 export type TrashItem = TrashItemInfo;
