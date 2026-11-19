@@ -39,22 +39,23 @@ test("persist_and_reload: 파일에 저장되고 다시 열면 그대로", () =>
   assert.equal(again.fresh, false);
   assert.deepEqual(again.all(), { A: ["a", "b"], B: ["b"] });
   const raw = JSON.parse(fs.readFileSync(path.join(dir, "memberships.json"), "utf8"));
-  assert.equal(raw.v, 1);
+  assert.equal(raw.v, 2);
 });
 
 test("remove_and_restore_server_account: 서버·계정을 빼면 뺀 목록을 돌려주고, 되살리면 다시 들어간다", () => {
   const { s } = store();
   s.join("A", "a"); s.join("A", "b"); s.join("B", "a");
-  assert.deepEqual(s.removeServer("A"), ["a", "b"]);
+  assert.deepEqual(s.removeServer("A"), { members: ["a", "b"], history: ["a", "b"] });
   assert.equal(s.hasServer("A"), false);
-  assert.deepEqual(s.removeAccount("a"), ["B"]);
+  assert.deepEqual(s.removeAccount("a"), { servers: ["B"], history: ["B"] });
   assert.deepEqual(s.membersOf("B"), []);
-  s.restoreServer("A", ["a", "b"]);
-  s.restoreAccount("a", ["B"]);
+  s.restoreServer("A", ["a", "b"], ["a", "b"]);
+  s.restoreAccount("a", ["B"], ["B"]);
   assert.deepEqual(s.membersOf("A"), ["a", "b"]);
   assert.deepEqual(s.membersOf("B"), ["a"]);
-  assert.deepEqual(s.removeServer("없음"), []);
-  assert.deepEqual(s.removeAccount("없음"), []);
+  assert.deepEqual(s.serversOf("a"), ["A", "B"]);
+  assert.deepEqual(s.removeServer("없음"), { members: [], history: [] });
+  assert.deepEqual(s.removeAccount("없음"), { servers: [], history: [] });
 });
 
 test("corrupt_file_moved_and_fresh: 손상된 파일은 옆으로 옮기고 빈 목록으로 새로 시작(→ 기록으로 다시 채움)", () => {
@@ -72,7 +73,69 @@ test("seed_and_sync_drops_ghosts_adds_new: 처음 채우기와 동기화(없는 
   const { s } = store();
   s.seed({ A: ["a", "ghost"], GONE: ["a"], B: [] });
   const r = s.sync({ servers: ["A", "B", "NEW"], accounts: ["a", "b"] });
-  assert.deepEqual(r, { removedServers: 1, removedMembers: 1, addedServers: 1 });
+  assert.deepEqual(r, { removedServers: 1, removedMembers: 1, addedServers: 1, repaired: 0 });
   assert.deepEqual(s.all(), { A: ["a"], B: [], NEW: [] });
-  assert.deepEqual(s.sync({ servers: ["A", "B", "NEW"], accounts: ["a", "b"] }), { removedServers: 0, removedMembers: 0, addedServers: 0 });
+  assert.deepEqual(s.historyOf("A"), ["a"], "유령 계정은 전적에서도 지움");
+  assert.deepEqual(s.sync({ servers: ["A", "B", "NEW"], accounts: ["a", "b"] }), { removedServers: 0, removedMembers: 0, addedServers: 0, repaired: 0 });
+});
+
+// ───── 사용자 설계 추가: 참가 전적·두 관점 저장·동기화 합집합 ─────
+const raw = (dir: string) => JSON.parse(fs.readFileSync(path.join(dir, "memberships.json"), "utf8"));
+
+test("history_keeps_left_members: 나가도 참가 전적에는 남는다", () => {
+  const { s } = store();
+  s.join("A", "a"); s.join("A", "b"); s.leave("A", "a");
+  assert.deepEqual(s.membersOf("A"), ["b"]);
+  assert.deepEqual(s.historyOf("A"), ["a", "b"]);
+  assert.deepEqual(s.history(), { A: ["a", "b"] });
+});
+
+test("stores_both_views_in_one_file: 서버 관점(현재·전적)과 참가자 관점을 한 파일에 함께 저장", () => {
+  const { dir, s } = store();
+  s.join("A", "a"); s.join("B", "a"); s.leave("B", "a");
+  const j = raw(dir);
+  assert.equal(j.v, 2);
+  assert.deepEqual(j.servers.A, { members: ["a"], history: ["a"] });
+  assert.deepEqual(j.servers.B, { members: [], history: ["a"] });
+  assert.deepEqual(j.accounts, { a: ["A"] });
+});
+
+test("sync_union_when_views_disagree: 서버 관점과 참가자 관점이 다르면 참가로 판정해 양쪽을 맞춘다", () => {
+  const dir = tempDir("uplink-mem-");
+  fs.writeFileSync(path.join(dir, "memberships.json"), JSON.stringify({ v: 2, servers: { A: { members: ["a"], history: ["a"] }, B: { members: [], history: [] } }, accounts: { a: ["B"], b: ["A"] } }));
+  const s = new MembershipStore({ dataDir: dir });
+  const r = s.sync({ servers: ["A", "B"], accounts: ["a", "b"] });
+  assert.equal(r.repaired, 3, "A의 a(계정 쪽 없음), B의 a(서버 쪽 없음), A의 b(서버 쪽 없음)");
+  assert.deepEqual(s.membersOf("A").sort(), ["a", "b"]);
+  assert.deepEqual(s.membersOf("B"), ["a"]);
+  assert.deepEqual(s.serversOf("a").sort(), ["A", "B"]);
+  assert.deepEqual(s.historyOf("A").sort(), ["a", "b"], "맞춘 참가자는 전적에도");
+  const acc = raw(dir).accounts; assert.deepEqual([acc.a.sort(), acc.b], [["A", "B"], ["A"]]);
+});
+
+test("sync_never_rejoins_from_history: 동기화는 참가 전적만 보고 다시 참가시키지 않는다(나간 계정은 그대로)", () => {
+  const { s } = store();
+  s.join("A", "a"); s.leave("A", "a");
+  const r = s.sync({ servers: ["A"], accounts: ["a"] });
+  assert.equal(r.repaired, 0);
+  assert.deepEqual(s.membersOf("A"), []);
+  assert.deepEqual(s.serversOf("a"), []);
+  assert.deepEqual(s.historyOf("A"), ["a"]);
+});
+
+test("v1_file_upgraded: 옛 v1 파일(서버 → 목록)은 읽어서 v2로(전적 = 현재 참가자)", () => {
+  const dir = tempDir("uplink-mem-");
+  fs.writeFileSync(path.join(dir, "memberships.json"), JSON.stringify({ v: 1, servers: { A: ["a", "b"] } }));
+  const s = new MembershipStore({ dataDir: dir });
+  assert.equal(s.fresh, false);
+  assert.deepEqual(s.membersOf("A"), ["a", "b"]);
+  assert.deepEqual(s.historyOf("A"), ["a", "b"]);
+  assert.deepEqual(s.serversOf("b"), ["A"]);
+});
+
+test("seed_fills_history: 처음 채우기(글 쓴 계정)는 전적에도 들어간다", () => {
+  const { s } = store();
+  s.seed({ A: ["a"] });
+  assert.deepEqual(s.historyOf("A"), ["a"]);
+  assert.deepEqual(s.serversOf("a"), ["A"]);
 });

@@ -142,6 +142,7 @@ export class TrashOps {
       deletedBy: by, name: srv.name, serverId: srv.id, serverName: srv.name,
       channels: srv.channels.map((c) => ({ id: c.id, name: c.name })),
       memberships: this.d.memberships?.membersOf(srv.id) ?? [],
+      membershipHistory: this.d.memberships?.historyOf(srv.id) ?? [],
     });
     this.finishDelete(meta);
     return true;
@@ -180,7 +181,10 @@ export class TrashOps {
       peer: r.members[0] === uuid ? r.members[1] : r.members[0],
       label: r.label,
     }));
-    const meta = this.d.trash.create("account", { deletedBy: by, name: a.name, account: { uuid }, dms, memberships: this.d.memberships?.serversOf(uuid) ?? [] });
+    const meta = this.d.trash.create("account", { deletedBy: by, name: a.name, account: { uuid }, dms,
+      memberships: this.d.memberships?.serversOf(uuid) ?? [],
+      membershipHistory: Object.entries(this.d.memberships?.history() ?? {}).filter(([, l]) => l.includes(uuid)).map(([s]) => s),
+    });
     this.finishDelete(meta);
     return true;
   }
@@ -385,7 +389,7 @@ export class TrashOps {
       }
       // 서버를 되살리면 지울 때 뺀 참가자를 다시 넣는다(그 사이 지워진 계정은 빼고)
       if (meta.kind === "server" && !conn && meta.memberships && this.d.memberships) {
-        this.d.memberships.restoreServer(srv.id, meta.memberships.filter((u) => !!accounts.get(u)));
+        this.d.memberships.restoreServer(srv.id, meta.memberships.filter((u) => !!accounts.get(u)), (meta.membershipHistory ?? []).filter((u) => !!accounts.get(u)));
       }
       trash.remove(meta.id);
       report.itemRemoved = true;
@@ -421,7 +425,7 @@ export class TrashOps {
       // 계정을 되살리면 지울 때 빠진 서버에 다시 넣는다 — 그 사이 지워진 서버(리스트에 줄이 없음)는 빼고
       if (meta.memberships && this.d.memberships) {
         const ms = this.d.memberships;
-        ms.restoreAccount(uuid, meta.memberships.filter((id) => ms.hasServer(id)));
+        ms.restoreAccount(uuid, meta.memberships.filter((id) => ms.hasServer(id)), (meta.membershipHistory ?? []).filter((id) => ms.hasServer(id)));
       }
       const left: NonNullable<TrashMeta["dms"]> = [];
       for (const d of meta.dms ?? []) {

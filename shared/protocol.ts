@@ -180,7 +180,9 @@ export interface Response {
   trash?: TrashItemInfo[]; // admin_snapshot
   securityFindings?: SecurityFinding[]; // admin_snapshot(최근 100건, v2.1.2)
   saveBlocked?: string[]; // admin_snapshot: 이번 실행 동안 저장을 멈춘 색인(데이터 폴더 기준, v3.0)
-  memberships?: Record<string, string[]>; // admin_snapshot: 서버 참가자 종합 리스트(서버 관점, v3.1.1)
+  memberships?: Record<string, string[]>; // admin_snapshot: 서버 참가자 종합 리스트(서버 관점 현재 참가자, v3.1.1)
+  membershipHistory?: Record<string, string[]>; // admin_snapshot: 서버 관점 참가 전적
+  repaired?: number; // admin_sync_memberships: 두 관점이 달라 참가로 맞춘 짝 수
   removedServers?: number; // admin_sync_memberships
   removedMembers?: number; // admin_sync_memberships
   addedServers?: number; // admin_sync_memberships

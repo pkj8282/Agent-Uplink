@@ -1151,7 +1151,8 @@ export class Hub {
           snapshotDms: this.dm.all().map((r) => ({ channelId: r.channelId, members: [...r.members], label: r.label })),
           trash: this.trash.list(),
           securityFindings: this.security.recent(100),
-          memberships: this.memberships.all(), // 서버 참가자 종합 리스트(서버 관점, v3.1.1)
+          memberships: this.memberships.all(), // 서버 참가자 종합 리스트(서버 관점 현재 참가자, v3.1.1)
+          membershipHistory: this.memberships.history(), // 서버 관점 참가 전적
           // 손상 원본을 백업하지 못해 이번 실행 동안 저장을 멈춘 색인(데이터 폴더 기준, v3 Minor ①).
           saveBlocked: ([[this.dm, "dm"], [this.servers, "servers"]] as const).filter(([s]) => s.saveBlocked).map(([, sub]) => `${sub}/index.json`),
         });

@@ -33,6 +33,8 @@ export interface TrashMeta {
   area?: "connection";
   /** v3.1.1 서버 참가자 리스트에서 뺀 것 — server면 계정 uuid들, account면 서버 id들. 되살릴 때 다시 넣는다. */
   memberships?: string[];
+  /** v3.1.1 참가 전적에서 뺀 것 — server면 계정 uuid들, account면 서버 id들. */
+  membershipHistory?: string[];
 }
 
 export type TrashItem = TrashItemInfo;

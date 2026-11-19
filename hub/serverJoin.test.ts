@@ -116,7 +116,7 @@ test("migration_joins_past_senders: 참가자 리스트 없이 기존 기록으�
     assert.equal((await c2.req("read", { channelId: ch })).code, "not_joined", "읽기만 한 c는 아님");
     assert.equal((await a2.req("read", { channelId: ch })).code, "not_joined", "a는 이 기록에 글을 안 썼음(만든 것은 기록에 없음)");
     const mem = JSON.parse(fs.readFileSync(path.join(dir, "memberships.json"), "utf8"));
-    assert.deepEqual(mem.servers[srv], ["b"]);
+    assert.deepEqual(mem.servers[srv], { members: ["b"], history: ["b"] });
   } finally { t2.hub.stop(); }
 });
 
@@ -141,7 +141,9 @@ async function admin(t: { port: number; dataDir: string }) {
   const c = new TestClient(t.port); await c.ready();
   return { c, req: (op: string, p: object = {}) => c.req(op, { token, ...p }) as Promise<any> };
 }
-const memFile = (dir: string) => JSON.parse(fs.readFileSync(path.join(dir, "memberships.json"), "utf8")).servers as Record<string, string[]>;
+const memRaw = (dir: string) => JSON.parse(fs.readFileSync(path.join(dir, "memberships.json"), "utf8"));
+const memFile = (dir: string) => Object.fromEntries(Object.entries(memRaw(dir).servers as Record<string, { members: string[] }>).map(([s, r]) => [s, r.members])) as Record<string, string[]>;
+const histFile = (dir: string) => Object.fromEntries(Object.entries(memRaw(dir).servers as Record<string, { history: string[] }>).map(([s, r]) => [s, r.history])) as Record<string, string[]>;
 const trashIdOf = async (adm: Awaited<ReturnType<typeof admin>>, kind: string) => (await adm.req("admin_snapshot")).trash.find((x: any) => x.kind === kind).id;
 
 test("delete_server_removes_row_restore_brings_back: 서버를 지우면 줄이 빠지고, 되살리면 참가자도 돌아온다", async () => {
@@ -191,11 +193,12 @@ test("admin_sync_memberships_counts: 동기화는 유령 서버·계정을 지�
   const s = await twoServers();
   try {
     const f = path.join(s.t.dataDir, "memberships.json");
-    const m = memFile(s.t.dataDir);
-    m["유령서버"] = ["a"];
-    m[s.sa] = [...m[s.sa], "유령계정"];
-    delete m[s.sb];
-    fs.writeFileSync(f, JSON.stringify({ v: 1, servers: m }));
+    const j = memRaw(s.t.dataDir);
+    j.servers["유령서버"] = { members: ["a"], history: ["a"] };
+    j.servers[s.sa].members.push("유령계정");
+    delete j.servers[s.sb];
+    j.accounts.b = [...(j.accounts.b ?? []).filter((x: string) => x !== s.sb), s.sa]; // 계정 쪽에만 있는 짝(서버 A의 b)
+    fs.writeFileSync(f, JSON.stringify(j));
     const adm = await admin(s.t);
     // 파일을 직접 고쳤으니 Hub가 다시 읽도록 재시작 없이 op가 파일 기준으로 맞추는지 보려면 Hub 재시작이 필요 — 여기서는 새 Hub로 연다
     adm.c.close();
@@ -203,11 +206,12 @@ test("admin_sync_memberships_counts: 동기화는 유령 서버·계정을 지�
     const t2 = await startTestHub({ dataDir: s.t.dataDir });
     const adm2 = await admin(t2);
     const r = await adm2.req("admin_sync_memberships");
-    assert.deepEqual([r.ok, r.removedServers, r.removedMembers, r.addedServers], [true, 1, 1, 1]);
+    assert.deepEqual([r.ok, r.removedServers, r.removedMembers, r.addedServers, r.repaired], [true, 1, 1, 1, 1]); // 맞춘 짝: 서버 A의 b(계정 쪽에만 있었음) — 유령은 먼저 지워 세지 않음
     const after = memFile(t2.dataDir);
     assert.equal("유령서버" in after, false);
     assert.equal(after[s.sa].includes("유령계정"), false);
     assert.deepEqual(after[s.sb], []);
+    assert.equal(after[s.sa].includes("b"), true, "계정 쪽에만 있던 짝은 참가로 판정");
     adm2.c.close();
     t2.hub.stop();
   } catch (e) { s.t.hub.stop(); throw e; }
@@ -220,6 +224,28 @@ test("snapshot_has_memberships: 관리 스냅샷에 서버 관점 참가자 리�
     const snap = await adm.req("admin_snapshot");
     assert.deepEqual(snap.memberships[s.sa], ["a"]);
     assert.deepEqual(snap.memberships[s.sb], ["b"]);
+    adm.c.close();
+  } finally { s.t.hub.stop(); }
+});
+
+test("history_in_snapshot_and_trash: 나간 계정은 참가 전적에 남고, 서버를 지웠다 되살리면 전적도 돌아온다", async () => {
+  const s = await twoServers();
+  try {
+    await s.a.req("join_server", { serverId: s.sb });
+    await s.a.req("leave_server", { serverId: s.sb });
+    const adm = await admin(s.t);
+    let snap = await adm.req("admin_snapshot");
+    assert.deepEqual(snap.memberships[s.sb], ["b"]);
+    assert.deepEqual(snap.membershipHistory[s.sb].sort(), ["a", "b"]);
+    await adm.req("admin_delete_server", { serverId: s.sb });
+    assert.equal(s.sb in histFile(s.t.dataDir), false);
+    assert.equal((await adm.req("admin_restore_trash", { trashId: await trashIdOf(adm, "server") })).ok, true);
+    snap = await adm.req("admin_snapshot");
+    assert.deepEqual(snap.memberships[s.sb], ["b"], "나간 a는 되살려도 참가자가 아님");
+    assert.deepEqual(snap.membershipHistory[s.sb].sort(), ["a", "b"]);
+    const r = await adm.req("admin_sync_memberships");
+    assert.equal(r.repaired, 0);
+    assert.deepEqual((await adm.req("admin_snapshot")).memberships[s.sb], ["b"], "동기화해도 나간 a는 되살아나지 않음");
     adm.c.close();
   } finally { s.t.hub.stop(); }
 });
