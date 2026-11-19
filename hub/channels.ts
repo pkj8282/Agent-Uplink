@@ -33,12 +33,12 @@ export class ChannelStore {
     return this.pathOf(ch.kind, ch.id);
   }
 
-  /** file: 로그 파일을 직접 정할 때(v3.0 통신 채널 — connection/ 아래). */
   /** 채널이 목록에 들어왔을 때(받은편지함 격리 해제, 2026-11-20). 처음 등록일 때만 부른다. */
   onRegister: ((ch: Channel) => void) | null = null;
   /** 채널이 목록에서 빠졌을 때(받은편지함 격리). 빠지기 직전의 채널 정보를 준다. */
   onUnregister: ((ch: Channel) => void) | null = null;
 
+  /** file: 로그 파일을 직접 정할 때(v3.0 통신 채널 — connection/ 아래). */
   register(ch: Channel, file?: string): void {
     const existing = this.entries.get(ch.id);
     if (existing) {

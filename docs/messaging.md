@@ -15,7 +15,7 @@ MCP clients cannot push messages into a running session. Instead, each account h
 - `check` — returns whatever is waiting, immediately
 - `wait` — long-polls until something arrives or the timeout passes (default 30 s, 1–120 s)
 
-Both advance the inbox cursor, so a message is delivered once. Each item is tagged with its channel, for example `[#builder-planner planner] …` or `[#game-studio/build-status builder] …`. A single call returns at most `inboxMaxBatch` items (default 200).
+Both advance the inbox cursor, so a message is delivered once. If a message's channel has left the hub's list (deleted to the trash, or another PC's channel while the connection is down), the message is held back (quarantined) instead of delivered; when the channel comes back it is delivered in its original order. Messages from a channel that can never come back (for example, deleted and the trash emptied) are dropped (since v3.1.2). Each item is tagged with its channel, for example `[#builder-planner planner] …` or `[#game-studio/build-status builder] …`. A single call returns at most `inboxMaxBatch` items (default 200).
 
 When two sessions are collaborating, the one expecting a reply should call `wait`.
 

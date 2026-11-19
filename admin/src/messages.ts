@@ -136,7 +136,7 @@ export const ADMIN_MESSAGES = defineCatalog({
     trash_emptied: (p: { count: number }) => `휴지통을 비웠습니다(${p.count}개).`,
     // 받은편지함 격리(2026-11-20)
     nav_quarantine: "격리",
-    quarantine_help: "채널이 목록에서 빠져 지금 확인할 수 없는 받은편지함 글입니다. 채널이 돌아오면(연결 복구·휴지통 복원) 원래 순서로 다시 전달됩니다. 되살릴 길이 없는 것은 Hub가 스스로 지웁니다.",
+    quarantine_help: "채널이 목록에서 빠져 지금 확인할 수 없는 받은편지함 글입니다. 채널이 돌아오면(연결 복구·휴지통 복원) 원래 순서로 다시 전달됩니다. 이 PC 채널이 휴지통에서도 비워져 되살릴 길이 없으면 Hub가 스스로 지우고, 다른 PC 쪽 채널은 돌아올 수 있어 남겨 둡니다.",
     btn_quarantine_delete_all: "격리 전체 삭제",
     quarantine_is_empty: "격리된 항목이 없습니다.",
     quarantine_unsupported: "이 Hub는 받은편지함 격리를 지원하지 않습니다.",
@@ -689,7 +689,7 @@ export const ADMIN_MESSAGES = defineCatalog({
     trash_emptied: (p: { count: number }) => `Emptied the trash (${p.count} item(s)).`,
     // Inbox quarantine (2026-11-20)
     nav_quarantine: "Quarantine",
-    quarantine_help: "Inbox messages whose channel left the list and can't be checked right now. When the channel comes back (connection restored, restored from the trash), they are delivered again in their original order. Ones that can never come back are removed by the hub on its own.",
+    quarantine_help: "Inbox messages whose channel left the list and can't be checked right now. When the channel comes back (connection restored, restored from the trash), they are delivered again in their original order. When a channel on this PC is gone for good (the trash was emptied too), the hub removes them on its own; ones from another PC's channel are kept because it may come back.",
     btn_quarantine_delete_all: "Delete all quarantined",
     quarantine_is_empty: "Nothing is quarantined.",
     quarantine_unsupported: "This hub does not support inbox quarantine.",

@@ -187,26 +187,36 @@ function renderQuarantine(s: Snapshot): void {
       const b = el("button", tr("btn_delete"));
       b.type = "button";
       b.className = "danger";
-      b.addEventListener("click", () => void deleteQuarantineFlow({ items: [{ account: a.account, seq: it.seq }] }, 1, it.bytes, b));
+      b.addEventListener("click", () => void deleteQuarantineFlow([{ items: [{ account: a.account, seq: it.seq }] }], 1, it.bytes, b));
       li.append(b);
       list.append(li);
     }
   }
 }
 
-async function deleteQuarantineFlow(input: QuarantineDeleteInput, count: number, bytes: number, b: HTMLButtonElement): Promise<void> {
+/** 확인 창에 보인 항목만 지운다(전체 삭제도 화면에 보인 목록을 1000개씩 보냄 — 그 사이 새로 격리된 것은 남김). */
+async function deleteQuarantineFlow(inputs: QuarantineDeleteInput[], count: number, bytes: number, b: HTMLButtonElement): Promise<void> {
   if (!window.confirm(quarantineDeleteConfirmMessage(count, bytes))) return;
   showOpMsg(null);
   b.disabled = true;
-  const r = await window.admin.deleteQuarantine(input);
+  let removed = 0;
+  let fail: { code?: string; error: string } | null = null;
+  for (const input of inputs) {
+    const r = await window.admin.deleteQuarantine(input);
+    if (!r.ok) { fail = r; break; }
+    removed += r.data.removed;
+  }
   await refresh();
-  showOpMsg(r.ok ? { text: tr("quarantine_deleted", { count: r.data.removed }), kind: "ok" } : { text: opErrorMessage(r.code, r.error), kind: "err" });
+  showOpMsg(fail ? { text: opErrorMessage(fail.code, fail.error), kind: "err" } : { text: tr("quarantine_deleted", { count: removed }), kind: "ok" });
 }
 
 byId("quarantine-delete-all").addEventListener("click", () => {
   const q = quarantineData;
   if (!q || q.totalCount === 0) return;
-  void deleteQuarantineFlow({ all: true }, q.totalCount, q.totalBytes, byId<HTMLButtonElement>("quarantine-delete-all"));
+  const all = q.accounts.flatMap((a) => a.items.map((it) => ({ account: a.account, seq: it.seq })));
+  const chunks: QuarantineDeleteInput[] = [];
+  for (let i = 0; i < all.length; i += 1000) chunks.push({ items: all.slice(i, i + 1000) });
+  void deleteQuarantineFlow(chunks, q.totalCount, q.totalBytes, byId<HTMLButtonElement>("quarantine-delete-all"));
 });
 
 /** 복원: 확인 → 이름이 겹치면 확인 입력 창 → 예일 때만 번호를 붙여 복원. */

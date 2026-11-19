@@ -254,6 +254,8 @@ export class Hub {
     if (this.memberships.fresh) this.seedMemberships();
     // 이전 버전 삭제·크래시로 남은 로그를 휴지통으로(손상된 서버 인덱스면 서버 쪽은 건너뜀 — 손으로 되살릴 여지)
     this.trashOps.sweepOrphans({ servers: !this.servers.sweepBlocked, dm: true });
+    // 압축으로 비워진 받은편지함도 번호가 커서 밑으로 돌아가지 않게(이전부터 있던 문제, 3.1.2에서 고침)
+    for (const a of this.accounts.list()) this.inbox.raiseSeq(a.uuid, this.accounts.get(a.uuid)?.inboxCursor ?? 0);
     // 받은편지함 격리(2026-11-20): 로컬 채널을 다 올린 뒤 한 번 훑고, 이후 채널이 빠지고 들어오는 순간 격리·해제한다.
     this.quarantineStartupScan();
     this.channels.onUnregister = (ch) => this.quarantineChannel(ch);
@@ -1423,9 +1425,13 @@ export class Hub {
     s.add(uuid);
   }
 
-  /** 휴지통 항목이 가진 채널·DM id(되살릴 수 있는 것). */
-  private trashChannelIds(): Set<string> {
-    const ids = new Set<string>();
+  /**
+   * "확실히 지워짐" 판정의 근거: 되살릴 수 있는 채널 id(휴지통) + 색인을 믿을 수 있는가.
+   * 서버·DM 색인이 손상돼 채널을 올리지 못했으면(고아 정리도 멈춤 — 백업으로 되살릴 여지) 아무것도 지워졌다고 보지 않는다.
+   */
+  private trashChannelIds(): Set<string> & { untrusted?: true } {
+    const ids: Set<string> & { untrusted?: true } = new Set<string>();
+    if (this.servers.sweepBlocked || this.dm.corrupt) ids.untrusted = true;
     for (const t of this.trash.list()) {
       const m = this.trash.readMeta(t.id);
       if (!m) continue;
@@ -1440,7 +1446,8 @@ export class Hub {
    * 목록에 없는 채널이 확실히 지워졌는가: 이 PC 채널(앞 표시 없는 id) + 로컬 계정 + 휴지통에도 없음.
    * 다른 PC 쪽(r:·m.<출처>.·s1:<공간>:)과 연결 영역 계정은 다시 붙을 수 있으니 확실하지 않다.
    */
-  private channelGone(channelId: string, area: "connection" | undefined, trashIds: Set<string>): boolean {
+  private channelGone(channelId: string, area: "connection" | undefined, trashIds: Set<string> & { untrusted?: true }): boolean {
+    if (trashIds.untrusted) return false;
     if (/^(r:|m\.|s1:)/.test(channelId)) return false;
     if (area === "connection") return false;
     return !trashIds.has(channelId);

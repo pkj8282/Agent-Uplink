@@ -219,3 +219,47 @@ test("server_restore_wakes_waiter_after_members_back: 서버째 되살릴 때 �
     close(s);
   } finally { s.t.hub.stop(); }
 });
+
+test("corrupt_index_does_not_drop: 서버 색인이 손상돼 채널을 못 올려도 안 읽은 글은 버리지 않고 격리 — 색인을 되살리면 나온다", async () => {
+  const dir = tempDir("uplink-q-");
+  const s = await setup(dir);
+  await s.b.req("send", { channelId: s.cb, text: "unread1" });
+  close(s);
+  s.t.hub.stop();
+  const idx = path.join(dir, "servers", "index.json");
+  const good = fs.readFileSync(idx, "utf8");
+  fs.writeFileSync(idx, "{손상");
+  const t2 = await startTestHub({ dataDir: dir });
+  const a2 = await login(t2.port, "a"), adm2 = await admin(t2);
+  assert.deepEqual(texts(await a2.req("check")), []);
+  assert.equal((await quarantine(adm2)).totalCount, 1, "버리지 않고 격리");
+  a2.close(); adm2.c.close();
+  t2.hub.stop();
+  // 사용자가 백업으로 색인을 되살림
+  for (const f of fs.readdirSync(path.join(dir, "servers"))) if (f.startsWith("index.json.corrupt-")) fs.rmSync(path.join(dir, "servers", f));
+  fs.writeFileSync(idx, good);
+  const t3 = await startTestHub({ dataDir: dir });
+  try {
+    const a3 = await login(t3.port, "a");
+    assert.deepEqual(texts(await a3.req("check")), ["unread1"]);
+    a3.close();
+  } finally { t3.hub.stop(); }
+});
+
+test("seq_floor_after_empty_compact: 압축으로 받은편지함 파일이 비어도 다시 켠 뒤 새 글이 보인다(번호가 커서 밑으로 돌아가지 않음)", async () => {
+  const dir = tempDir("uplink-q-");
+  const t1 = await startTestHub({ dataDir: dir });
+  const a = await login(t1.port, "a"), b = await login(t1.port, "b");
+  await a.req("check");
+  for (let i = 0; i < 1001; i++) { await b.req("send", { channelId: "lobby", text: `n${i}` }); await a.req("check"); }
+  assert.equal(fs.readFileSync(path.join(dir, "notifications", "a.jsonl"), "utf8").trim(), "", "압축으로 파일이 비었다");
+  a.close(); b.close();
+  t1.hub.stop();
+  const t2 = await startTestHub({ dataDir: dir });
+  try {
+    const a2 = await login(t2.port, "a"), b2 = await login(t2.port, "b");
+    await b2.req("send", { channelId: "lobby", text: "after-restart" });
+    assert.deepEqual(texts(await a2.req("check")), ["after-restart"]);
+    a2.close(); b2.close();
+  } finally { t2.hub.stop(); }
+});

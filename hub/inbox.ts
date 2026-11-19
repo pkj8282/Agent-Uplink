@@ -119,6 +119,15 @@ export class InboxStore {
     this.save(uuid);
   }
 
+  /**
+   * 번호(seq) 바닥을 올린다. 압축으로 파일이 비면 다시 켤 때 seq를 파일에서 되살릴 수 없어 1부터 다시 매기는데,
+   * 그러면 커서(이미 받은 번호)보다 작은 번호의 새 항목이 since()에서 안 보인다 → 시작 때 커서로 바닥을 맞춘다.
+   */
+  raiseSeq(uuid: string, floor: number): void {
+    const b = this.box(uuid);
+    if (floor > b.seq) b.seq = floor;
+  }
+
   size(uuid: string): number {
     return this.box(uuid).items.length;
   }
