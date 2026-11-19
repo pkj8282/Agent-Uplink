@@ -102,6 +102,8 @@ export class HubClient {
   async listDms(): Promise<Response> { await this.ensureConnected(); return this.request("list_dms", {}); }
   async createServer(name: string): Promise<Response> { await this.ensureConnected(); return this.request("create_server", { name }); }
   async listServers(): Promise<Response> { await this.ensureConnected(); return this.request("list_servers", {}); }
+  async joinServer(serverId: string): Promise<Response> { await this.ensureConnected(); return this.request("join_server", { serverId }); }
+  async leaveServer(serverId: string): Promise<Response> { await this.ensureConnected(); return this.request("leave_server", { serverId }); }
   async createChannel(serverId: string, name: string): Promise<Response> { await this.ensureConnected(); return this.request("create_channel", { serverId, name }); }
   async listChannels(serverId: string): Promise<Response> { await this.ensureConnected(); return this.request("list_channels", { serverId }); }
   async deleteChannel(channelId: string): Promise<Response> { await this.ensureConnected(); return this.request("delete_channel", { channelId }); }

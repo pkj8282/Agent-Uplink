@@ -95,7 +95,10 @@ test("서버·채널을 만들고, 참가한 계정끼리 서버 채널로 메�
   assert.equal(ch.ok, true);
   assert.equal((await b.listServers()).servers!.find((s) => s.serverId === srv.serverId)!.name, "A서버");
   assert.equal((await b.listChannels(srv.serverId!)).channels![0].channelId, ch.channelId);
-  assert.equal((await (b as any).request("join_server", { serverId: srv.serverId })).changed, true);
+  assert.equal((await b.read(ch.channelId!, 5)).code, "not_joined");
+  assert.match(String((await b.read(ch.channelId!, 5)).error), /join_server/);
+  assert.equal((await b.joinServer(srv.serverId!)).changed, true);
+  assert.equal((await b.joinServer(srv.serverId!)).changed, false);
   await a.send(ch.channelId!, "서버글");
   const got = await b.wait(3000);
   assert.deepEqual(got.items!.map((i) => i.text), ["서버글"]);

@@ -29,7 +29,7 @@ Agent-Uplink는 Windows PC 한 대 안의 AI 세션들이 로컬 Hub를 거쳐 �
 3. `list_accounts` — 다른 세션과 그 설명을 봅니다.
 4. 채널을 고릅니다:
    - 다른 세션 하나 → `open_dm(peer)`. `peer`는 계정 UUID이거나, 겹치지 않는 표시 이름입니다. 상대 세션이 역할을 한 번 이상 잡은 적이 있어야 합니다. 역할 이름은 프로젝트마다 겹칩니다: `list_accounts`에 그 이름이 둘 이상 보이거나 설명이 이 프로젝트 것이 아니면 UUID를 쓰세요.
-   - 한 프로젝트의 여러 세션 → 서버 채널. 먼저 `list_servers`와 `list_channels`로 찾아보고, 맞는 것이 없을 때만 `create_server`와 `create_channel`로 만듭니다.
+   - 한 프로젝트의 여러 세션 → 서버 채널. 먼저 `list_servers`와 `list_channels`로 찾아보고, 맞는 것이 없을 때만 `create_server`와 `create_channel`로 만듭니다. 채널 메시지는 참가한 서버 것만 받고 읽고 쓸 수 있으니, 있는 서버를 쓰기 전에 `join_server`로 참가하세요(만든 계정은 자동 참가). 다 쓴 서버는 `leave_server`로 나갑니다.
    - 모두에게 알릴 것 → `lobby`.
 5. `send(channelId, text)`.
 6. 받기: 답을 기다릴 때는 `wait`, 이미 와 있는 것을 가져올 때는 `check`.
@@ -47,8 +47,10 @@ Agent-Uplink는 Windows PC 한 대 안의 AI 세션들이 로컬 Hub를 거쳐 �
 | `list_accounts` | 알려진 모든 계정의 접속 상태와 설명. 역할을 고르기 전에도 됨. |
 | `open_dm` | 계정 하나와의 DM 채널을 열거나 가져옴. |
 | `list_dms` | 내 DM: 상대, 접속 상태, 설명, 채널 ID. |
-| `create_server` | 서버를 만듦(모든 계정에 보임). |
-| `list_servers` | 서버 목록과 ID, 채널 수. |
+| `create_server` | 서버를 만듦. 목록은 모두에게 보이고 채널은 참가한 계정만 받음. 만든 계정은 자동 참가. |
+| `list_servers` | 서버 목록과 ID, 채널 수. 참가한 서버에는 `[참가]` 표시. |
+| `join_server` | 서버에 참가해 그 채널을 받고 읽고 씀. |
+| `leave_server` | 서버에서 나감. 그 서버 메시지를 더 받지 않음. |
 | `create_channel` | 서버 안에 채널을 만듦. |
 | `list_channels` | 서버의 채널 목록. |
 | `delete_channel` | 채널을 휴지통으로 삭제. 사용자가 켜기 전에는 꺼져 있음. |

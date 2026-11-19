@@ -8,7 +8,7 @@ import { HubClient } from "./hubClient.js";
 import { RoleStore, resolveRoleCwd } from "./roles.js";
 import { AccountSession } from "./session.js";
 import { oneLine } from "./text.js";
-import { fmtItems, fmtMessages, remoteTag } from "./format.js";
+import { fmtItems, fmtMessages, fmtServer } from "./format.js";
 import { resolveDataDir } from "../shared/clientKey.js";
 import { currentLang } from "../shared/langConfig.js";
 import { MAX_TEXT_LENGTH } from "../shared/protocol.js";
@@ -202,10 +202,27 @@ server.registerTool(
   gated(async () => {
     const r = await client.listServers();
     if (!r.ok) return text(session.explainError(r), true);
-    const list = (r.servers ?? []).map((s) => `${s.remote ? `${remoteTag(client.lang(), s.remote.spaceName, s.remote.hubUser)} ` : s.area === "connection" ? `${m("comms_server_tag")} ` : ""}${s.name} (${s.serverId}) · ${m("server_channel_count", { count: s.channelCount })}`);
+    const list = (r.servers ?? []).map((s) => fmtServer(s, client.lang()));
     return text(list.length ? list.join("\n") : m("no_servers"));
   }),
 );
+
+for (const op of ["join_server", "leave_server"] as const) {
+  server.registerTool(
+    op,
+    {
+      description: T.tools[op].description,
+      inputSchema: { serverId: z.string().min(1).max(256).describe(T.tools[op].params.serverId) },
+      annotations: SET,
+    },
+    gated(async ({ serverId }: { serverId: string }) => {
+      const r = op === "join_server" ? await client.joinServer(serverId) : await client.leaveServer(serverId);
+      if (!r.ok) return text(session.explainError(r), true);
+      const key = op === "join_server" ? (r.changed ? "server_joined" : "server_already_joined") : (r.changed ? "server_left" : "server_not_joined_yet");
+      return text(m(key, { serverId }));
+    }),
+  );
+}
 
 server.registerTool(
   "create_channel",

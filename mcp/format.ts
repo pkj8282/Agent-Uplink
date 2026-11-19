@@ -14,6 +14,13 @@ export function remoteTag(lang: Lang, spaceName: string, hubUser: string): strin
   return mcpMsg(lang, "remote_tag", { space: oneLine(spaceName, 64), user: oneLine(hubUser, 64) });
 }
 
+/** list_servers 한 줄. 참가한 서버(v3.1.1)는 맨 앞에 참가 표시 — 연결 영역 서버는 참가제가 아니라 표시 없음. */
+export function fmtServer(s: { serverId: string; name: string; channelCount: number; area?: "connection"; remote?: { spaceName: string; hubUser: string }; joined?: boolean }, lang: Lang): string {
+  const joined = s.joined === true ? `${mcpMsg(lang, "joined_tag")} ` : "";
+  const where = s.remote ? `${remoteTag(lang, s.remote.spaceName, s.remote.hubUser)} ` : s.area === "connection" ? `${mcpMsg(lang, "comms_server_tag")} ` : "";
+  return `${joined}${where}${s.name} (${s.serverId}) · ${mcpMsg(lang, "server_channel_count", { count: s.channelCount })}`;
+}
+
 function originPrefix(origin: MessageOrigin | undefined, lang: Lang): string {
   return origin?.scope === "remote" ? `${remoteTag(lang, origin.spaceName, origin.hubUser)} ` : "";
 }

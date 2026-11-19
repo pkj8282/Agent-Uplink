@@ -105,10 +105,10 @@ const section = (md: string, title: string): string => {
   return end < 0 ? rest : rest.slice(0, end);
 };
 
-test("도구 표는 MCP 도구 17개와 정확히 같다", () => {
+test("도구 표는 MCP 도구 19개와 정확히 같다", () => {
   const rows = [...section(read("SKILL.md"), "Tools").matchAll(/^\| `([a-z_]+)` \|/gm)].map((m) => m[1]);
   const tools = Object.keys(toolTexts("en").tools);
-  assert.equal(tools.length, 17);
+  assert.equal(tools.length, 19);
   assert.deepEqual([...rows].sort(), [...tools].sort());
 });
 
@@ -376,4 +376,10 @@ test("리뷰 Minor: 공개 예시 채널명은 중립, More 링크는 언제 읽
   for (const line of more.split("\n").filter((l) => l.startsWith("- ["))) assert.match(line, /\) — /, `읽을 때 안내 없음: ${line}`);
   const [maj, min] = num("package.json", /"version":\s*"(\d+\.\d+)\.\d+"/).split(".");
   assert.ok(read("SKILL.md").includes(`Written for agent-uplink ${maj}.${min}.x`));
+});
+
+test("skill_mentions_server_join: 스킬이 서버 참가제(join_server·leave_server)를 두 언어로 안내한다(v3.1.1)", () => {
+  assert.match(read("SKILL.md"), /join_server/);
+  assert.match(read("SKILL.md"), /leave_server/);
+  assert.match(read("ko/SKILL.md"), /join_server/);
 });

@@ -68,3 +68,11 @@ test("error_codes_have_ko_en_text: 통신 오류 문구가 두 언어 모두 있
   }
   assert.notEqual(hubMsg("ko", "connection_lost"), hubMsg("en", "connection_lost"));
 });
+
+test("list_servers_shows_joined_tag: 서버 목록 줄에 참가 표시(한/영), 참가 안 했으면 없음", async () => {
+  const { fmtServer } = await import("./format.js");
+  assert.equal(fmtServer({ serverId: "s1", name: "팀", channelCount: 2, joined: true }, "ko"), "[참가] 팀 (s1) · 채널 2개");
+  assert.equal(fmtServer({ serverId: "s1", name: "팀", channelCount: 2, joined: false }, "ko"), "팀 (s1) · 채널 2개");
+  assert.equal(fmtServer({ serverId: "s1", name: "team", channelCount: 1, joined: true }, "en"), "[joined] team (s1) · 1 channel(s)");
+  assert.equal(fmtServer({ serverId: "c1", name: "c", channelCount: 0, area: "connection" }, "ko").includes("[참가]"), false, "연결 영역 서버는 참가제 아님(표시 없음)");
+});

@@ -31,7 +31,7 @@ function rpc(reqs: object[], env: Record<string, string>): Promise<any[]> {
   });
 }
 
-test("MCP v2는 tools/list에서 17개 툴을 노출한다", async () => {
+test("MCP는 tools/list에서 19개 툴을 노출한다(v3.1.1 join_server·leave_server)", async () => {
   const dataDir = tempDir("uplink-smoke-");
   const out = await rpc([
     { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } } },
@@ -40,7 +40,7 @@ test("MCP v2는 tools/list에서 17개 툴을 노출한다", async () => {
   const list = out.find((m) => m.id === 2);
   const names = list.result.tools.map((t: any) => t.name).sort();
   assert.deepEqual(names, [
-    "check", "create_channel", "create_server", "delete_channel", "delete_server",
+    "check", "create_channel", "create_server", "delete_channel", "delete_server", "join_server", "leave_server",
     "list_accounts", "list_channels", "list_dms", "list_servers",
     "open_dm", "read", "send", "set_name", "set_profile", "use_account", "wait", "whoami",
   ].sort());
@@ -70,7 +70,9 @@ test("도구 annotation: 삭제는 destructive, 조회는 readOnly, check·wait�
   const init = out.find((m) => m.id === 1);
   assert.match(init.result.instructions, /not the user's instructions/); // 언어 미선택(N/A) = 영어
   const tools = new Map<string, any>(out.find((m) => m.id === 2).result.tools.map((t: any) => [t.name, t]));
-  assert.equal(tools.size, 17);
+  assert.equal(tools.size, 19);
+  for (const n of ["join_server", "leave_server"]) assert.equal(tools.get(n).annotations.readOnlyHint, false, n);
+  assert.match(tools.get("join_server").description, /join/i);
   // v3.0: 메시지를 주고받는 도구는 원격(다른 PC) 채널에도 닿는다 → openWorld. 나머지는 이 PC 안.
   const OPEN = new Set(["send", "read", "check", "wait"]);
   for (const [name, t] of tools) {

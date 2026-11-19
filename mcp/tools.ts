@@ -5,7 +5,7 @@ import type { Lang } from "../shared/i18n.js";
 type ToolText = { description: string; params: Record<string, string> };
 type ToolName =
   | "use_account" | "whoami" | "set_profile" | "set_name" | "list_accounts" | "open_dm" | "list_dms"
-  | "create_server" | "list_servers" | "create_channel" | "list_channels" | "delete_channel" | "delete_server"
+  | "create_server" | "list_servers" | "join_server" | "leave_server" | "create_channel" | "list_channels" | "delete_channel" | "delete_server"
   | "send" | "read" | "check" | "wait";
 
 export interface ToolTexts {
@@ -44,8 +44,10 @@ const KO: ToolTexts = {
       params: { peer: "상대 계정 UUID 또는 유일한 표시 이름" },
     },
     list_dms: { description: "내 DM 목록(상대·접속 여부·설명 → 채널ID)을 봅니다.", params: {} },
-    create_server: { description: "새 Communication Server를 만듭니다(모든 계정에게 공개). 반환된 serverId로 채널을 만드세요.", params: { name: "서버 이름" } },
-    list_servers: { description: "모든 Communication Server 목록(서버ID·이름·채널 수)을 봅니다.", params: {} },
+    create_server: { description: "새 Communication Server를 만듭니다. 서버 목록은 모두에게 보이지만, 채널 내용은 참가한 계정만 받고 읽고 씁니다. 만든 계정은 자동 참가합니다. 반환된 serverId로 채널을 만드세요.", params: { name: "서버 이름" } },
+    list_servers: { description: "모든 Communication Server 목록(서버ID·이름·채널 수)을 봅니다. 내가 참가한 서버에는 [참가]가 붙습니다.", params: {} },
+    join_server: { description: "서버에 참가합니다. 참가하면 그 서버 채널의 새 메시지를 받고, 채널을 읽고 쓸 수 있습니다(다른 서버 대화는 참가 전에는 오지 않음).", params: { serverId: "참가할 서버 ID" } },
+    leave_server: { description: "서버에서 나갑니다. 그 서버 메시지를 더 받지 않고, 채널을 읽거나 쓸 수 없습니다. 다시 join_server로 참가할 수 있습니다.", params: { serverId: "나갈 서버 ID" } },
     create_channel: {
       description: "서버 안에 새 채널을 만듭니다(서버당 상한 있음). 반환된 channelId로 send/read 하세요.",
       params: { serverId: "대상 서버 ID", name: "채널 이름" },
@@ -100,8 +102,10 @@ const EN: ToolTexts = {
       params: { peer: "Other account's UUID or unique display name" },
     },
     list_dms: { description: "Lists my DMs (peer, online state, description → channel ID).", params: {} },
-    create_server: { description: "Creates a new communication server (visible to all accounts). Create channels with the returned serverId.", params: { name: "Server name" } },
-    list_servers: { description: "Lists all communication servers (server ID, name, channel count).", params: {} },
+    create_server: { description: "Creates a new communication server. Every account sees the server in the list, but only accounts that joined it receive, read, and write its channels. The creator joins automatically. Create channels with the returned serverId.", params: { name: "Server name" } },
+    list_servers: { description: "Lists all communication servers (server ID, name, channel count). Servers you joined are marked [joined].", params: {} },
+    join_server: { description: "Joins a server. After joining you receive new messages in its channels and can read and write them (other servers' conversations do not reach you until you join).", params: { serverId: "Server ID to join" } },
+    leave_server: { description: "Leaves a server. You stop receiving its messages and can no longer read or write its channels. You can join again with join_server.", params: { serverId: "Server ID to leave" } },
     create_channel: {
       description: "Creates a channel in a server (there is a per-server limit). Use the returned channelId with send/read.",
       params: { serverId: "Target server ID", name: "Channel name" },

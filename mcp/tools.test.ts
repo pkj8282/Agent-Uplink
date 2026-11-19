@@ -8,7 +8,7 @@ test("영어 도구 텍스트에 한글이 없고, 두 언어의 도구·매개�
   const ko = toolTexts("ko");
   assert.equal(hasHangul(JSON.stringify(en)), false);
   assert.deepEqual(Object.keys(en.tools).sort(), Object.keys(ko.tools).sort());
-  assert.equal(Object.keys(en.tools).length, 17);
+  assert.equal(Object.keys(en.tools).length, 19);
   for (const k of Object.keys(en.tools) as (keyof typeof en.tools)[]) {
     assert.deepEqual(Object.keys(en.tools[k].params).sort(), Object.keys(ko.tools[k].params).sort(), k);
   }
@@ -27,4 +27,16 @@ test("어떤 도구 텍스트도 응답 언어를 지시하지 않는다", () =>
     const s = JSON.stringify(toolTexts(lang));
     assert.doesNotMatch(s, /respond in|reply in|answer in|in (English|Korean)|한국어로|영어로/i);
   }
+});
+
+test("tools_include_join_leave_ko_en: 참가·나가기 도구와 참가제 설명이 두 언어에 있다(v3.1.1)", async () => {
+  const { toolTexts } = await import("./tools.js");
+  const ko = toolTexts("ko").tools as any, en = toolTexts("en").tools as any;
+  assert.match(ko.join_server.description, /참가/);
+  assert.match(ko.leave_server.description, /나갑니다/);
+  assert.match(en.join_server.description, /[Jj]oin/);
+  assert.match(en.leave_server.description, /[Ll]eave/);
+  assert.match(ko.create_server.description, /참가한 계정만/);
+  assert.match(en.create_server.description, /accounts that joined/);
+  assert.equal(typeof ko.join_server.params.serverId, "string");
 });
