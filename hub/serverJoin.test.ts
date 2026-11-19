@@ -195,7 +195,7 @@ test("admin_sync_memberships_counts: 동기화는 유령 서버·계정을 지�
     const f = path.join(s.t.dataDir, "memberships.json");
     const j = memRaw(s.t.dataDir);
     j.servers["유령서버"] = { members: ["a"], history: ["a"] };
-    j.servers[s.sa].members.push("유령계정");
+    j.servers[s.sa].members.push("ghost-account");
     delete j.servers[s.sb];
     j.accounts.b = [...(j.accounts.b ?? []).filter((x: string) => x !== s.sb), s.sa]; // 계정 쪽에만 있는 짝(서버 A의 b)
     fs.writeFileSync(f, JSON.stringify(j));
@@ -209,7 +209,7 @@ test("admin_sync_memberships_counts: 동기화는 유령 서버·계정을 지�
     assert.deepEqual([r.ok, r.removedServers, r.removedMembers, r.addedServers, r.repaired], [true, 1, 1, 1, 1]); // 맞춘 짝: 서버 A의 b(계정 쪽에만 있었음) — 유령은 먼저 지워 세지 않음
     const after = memFile(t2.dataDir);
     assert.equal("유령서버" in after, false);
-    assert.equal(after[s.sa].includes("유령계정"), false);
+    assert.equal(after[s.sa].includes("ghost-account"), false);
     assert.deepEqual(after[s.sb], []);
     assert.equal(after[s.sa].includes("b"), true, "계정 쪽에만 있던 짝은 참가로 판정");
     adm2.c.close();
@@ -310,5 +310,35 @@ test("not_joined_hint_mentions_restart: 참가 안내는 옛 세션(도구 없�
     const r: any = await s.a.req("read", { channelId: s.cb });
     assert.match(r.error, /join_server/);
     assert.match(r.error, /다시 시작/);
+  } finally { s.t.hub.stop(); }
+});
+
+test("fanout_skips_unknown_accounts: 리스트에 없는 계정이 섞여 있어도 받은편지함 파일을 만들지 않는다", async () => {
+  const s = await twoServers();
+  try {
+    const adm = await admin(s.t);
+    adm.c.close();
+    s.t.hub.stop();
+    const j = memRaw(s.t.dataDir);
+    j.servers[s.sa].members.push("ghost-account");
+    fs.writeFileSync(path.join(s.t.dataDir, "memberships.json"), JSON.stringify(j));
+    const t2 = await startTestHub({ dataDir: s.t.dataDir });
+    const a2 = await login(t2.port, "a");
+    await a2.req("send", { channelId: s.ca, text: "유령에게 가면 안 됨" });
+    assert.equal(fs.existsSync(path.join(s.t.dataDir, "notifications", "ghost-account.jsonl")), false);
+    a2.close();
+    t2.hub.stop();
+  } catch (e) { s.t.hub.stop(); throw e; }
+});
+
+test("snapshot_has_account_view: 관리 스냅샷에 참가자 관점(계정 → 서버)도 실린다", async () => {
+  const s = await twoServers();
+  try {
+    await s.a.req("join_server", { serverId: s.sb });
+    const adm = await admin(s.t);
+    const snap = await adm.req("admin_snapshot");
+    assert.deepEqual(snap.membershipAccounts.a.sort(), [s.sa, s.sb].sort());
+    assert.deepEqual(snap.membershipAccounts.b, [s.sb]);
+    adm.c.close();
   } finally { s.t.hub.stop(); }
 });

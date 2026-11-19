@@ -1,5 +1,6 @@
 import net from "node:net";
 import http from "node:http";
+import fs from "node:fs";
 import path from "node:path";
 import { encodeFrame, FrameDecoder, FrameTooLargeError } from "../shared/framing.js";
 import { renderViewerHtml, isAllowedHost } from "./viewer.js";
@@ -14,7 +15,6 @@ import { InboxStore } from "./inbox.js";
 import { DmStore } from "./dm.js";
 import { ServerStore } from "./servers.js";
 import { MembershipStore } from "./memberships.js";
-import fs from "node:fs";
 import { nameKey, validateName } from "./names.js";
 import { isSafeAccountId } from "./ids.js";
 import { TrashStore } from "./trash.js";
@@ -1154,6 +1154,7 @@ export class Hub {
           securityFindings: this.security.recent(100),
           memberships: this.memberships.all(), // 서버 참가자 종합 리스트(서버 관점 현재 참가자, v3.1.1)
           membershipHistory: this.memberships.history(), // 서버 관점 참가 전적
+          membershipAccounts: this.memberships.accountsView(), // 참가자 관점(계정 → 서버)
           // 손상 원본을 백업하지 못해 이번 실행 동안 저장을 멈춘 색인(데이터 폴더 기준, v3 Minor ①).
           saveBlocked: [...([[this.dm, "dm"], [this.servers, "servers"]] as const).filter(([s]) => s.saveBlocked).map(([, sub]) => `${sub}/index.json`), ...(this.memberships.saveBlocked ? ["memberships.json"] : [])],
         });
@@ -1386,7 +1387,6 @@ export class Hub {
     return false;
   }
 
-  /** 채널 메시지를 수신 대상 계정들의 인박스에 append하고, 대기자를 깨운다. */
   /** 참가할 수 있는 서버: 로컬 서버와 공간 서버(s1:<spaceId>, 구성원 쪽 거울). 로비·DM·연결 영역은 아님. */
   private isJoinableServer(id: string): boolean {
     if (!id) return false;
@@ -1428,11 +1428,13 @@ export class Hub {
     this.memberships.seed(map);
   }
 
+  /** 채널 메시지를 수신 대상 계정들의 인박스에 append하고, 대기자를 깨운다. */
   protected fanout(ch: Channel, from: string, fromName: string, text: string, ts: number, origin?: MessageOrigin, skipUuid?: string): void {
     // 참가제 서버 채널(v3.1.1)은 그 서버 참가자만, 로비는 전체, DM은 두 사람
     const recipients = ch.members ?? (ch.serverId ? this.memberships.membersOf(ch.serverId) : this.accounts.allUuids());
     for (const uuid of recipients) {
       if (uuid === from || uuid === skipUuid) continue;
+      if (ch.serverId && !this.accounts.get(uuid)) continue; // 참가자 리스트에 남은 없는 계정(손으로 고친 파일 등)에는 인박스를 만들지 않는다
       // 통신 채널(v3.0)은 연결 계정에게만 전달한다.
       if (ch.area === "connection" && this.accounts.get(uuid)?.area !== "connection") continue;
       this.inbox.append(uuid, {

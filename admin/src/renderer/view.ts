@@ -647,7 +647,7 @@ export function hubAddressLine(port: number): string {
 }
 
 // ───── v3.1.1: 서버 참가자 종합 리스트 ─────
-type MemberSnap = Pick<Snapshot, "servers" | "accounts" | "memberships" | "membershipHistory">;
+type MemberSnap = Pick<Snapshot, "servers" | "accounts" | "memberships" | "membershipHistory" | "membershipAccounts">;
 const nameOfAccount = (s: MemberSnap, u: string) => s.accounts.find((a) => a.uuid === u)?.name ?? u.slice(0, 8);
 
 /** 서버 줄: "참가자: … | 참가 전적: …"(서버 관점). 옛 Hub(목록 없음)면 null. */
@@ -662,7 +662,8 @@ export function membersLine(serverId: string, s: MemberSnap): string | null {
 /** 계정 줄: "참가 서버: …"(참가자 관점). 공간 서버(s1:)는 spaceNames로 이름을 찾는다. 참가한 서버가 없거나 옛 Hub면 null. */
 export function joinedServersLine(uuid: string, s: MemberSnap, spaceNames: Record<string, string>): string | null {
   if (!s.memberships) return null;
-  const ids = Object.entries(s.memberships).filter(([, l]) => l.includes(uuid)).map(([id]) => id);
+  // 참가자 관점이 있으면 그것으로(동기화 '맞춤'의 이유가 보이게), 없으면(옛 스냅샷) 서버 관점에서 계산
+  const ids = s.membershipAccounts ? (s.membershipAccounts[uuid] ?? []) : Object.entries(s.memberships).filter(([, l]) => l.includes(uuid)).map(([id]) => id);
   if (ids.length === 0) return null;
   const name = (id: string) => s.servers.find((x) => x.id === id)?.name ?? spaceNames[id] ?? id;
   return tr("joined_servers_line", { list: ids.map(name).join(", ") });

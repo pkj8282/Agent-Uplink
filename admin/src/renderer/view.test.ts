@@ -858,3 +858,9 @@ test("sync_result_message: 동기화 결과 문구(맞춘 짝·지운 서버·�
   assert.equal(syncResultMessage({ removedServers: 0, removedMembers: 0, addedServers: 1, repaired: 0 }), "Member list synced: repaired 0 · removed servers 0 · removed members 0 · added servers 1");
   setLang("ko");
 });
+
+test("joined_servers_line_uses_account_view: 계정 줄은 참가자 관점(계정 → 서버)이 있으면 그것으로 보여 준다", () => {
+  setLang("ko");
+  const s = { ...snapM, memberships: { A: ["a"], B: [] }, membershipAccounts: { a: ["A", "B"] } } as any;
+  assert.equal(joinedServersLine("a", s, {}), "참가 서버: 프로젝트, 디자인", "서버 관점엔 B가 없어도 계정 관점에 있으면 보임(어긋남이 드러남)");
+});

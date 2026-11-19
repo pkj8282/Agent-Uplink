@@ -134,6 +134,8 @@ export interface Snapshot {
   memberships?: Record<string, string[]>;
   /** 서버 관점 참가 전적(한 번이라도 참가한 계정). */
   membershipHistory?: Record<string, string[]>;
+  /** 참가자 관점(계정 → 서버). 계정 줄 표시에 쓴다 — 두 관점이 어긋나면 드러나게. */
+  membershipAccounts?: Record<string, string[]>;
 }
 
 /** IPC 결과 봉투. hubDown은 Hub 미실행(접속 거부)일 때만 true. code는 Hub 오류 코드(관리 앱이 문구로 변환). */

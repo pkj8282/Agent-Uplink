@@ -5,6 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { backupCorrupt, writeFileAtomic } from "./fsutil.js";
+import { isSafeAccountId } from "./ids.js";
 
 const FILE = "memberships.json";
 
@@ -116,6 +117,11 @@ export class MembershipStore {
     return Object.fromEntries([...this.servers].map(([s, r]) => [s, [...r.members]]));
   }
 
+  /** 참가자 관점 전체(계정 → 서버). */
+  accountsView(): Record<string, string[]> {
+    return Object.fromEntries([...this.accounts].filter(([, l]) => l.length > 0).map(([u, l]) => [u, [...l]]));
+  }
+
   /** 서버 관점 참가 전적. */
   history(): Record<string, string[]> {
     return Object.fromEntries([...this.servers].map(([s, r]) => [s, [...r.history]]));
@@ -201,6 +207,9 @@ function strList(l: unknown): l is string[] {
   return Array.isArray(l) && l.every((u) => typeof u === "string");
 }
 
+/** 손으로 고친 파일의 위험한 계정 id(경로 문자 등)는 버린다 — 인박스 파일 경로로 쓰이므로(레드팀 원칙). */
+const safeIds = (l: string[]) => uniq(l.filter(isSafeAccountId));
+
 function parse(raw: string): { servers: Map<string, Row>; accounts: Map<string, string[]> } | null {
   let j: unknown;
   try { j = JSON.parse(raw); } catch { return null; }
@@ -212,19 +221,19 @@ function parse(raw: string): { servers: Map<string, Row>; accounts: Map<string, 
     // 옛 v1(서버 → 목록): 전적 = 현재 참가자, 참가자 관점은 계산해서 채운다
     for (const [s, l] of Object.entries(servers)) {
       if (!strList(l)) return null;
-      outS.set(s, { members: uniq(l), history: uniq(l) });
-      for (const u of uniq(l)) outA.set(u, add(outA.get(u) ?? [], s));
+      outS.set(s, { members: safeIds(l), history: safeIds(l) });
+      for (const u of safeIds(l)) outA.set(u, add(outA.get(u) ?? [], s));
     }
     return { servers: outS, accounts: outA };
   }
   if (v !== 2 || !accounts || typeof accounts !== "object" || Array.isArray(accounts)) return null;
   for (const [s, r] of Object.entries(servers)) {
     if (!r || typeof r !== "object" || !strList((r as Row).members) || !strList((r as Row).history)) return null;
-    outS.set(s, { members: uniq((r as Row).members), history: uniq((r as Row).history) });
+    outS.set(s, { members: safeIds((r as Row).members), history: safeIds((r as Row).history) });
   }
   for (const [u, l] of Object.entries(accounts)) {
     if (!strList(l)) return null;
-    outA.set(u, uniq(l));
+    if (isSafeAccountId(u)) outA.set(u, uniq(l));
   }
   return { servers: outS, accounts: outA };
 }

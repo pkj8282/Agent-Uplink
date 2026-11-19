@@ -131,6 +131,7 @@ export class AdminClient {
       saveBlocked: r.saveBlocked, // 〃(v3.0 이전 Hub)
       memberships: r.memberships, // 〃(v3.1.1 이전 Hub)
       membershipHistory: r.membershipHistory,
+      membershipAccounts: r.membershipAccounts,
     };
   }
 

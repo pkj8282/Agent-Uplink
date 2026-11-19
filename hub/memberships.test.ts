@@ -170,3 +170,13 @@ test("corrupt_backup_failure_blocks_save: 손상 파일을 옆으로 옮기지 �
   s.join("A", "a");
   assert.equal(fs.readFileSync(f, "utf8"), "{ broken", "원본(증거) 보존");
 });
+
+// ───── 최종 리뷰 Minor: 계정 id 검사 ─────
+test("unsafe_account_ids_dropped_on_load: 손으로 고친 파일의 위험한 계정 id(경로 문자 등)는 읽을 때 버린다", () => {
+  const dir = tempDir("uplink-mem-");
+  fs.writeFileSync(path.join(dir, "memberships.json"), JSON.stringify({ v: 2, servers: { A: { members: ["a", "../evil", "x/y"], history: ["a", "..\evil"] } }, accounts: { a: ["A"], "../evil": ["A"] } }));
+  const s = new MembershipStore({ dataDir: dir });
+  assert.deepEqual(s.membersOf("A"), ["a"]);
+  assert.deepEqual(s.historyOf("A"), ["a"]);
+  assert.deepEqual(s.serversOf("../evil"), []);
+});
