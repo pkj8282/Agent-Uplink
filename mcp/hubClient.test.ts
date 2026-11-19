@@ -84,7 +84,7 @@ test("open_dm으로 연 채널로 두 계정이 DM을 주고받는다", async ()
   await new Promise((r) => setTimeout(r, 300));
 });
 
-test("서버·채널을 만들고 전체 공개 채널로 메시지를 주고받는다", async () => {
+test("서버·채널을 만들고, 참가한 계정끼리 서버 채널로 메시지를 주고받는다(v3.1.1 참가제)", async () => {
   const port = freshPort();
   const a = makeClient(port, "acc-A", "A");
   const b = makeClient(port, "acc-B", "B");
@@ -95,6 +95,7 @@ test("서버·채널을 만들고 전체 공개 채널로 메시지를 주고받
   assert.equal(ch.ok, true);
   assert.equal((await b.listServers()).servers!.find((s) => s.serverId === srv.serverId)!.name, "A서버");
   assert.equal((await b.listChannels(srv.serverId!)).channels![0].channelId, ch.channelId);
+  assert.equal((await (b as any).request("join_server", { serverId: srv.serverId })).changed, true);
   await a.send(ch.channelId!, "서버글");
   const got = await b.wait(3000);
   assert.deepEqual(got.items!.map((i) => i.text), ["서버글"]);

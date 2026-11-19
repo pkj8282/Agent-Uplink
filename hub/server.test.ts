@@ -302,7 +302,7 @@ test("재시작 시 끊긴 DM 역색인을 dm/index.json 기준으로 복구한�
   b2.close(); h2.hub.stop();
 });
 
-test("create_server/create_channel/list_*가 동작하고 서버 채널은 전체 공개로 fan-out된다", async () => {
+test("create_server/create_channel/list_*가 동작하고 서버 채널은 참가한 계정에게 fan-out된다(v3.1.1 참가제)", async () => {
   const { hub, port } = await startHub();
   const a = new Client(port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
   const b = new Client(port); await b.ready(); await b.req("login", { uuid: "u2", name: "B" });
@@ -312,6 +312,9 @@ test("create_server/create_channel/list_*가 동작하고 서버 채널은 전�
   const ch = await a.req("create_channel", { serverId: srv.serverId, name: "논의방" });
   assert.equal(ch.ok, true);
   assert.equal((await b.req("list_channels", { serverId: srv.serverId })).channels![0].channelId, ch.channelId);
+  await a.req("send", { channelId: ch.channelId, text: "참가 전 글" });
+  assert.deepEqual((await b.req("check")).items!.map((i) => i.text), [], "참가 전에는 안 옴");
+  assert.equal((await b.req("join_server", { serverId: srv.serverId })).changed, true);
   await a.req("send", { channelId: ch.channelId, text: "서버채널 글" });
   assert.deepEqual((await b.req("check")).items!.map((i) => i.text), ["서버채널 글"]);
   a.close(); b.close(); hub.stop();
