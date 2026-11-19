@@ -65,7 +65,7 @@ test("corrupt_file_moved_and_fresh: 손상된 파일은 옆으로 옮기고 빈 
     const s = new MembershipStore({ dataDir: dir });
     assert.equal(s.fresh, true, bad);
     assert.deepEqual(s.all(), {});
-    assert.ok(fs.readdirSync(dir).some((f) => f.startsWith("memberships.json.bad-")), bad);
+    assert.ok(fs.readdirSync(dir).some((f) => f.startsWith("memberships.json.corrupt-")), bad);
   }
 });
 
@@ -138,4 +138,35 @@ test("seed_fills_history: 처음 채우기(글 쓴 계정)는 전적에도 들�
   s.seed({ A: ["a"] });
   assert.deepEqual(s.historyOf("A"), ["a"]);
   assert.deepEqual(s.serversOf("a"), ["A"]);
+});
+
+// ───── 최종 리뷰 Important 1·2: 읽기 오류·저장 실패 ─────
+test("read_error_not_treated_as_missing: 없는 게 아닌 읽기 오류면 새로 채우지 않고 저장도 막는다(정상 파일 덮어쓰기 방지)", () => {
+  const dir = tempDir("uplink-mem-");
+  fs.mkdirSync(path.join(dir, "memberships.json")); // 읽으면 EISDIR(ENOENT 아님)
+  const s = new MembershipStore({ dataDir: dir });
+  assert.equal(s.fresh, false, "기록으로 다시 채우면 안 됨");
+  assert.equal(s.saveBlocked, true);
+  assert.doesNotThrow(() => s.join("A", "a"));
+  assert.equal(fs.statSync(path.join(dir, "memberships.json")).isDirectory(), true, "그대로 둠");
+});
+
+test("save_failure_does_not_throw: 저장이 실패해도 던지지 않고 메모리 상태는 유지", () => {
+  const { dir, s } = store();
+  fs.mkdirSync(path.join(dir, "memberships.json")); // 이제 쓰기가 실패한다
+  assert.doesNotThrow(() => s.join("A", "a"));
+  assert.equal(s.isMember("A", "a"), true);
+  assert.doesNotThrow(() => s.seed({ B: ["b"] }));
+  assert.doesNotThrow(() => s.sync({ servers: ["A"], accounts: ["a"] }));
+});
+
+test("corrupt_backup_failure_blocks_save: 손상 파일을 옆으로 옮기지 못하면 덮어쓰지 않는다", () => {
+  const dir = tempDir("uplink-mem-");
+  const f = path.join(dir, "memberships.json");
+  fs.writeFileSync(f, "{ broken");
+  const s = new MembershipStore({ dataDir: dir, backup: () => null });
+  assert.equal(s.fresh, true);
+  assert.equal(s.saveBlocked, true);
+  s.join("A", "a");
+  assert.equal(fs.readFileSync(f, "utf8"), "{ broken", "원본(증거) 보존");
 });

@@ -391,6 +391,19 @@ export class TrashOps {
       if (meta.kind === "server" && !conn && meta.memberships && this.d.memberships) {
         this.d.memberships.restoreServer(srv.id, meta.memberships.filter((u) => !!accounts.get(u)), (meta.membershipHistory ?? []).filter((u) => !!accounts.get(u)));
       }
+      // 참가 정보가 없는 항목(3.1.0 시절에 지운 서버, 서버째 다시 만들어진 채널 복원)으로 참가자 0명이 되면 되살린 기록의 글쓴이로 채운다
+      if (!conn && !meta.memberships && this.d.memberships && this.d.memberships.membersOf(srv.id).length === 0) {
+        const posters = new Set<string>();
+        for (const ch of meta.channels ?? []) {
+          try {
+            for (const line of fs.readFileSync(this.logPathOf(meta, ch.id), "utf8").split("\n")) {
+              if (!line) continue;
+              try { const from = (JSON.parse(line) as { from?: unknown }).from; if (typeof from === "string" && accounts.get(from)) posters.add(from); } catch { /* 손상 줄 */ }
+            }
+          } catch { /* 로그 없음 */ }
+        }
+        if (posters.size) this.d.memberships.restoreServer(srv.id, [...posters], [...posters]);
+      }
       trash.remove(meta.id);
       report.itemRemoved = true;
       if (conn) this.commsDeps().changed();

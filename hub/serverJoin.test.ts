@@ -249,3 +249,66 @@ test("history_in_snapshot_and_trash: 나간 계정은 참가 전적에 남고, �
     adm.c.close();
   } finally { s.t.hub.stop(); }
 });
+
+// ───── 최종 리뷰 Important 3·4·(Minor→Important) ─────
+test("leave_drops_queued: 나간 서버의, 아직 안 읽은 메시지는 받은편지함에서 걸러진다(묶음 상한을 넘어도)", async () => {
+  const s = await twoServers();
+  try {
+    const adm = await admin(s.t);
+    await adm.req("admin_set_config", { patch: { inboxMaxBatch: 2 } });
+    await s.a.req("join_server", { serverId: s.sb });
+    for (let i = 0; i < 5; i++) await s.b.req("send", { channelId: s.cb, text: `쌓임${i}` });
+    await s.b.req("send", { channelId: "lobby", text: "로비" });
+    await s.a.req("leave_server", { serverId: s.sb });
+    assert.deepEqual(texts(await s.a.req("check")), ["로비"], "나간 서버 것은 걸러지고 뒤의 로비 글이 온다");
+    adm.c.close();
+  } finally { s.t.hub.stop(); }
+});
+
+test("sync_keeps_space_rows_known_on_disk: 동기화는 지금 활성 목록에 없더라도 디스크에 있는 공간 서버 줄을 지우지 않는다", async () => {
+  const s = await twoServers();
+  try {
+    const sp = path.join(s.t.dataDir, "connection", "spaces1", "sp-pending");
+    fs.mkdirSync(sp, { recursive: true });
+    const adm = await admin(s.t);
+    adm.c.close();
+    s.t.hub.stop();
+    const j = memRaw(s.t.dataDir);
+    j.servers["s1:sp-pending"] = { members: ["a"], history: ["a"] };
+    j.accounts.a = [...(j.accounts.a ?? []), "s1:sp-pending"];
+    fs.writeFileSync(path.join(s.t.dataDir, "memberships.json"), JSON.stringify(j));
+    const t2 = await startTestHub({ dataDir: s.t.dataDir });
+    const adm2 = await admin(t2);
+    const r = await adm2.req("admin_sync_memberships");
+    assert.equal(r.removedServers, 0);
+    assert.deepEqual(memFile(t2.dataDir)["s1:sp-pending"], ["a"]);
+    adm2.c.close();
+    t2.hub.stop();
+  } catch (e) { s.t.hub.stop(); throw e; }
+});
+
+test("old_trash_server_restore_seeds_from_logs: 3.1.0 시절에 지운 서버(참가 정보 없음)를 되살리면 글 쓴 계정이 참가자가 된다", async () => {
+  const s = await twoServers();
+  try {
+    await s.b.req("send", { channelId: s.cb, text: "비의 글" });
+    const adm = await admin(s.t);
+    await adm.req("admin_delete_server", { serverId: s.sb });
+    const id = await trashIdOf(adm, "server");
+    const metaFile = path.join(s.t.dataDir, "trash", id, "meta.json");
+    const meta = JSON.parse(fs.readFileSync(metaFile, "utf8"));
+    delete meta.memberships; delete meta.membershipHistory; // 옛 항목처럼
+    fs.writeFileSync(metaFile, JSON.stringify(meta));
+    assert.equal((await adm.req("admin_restore_trash", { trashId: id })).ok, true);
+    assert.deepEqual(memFile(s.t.dataDir)[s.sb], ["b"]);
+    adm.c.close();
+  } finally { s.t.hub.stop(); }
+});
+
+test("not_joined_hint_mentions_restart: 참가 안내는 옛 세션(도구 없음)에게 다시 시작하라고도 말한다", async () => {
+  const s = await twoServers();
+  try {
+    const r: any = await s.a.req("read", { channelId: s.cb });
+    assert.match(r.error, /join_server/);
+    assert.match(r.error, /다시 시작/);
+  } finally { s.t.hub.stop(); }
+});

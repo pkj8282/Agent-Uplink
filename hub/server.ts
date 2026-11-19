@@ -206,6 +206,7 @@ export class Hub {
         process.stderr.write(`${this.msg("log_index_save_blocked", { file: path.join(this.opts.dataDir, sub, "index.json") })}\n`);
       }
     }
+    if (this.memberships.saveBlocked) process.stderr.write(`${this.msg("log_index_save_blocked", { file: path.join(this.opts.dataDir, "memberships.json") })}\n`);
     // 통신 관리자는 휴지통보다 먼저 만든다 — 통신 항목의 크래시 재실행(recoverPending)이 통신 저장소를 쓴다. 생성자는 파일을 건드리지 않는다.
     this.conn = new ConnectionManager({
       dataDir: this.opts.dataDir,
@@ -1154,7 +1155,7 @@ export class Hub {
           memberships: this.memberships.all(), // 서버 참가자 종합 리스트(서버 관점 현재 참가자, v3.1.1)
           membershipHistory: this.memberships.history(), // 서버 관점 참가 전적
           // 손상 원본을 백업하지 못해 이번 실행 동안 저장을 멈춘 색인(데이터 폴더 기준, v3 Minor ①).
-          saveBlocked: ([[this.dm, "dm"], [this.servers, "servers"]] as const).filter(([s]) => s.saveBlocked).map(([, sub]) => `${sub}/index.json`),
+          saveBlocked: [...([[this.dm, "dm"], [this.servers, "servers"]] as const).filter(([s]) => s.saveBlocked).map(([, sub]) => `${sub}/index.json`), ...(this.memberships.saveBlocked ? ["memberships.json"] : [])],
         });
         return;
       }
@@ -1162,7 +1163,10 @@ export class Hub {
       case "admin_sync_memberships": {
         if (!adminAuth()) return;
         // 혹시 모를 꼬임 대비: 없는 서버 줄·없는 계정 삭제, 새 서버는 빈 줄(기록을 다시 훑어 참가시키지는 않음)
-        const real = [...this.servers.listServers().map((s) => s.id), ...this.conn.space1ServersFor().map((s) => s.serverId)];
+        // 공간 서버는 지금 활성 목록(listing)만이 아니라 불러온 공간·디스크의 공간 폴더 전부 — 잠깐 pending이거나 통신이 안 켜졌을 때 줄을 지우지 않게
+        const spaceIds = new Set(this.conn.space1Status().filter((sp) => sp.role === "member").map((sp) => sp.spaceId));
+        try { for (const d of fs.readdirSync(path.join(this.opts.dataDir, "connection", "spaces1"))) spaceIds.add(d); } catch { /* 없음 */ }
+        const real = [...this.servers.listServers().map((s) => s.id), ...[...spaceIds].map((id) => `s1:${id}`)];
         reply({ ok: true, ...this.memberships.sync({ servers: real, accounts: this.accounts.allUuids() }) });
         return;
       }
@@ -1326,15 +1330,24 @@ export class Hub {
   private drain(uuid: string): InboxItem[] {
     const acc = this.accounts.get(uuid);
     if (!acc) return []; // 삭제된 계정(끊기기 전 잔여 호출 등)에서도 크래시하지 않는다
-    const cursor = acc.inboxCursor;
-    const items = this.inbox.since(uuid, cursor, this.config.inboxMaxBatch);
-    if (items.length) {
-      const last = items[items.length - 1].seq;
-      this.accounts.setInboxCursor(uuid, last);
+    // 참가제(v3.1.1): 이미 쌓인 항목 중 참가하지 않은 서버 채널 것은 건너뛴다(업그레이드 전에 들어온 것·나간 뒤 남은 것).
+    // 커서는 그대로 전진하고, 한 묶음이 전부 걸러지면 다음 묶음을 이어서 본다(상한 있음).
+    const visible = (i: InboxItem) => {
+      const sid = this.channels.getChannel(i.channelId)?.serverId;
+      return !sid || this.memberships.isMember(sid, uuid);
+    };
+    let cursor = acc.inboxCursor;
+    for (let round = 0; round < 50; round++) {
+      const items = this.inbox.since(uuid, cursor, this.config.inboxMaxBatch);
+      if (!items.length) return [];
+      cursor = items[items.length - 1].seq;
+      this.accounts.setInboxCursor(uuid, cursor);
       // 소비분이 많이 쌓였을 때만 압축해 인박스 무한 증가를 막는다(재작성은 드물게).
-      if (this.inbox.size(uuid) > INBOX_COMPACT_THRESHOLD) this.inbox.compact(uuid, last);
+      if (this.inbox.size(uuid) > INBOX_COMPACT_THRESHOLD) this.inbox.compact(uuid, cursor);
+      const shown = items.filter(visible);
+      if (shown.length) return shown;
     }
-    return items;
+    return [];
   }
 
   /** peer를 UUID(우선) 또는 유일한 이름으로 해석한다. */

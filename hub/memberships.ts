@@ -4,7 +4,7 @@
 // 참가 전적은 기록일 뿐 실행 중 판정(받은편지함·read·send)이나 동기화 참가 판정에는 쓰지 않는다.
 import fs from "node:fs";
 import path from "node:path";
-import { writeFileAtomic } from "./fsutil.js";
+import { backupCorrupt, writeFileAtomic } from "./fsutil.js";
 
 const FILE = "memberships.json";
 
@@ -19,17 +19,26 @@ export class MembershipStore {
   private accounts = new Map<string, string[]>();
   /** 파일이 없거나 손상돼 빈 목록으로 시작했는가 — 이때만 채널 기록으로 처음 채운다. */
   readonly fresh: boolean;
+  /** 이번 실행 동안 저장을 멈췄는가(읽기 오류·손상 원본을 옮기지 못함) — 원본을 덮어쓰지 않는다. 다른 색인과 같은 관례. */
+  saveBlocked = false;
   private readonly file: string;
 
-  constructor(opts: { dataDir: string }) {
+  constructor(opts: { dataDir: string; backup?: (file: string) => string | null }) {
     this.file = path.join(opts.dataDir, FILE);
-    let raw: string | null = null;
-    try { raw = fs.readFileSync(this.file, "utf8"); } catch { /* 없음 */ }
-    if (raw === null) { this.fresh = true; return; }
+    let raw: string;
+    try {
+      raw = fs.readFileSync(this.file, "utf8");
+    } catch (e) {
+      // 정말 없을 때만 새로 시작. 그 밖의 읽기 오류(EBUSY·EPERM 등)는 정상 파일일 수 있으니 채우지도 덮어쓰지도 않는다
+      // — 빈 목록이라 이번 실행엔 아무도 서버 채널을 받지 않는다(새지 않는 쪽).
+      this.fresh = (e as NodeJS.ErrnoException).code === "ENOENT";
+      if (!this.fresh) this.saveBlocked = true;
+      return;
+    }
     const parsed = parse(raw);
     if (!parsed) {
-      // 손상: 지우지 않고 옆으로 옮겨 두고 새로 시작(Hub가 기록으로 다시 채운다)
-      try { fs.renameSync(this.file, `${this.file}.bad-${Date.now()}`); } catch { /* 옮기지 못해도 새 파일로 덮는다 */ }
+      // 손상: 원본을 보존(옆으로 옮기거나 복사)하고 새로 시작(Hub가 기록으로 다시 채운다). 보존하지 못하면 덮어쓰지 않는다.
+      if (!(opts.backup ?? backupCorrupt)(this.file)) this.saveBlocked = true;
       this.fresh = true;
       return;
     }
@@ -39,9 +48,14 @@ export class MembershipStore {
   }
 
   private save(): void {
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
+    if (this.saveBlocked) return;
     const accounts = Object.fromEntries([...this.accounts].filter(([, l]) => l.length > 0));
-    writeFileAtomic(this.file, JSON.stringify({ v: 2, servers: Object.fromEntries(this.servers), accounts }, null, 2));
+    try {
+      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      writeFileAtomic(this.file, JSON.stringify({ v: 2, servers: Object.fromEntries(this.servers), accounts }, null, 2));
+    } catch {
+      // 쓰기 실패해도 메모리 상태는 유지(다른 색인과 같은 관례) — Hub 기동·요청을 멈추지 않는다
+    }
   }
 
   private row(serverId: string): Row {
