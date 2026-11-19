@@ -29,7 +29,7 @@ function block(id: string): string {
 test("nav_order_matches_design: 왼쪽 목록 순서·하위 탭이 설계와 같다", () => {
   assert.deepEqual(NAV.map((n) => [n.id, (n.subs ?? []).map((s) => s.id)]), [
     ["app", []], ["limits", []], ["servers", ["local", "multi"]], ["accounts", ["local", "multi"]],
-    ["security", []], ["multi", ["comms", "space1", "mesh", "storage"]], ["trash", []],
+    ["security", []], ["multi", ["comms", "space1", "mesh", "storage"]], ["trash", []], ["quarantine", []],
   ]);
 });
 

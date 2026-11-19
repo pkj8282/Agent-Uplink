@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount, parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage, connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, storageStatusLine, verifyResultMessage, parsePruneForm, parseSupabaseForm } from "./view.js";
+import { ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf, emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage, restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount, parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage, connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, storageStatusLine, verifyResultMessage, parsePruneForm, parseSupabaseForm, quarantineSummary, quarantineReasonLabel, quarantineDeleteConfirmMessage } from "./view.js";
 import { setLang, tr } from "./lang.js";
 import { hasHangul } from "../../../hub/testing.js";
 
@@ -863,4 +863,18 @@ test("joined_servers_line_uses_account_view: 계정 줄은 참가자 관점(계�
   setLang("ko");
   const s = { ...snapM, memberships: { A: ["a"], B: [] }, membershipAccounts: { a: ["A", "B"] } } as any;
   assert.equal(joinedServersLine("a", s, {}), "참가 서버: 프로젝트, 디자인", "서버 관점엔 B가 없어도 계정 관점에 있으면 보임(어긋남이 드러남)");
+});
+
+test("quarantine_view: 격리 요약·이유 문구·삭제 확인(한/영)", () => {
+  setLang("ko");
+  assert.equal(quarantineSummary(undefined), "이 Hub는 받은편지함 격리를 지원하지 않습니다.");
+  assert.equal(quarantineSummary({ totalCount: 2, totalBytes: 3072, accounts: [] }), "2개 항목 · 3.0 KB");
+  assert.equal(quarantineReasonLabel("channel_removed"), "채널이 목록에서 빠짐");
+  assert.match(quarantineDeleteConfirmMessage(2, 3072), /2개 항목\(3\.0 KB\)[\s\S]*되돌릴 수 없습니다/);
+  setLang("en");
+  try {
+    for (const r of ["channel_removed", "startup_missing", "check_missing"] as const) assert.equal(hasHangul(quarantineReasonLabel(r)), false, r);
+    assert.equal(hasHangul(quarantineSummary({ totalCount: 0, totalBytes: 0, accounts: [] })), false);
+    assert.equal(hasHangul(quarantineDeleteConfirmMessage(1, 10)), false);
+  } finally { setLang("ko"); }
 });

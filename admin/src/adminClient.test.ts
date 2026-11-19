@@ -599,3 +599,23 @@ test("snapshot_passes_memberships: 관리 앱 클라이언트가 참가자 리�
     a.close();
   } finally { t.hub.stop(); }
 });
+
+test("snapshot_passes_quarantine: 관리 앱 클라이언트가 받은편지함 격리를 버리지 않고, 격리 삭제를 보낸다(2026-11-20)", async () => {
+  const t = await startHub();
+  try {
+    const a = new Raw(t.port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+    const b = new Raw(t.port); await b.ready(); await b.req("login", { uuid: "u2", name: "B" });
+    const srv: any = await a.req("create_server", { name: "S" });
+    const ch: any = await a.req("create_channel", { serverId: srv.serverId, name: "c" });
+    await b.req("join_server", { serverId: srv.serverId });
+    await a.req("send", { channelId: ch.channelId, text: "q" });
+    await t.client.deleteChannel(ch.channelId);
+    const snap = await t.client.snapshot();
+    assert.equal(snap.quarantine?.totalCount, 1);
+    assert.equal(snap.quarantine?.accounts[0].items[0].preview, "q");
+    const one = snap.quarantine!.accounts[0];
+    assert.deepEqual(await t.client.deleteQuarantine({ items: [{ account: one.account, seq: one.items[0].seq }] }), { removed: 1 });
+    assert.deepEqual(await t.client.deleteQuarantine({ all: true }), { removed: 0 });
+    a.close(); b.close();
+  } finally { t.hub.stop(); }
+});

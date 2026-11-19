@@ -149,7 +149,21 @@ export type Request =
   | { op: "admin_delete_dm"; id: number; token: string; channelId: string }
   | { op: "admin_restore_trash"; id: number; token: string; trashId?: string; confirmRename?: boolean }
   | { op: "admin_empty_trash"; id: number; token: string }
-  | { op: "admin_sync_memberships"; id: number; token: string };
+  | { op: "admin_sync_memberships"; id: number; token: string }
+  | { op: "admin_quarantine_delete"; id: number; token: string; all?: boolean; items?: { account: string; seq: number }[] };
+
+/** 관리 앱용 받은편지함 격리 요약(2026-11-20). 계정별 항목은 받은편지함 순서. 본문은 앞 200자만. */
+export interface QuarantineSnapshot {
+  totalCount: number;
+  totalBytes: number;
+  accounts: {
+    account: string;
+    name: string;
+    count: number;
+    bytes: number;
+    items: { seq: number; ts: number; channelId: string; channelKind: ChannelKind; channelLabel: string; fromName: string; preview: string; reason: "channel_removed" | "startup_missing" | "check_missing"; at: number; bytes: number }[];
+  }[];
+}
 
 export interface Response {
   ok: boolean;
@@ -188,7 +202,8 @@ export interface Response {
   removedMembers?: number; // admin_sync_memberships
   addedServers?: number; // admin_sync_memberships
   restored?: RestoreReport; // admin_restore_trash
-  removed?: number; // admin_empty_trash
+  removed?: number; // admin_empty_trash·admin_quarantine_delete
+  quarantine?: QuarantineSnapshot; // admin_snapshot: 받은편지함 격리(2026-11-20)
   error?: string;
   code?: string; // 관리 앱이 문구로 바꾸는 오류 코드(휴지통 op)
   conflicts?: NameConflict[]; // admin_restore_trash: code=name_conflict

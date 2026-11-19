@@ -61,6 +61,7 @@ export const HUB_MESSAGES = defineCatalog({
     http_too_many_viewers: "뷰어 연결이 너무 많습니다.",
     // 휴지통 복원 실패(code는 trashOps가 정한다)
     trash_bad_id: "잘못된 휴지통 항목 ID입니다.",
+    quarantine_target_invalid: "지울 격리 항목을 정하지 않았거나 형식이 잘못됐습니다.",
     trash_missing: "휴지통 항목 파일이 없습니다(이미 지워진 것 같습니다).",
     trash_missing_or_damaged: "휴지통 항목 파일이 없거나 손상됐습니다(이미 지워진 것 같습니다).",
     trash_finishing: "이 항목은 삭제를 마무리하는 중입니다. 같은 대상을 다시 삭제하거나 Hub를 재시작하세요.",
@@ -160,6 +161,7 @@ export const HUB_MESSAGES = defineCatalog({
     http_not_ready: "Hub is starting",
     http_too_many_viewers: "Too many viewer connections.",
     trash_bad_id: "Invalid trash item ID.",
+    quarantine_target_invalid: "No quarantined items were chosen to delete, or the request is malformed.",
     trash_missing: "The trash item's files are missing (it seems to be deleted already).",
     trash_missing_or_damaged: "The trash item's files are missing or damaged (it seems to be deleted already).",
     trash_finishing: "This item is still being deleted. Delete the same target again or restart the hub.",

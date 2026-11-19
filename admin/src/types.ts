@@ -11,6 +11,17 @@ export interface AdminConfig {
 
 export type ConfigPatch = Partial<Omit<AdminConfig, "language">> & { language?: Lang };
 
+export type QuarantineReason = "channel_removed" | "startup_missing" | "check_missing";
+export interface QuarantineItem { seq: number; ts: number; channelId: string; channelKind: "dm" | "server"; channelLabel: string; fromName: string; preview: string; reason: QuarantineReason; at: number; bytes: number }
+/** 받은편지함 격리: 계정별 항목(받은편지함 순서)과 용량. */
+export interface QuarantineSnapshot {
+  totalCount: number;
+  totalBytes: number;
+  accounts: { account: string; name: string; count: number; bytes: number; items: QuarantineItem[] }[];
+}
+/** 격리 삭제 대상: 전체 또는 (계정, seq) 목록. */
+export type QuarantineDeleteInput = { all: true } | { items: { account: string; seq: number }[] };
+
 export interface SnapshotServer { id: string; name: string; channels: { id: string; name: string }[]; }
 export interface SnapshotAccount { uuid: string; name: string; description?: string; online?: boolean; /** 연결 계정(v3.1 Hub). 없으면 로컬. */ area?: "connection"; }
 export interface SnapshotDm { channelId: string; members: string[]; label: string; }
@@ -136,6 +147,8 @@ export interface Snapshot {
   membershipHistory?: Record<string, string[]>;
   /** 참가자 관점(계정 → 서버). 계정 줄 표시에 쓴다 — 두 관점이 어긋나면 드러나게. */
   membershipAccounts?: Record<string, string[]>;
+  /** 받은편지함 격리(2026-11-20 Hub). undefined = 구버전 Hub. */
+  quarantine?: QuarantineSnapshot;
 }
 
 /** IPC 결과 봉투. hubDown은 Hub 미실행(접속 거부)일 때만 true. code는 Hub 오류 코드(관리 앱이 문구로 변환). */
@@ -153,6 +166,8 @@ export interface AdminApi {
   deleteDm(channelId: string): Promise<IpcResult<void>>;
   restoreTrash(id: string, confirmRename: boolean): Promise<IpcResult<RestoreReport>>;
   emptyTrash(): Promise<IpcResult<{ removed: number }>>;
+  /** 받은편지함 격리 항목 삭제(일부·전체). */
+  deleteQuarantine(input: QuarantineDeleteInput): Promise<IpcResult<{ removed: number }>>;
   openViewer(): Promise<IpcResult<void>>;
   /** Hub 수동 시작(v3.1). started: false = 이미 떠 있음. 실패 code: no_launch_info | launch_untrusted. */
   startHub(): Promise<IpcResult<{ started: boolean }>>;

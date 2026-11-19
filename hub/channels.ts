@@ -34,12 +34,22 @@ export class ChannelStore {
   }
 
   /** file: 로그 파일을 직접 정할 때(v3.0 통신 채널 — connection/ 아래). */
+  /** 채널이 목록에 들어왔을 때(받은편지함 격리 해제, 2026-11-20). 처음 등록일 때만 부른다. */
+  onRegister: ((ch: Channel) => void) | null = null;
+  /** 채널이 목록에서 빠졌을 때(받은편지함 격리). 빠지기 직전의 채널 정보를 준다. */
+  onUnregister: ((ch: Channel) => void) | null = null;
+
   register(ch: Channel, file?: string): void {
     const existing = this.entries.get(ch.id);
     if (existing) {
       existing.channel = ch; // 메타 갱신(멱등)
       return;
     }
+    this.load(ch, file);
+    this.onRegister?.(ch);
+  }
+
+  private load(ch: Channel, file?: string): void {
     file ??= this.pathFor(ch);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const entry: Entry = { channel: ch, ring: [], seq: 0, file };
@@ -154,6 +164,10 @@ export class ChannelStore {
 
   /** 채널 메타·인메모리 로그를 제거한다(라우팅 불가). 로그 파일은 휴지통 이동(trashOps)이 맡는다. */
   unregister(channelId: string): boolean {
-    return this.entries.delete(channelId);
+    const ch = this.entries.get(channelId)?.channel;
+    if (!ch) return false;
+    this.entries.delete(channelId);
+    this.onUnregister?.(ch);
+    return true;
   }
 }

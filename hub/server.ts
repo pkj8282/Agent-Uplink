@@ -11,7 +11,7 @@ import { secureDataDir, SecureDeps } from "./secure.js";
 import { newNonce, isNonce, clientProof, hubProof, proofEquals } from "../shared/auth.js";
 import { ChannelStore } from "./channels.js";
 import { AccountStore } from "./accounts.js";
-import { InboxStore } from "./inbox.js";
+import { InboxStore, publicItem, type StoredInboxItem } from "./inbox.js";
 import { DmStore } from "./dm.js";
 import { ServerStore } from "./servers.js";
 import { MembershipStore } from "./memberships.js";
@@ -42,6 +42,7 @@ import {
   Channel,
   InboxItem,
   MessageOrigin,
+  QuarantineSnapshot,
   Request,
   Response,
 } from "../shared/protocol.js";
@@ -253,6 +254,10 @@ export class Hub {
     if (this.memberships.fresh) this.seedMemberships();
     // 이전 버전 삭제·크래시로 남은 로그를 휴지통으로(손상된 서버 인덱스면 서버 쪽은 건너뜀 — 손으로 되살릴 여지)
     this.trashOps.sweepOrphans({ servers: !this.servers.sweepBlocked, dm: true });
+    // 받은편지함 격리(2026-11-20): 로컬 채널을 다 올린 뒤 한 번 훑고, 이후 채널이 빠지고 들어오는 순간 격리·해제한다.
+    this.quarantineStartupScan();
+    this.channels.onUnregister = (ch) => this.quarantineChannel(ch);
+    this.channels.onRegister = (ch) => this.releaseChannel(ch);
     this.security.finishStartupScan();
     this.setConnStatusSource(this.conn);
   }
@@ -1155,6 +1160,7 @@ export class Hub {
           memberships: this.memberships.all(), // 서버 참가자 종합 리스트(서버 관점 현재 참가자, v3.1.1)
           membershipHistory: this.memberships.history(), // 서버 관점 참가 전적
           membershipAccounts: this.memberships.accountsView(), // 참가자 관점(계정 → 서버)
+          quarantine: this.quarantineSnapshot(), // 받은편지함 격리(2026-11-20)
           // 손상 원본을 백업하지 못해 이번 실행 동안 저장을 멈춘 색인(데이터 폴더 기준, v3 Minor ①).
           saveBlocked: [...([[this.dm, "dm"], [this.servers, "servers"]] as const).filter(([s]) => s.saveBlocked).map(([, sub]) => `${sub}/index.json`), ...(this.memberships.saveBlocked ? ["memberships.json"] : [])],
         });
@@ -1253,7 +1259,38 @@ export class Hub {
 
       case "admin_empty_trash": {
         if (!adminAuth()) return;
-        reply({ ok: true, removed: this.trash.empty() });
+        const removed = this.trash.empty();
+        this.dropGoneQuarantine(); // 되살릴 길이 없어진 격리 항목은 버린다
+        reply({ ok: true, removed });
+        return;
+      }
+
+      case "admin_quarantine_delete": {
+        if (!adminAuth()) return;
+        const q = req as { all?: unknown; items?: unknown };
+        if (q.all === true) {
+          let removed = 0;
+          const users = new Set<string>();
+          for (const s of this.qIndex.values()) for (const u of s) users.add(u);
+          for (const u of users) removed += this.dropQuarantined(u, () => true);
+          reply({ ok: true, removed });
+          return;
+        }
+        const items = q.items;
+        if (!Array.isArray(items) || items.length === 0 || items.length > 1000
+          || !items.every((x) => x && typeof x === "object" && typeof (x as { account?: unknown }).account === "string" && Number.isSafeInteger((x as { seq?: unknown }).seq))) {
+          reply(this.err("quarantine_target_invalid", "quarantine_target_invalid"));
+          return;
+        }
+        const byAccount = new Map<string, Set<number>>();
+        for (const x of items as { account: string; seq: number }[]) {
+          let s = byAccount.get(x.account);
+          if (!s) { s = new Set(); byAccount.set(x.account, s); }
+          s.add(x.seq);
+        }
+        let removed = 0;
+        for (const [u, seqs] of byAccount) removed += this.dropQuarantined(u, (it) => seqs.has(it.seq));
+        reply({ ok: true, removed });
         return;
       }
 
@@ -1327,28 +1364,216 @@ export class Hub {
     reply({ ok: true, proof: hubProof(this.clientKey, hubNonce, q.nonce) });
   }
 
-  /** 계정 인박스에서 커서 이후를 상한까지 꺼내고 커서를 전진시킨다. */
+  /**
+   * 계정 인박스에서 커서 이후를 상한까지 꺼낸다. AI에게 줄 때만 거르고, 커서·표시는 원본(격리 포함) 기준(2026-11-20).
+   * - 격리 항목은 건너뛰고 커서는 그 앞에서 멈춘다(해제되면 원래 순서로 나오게). 그 뒤에서 처리한 항목에는 delivered.
+   * - 참가제(v3.1.1): 참가하지 않은 서버 채널 항목은 확실히 버린다(업그레이드 전에 들어온 것·나간 뒤 남은 것).
+   * - 채널을 못 찾으면: 확실히 지워진 이 PC 채널은 버리고, 아니면 격리(check_missing — 마지막 안전장치).
+   */
   private drain(uuid: string): InboxItem[] {
     const acc = this.accounts.get(uuid);
     if (!acc) return []; // 삭제된 계정(끊기기 전 잔여 호출 등)에서도 크래시하지 않는다
-    // 참가제(v3.1.1): 이미 쌓인 항목 중 참가하지 않은 서버 채널 것은 건너뛴다(업그레이드 전에 들어온 것·나간 뒤 남은 것).
-    // 커서는 그대로 전진하고, 한 묶음이 전부 걸러지면 다음 묶음을 이어서 본다(상한 있음).
-    const visible = (i: InboxItem) => {
-      const sid = this.channels.getChannel(i.channelId)?.serverId;
-      return !sid || this.memberships.isMember(sid, uuid);
+    const max = this.config.inboxMaxBatch;
+    const out: StoredInboxItem[] = [];
+    let cursor = acc.inboxCursor; // 앞에서부터 빈틈없이 처리된 곳까지
+    let scan = cursor;
+    let blocked = false; // 이 앞에 격리 항목이 있어 커서가 멈춤
+    let dirty = false;
+    let trashIds: Set<string> | null = null;
+    const done = (it: StoredInboxItem) => {
+      if (!blocked) cursor = it.seq;
+      else { it.delivered = true; dirty = true; }
     };
-    let cursor = acc.inboxCursor;
-    for (let round = 0; round < 50; round++) {
-      const items = this.inbox.since(uuid, cursor, this.config.inboxMaxBatch);
-      if (!items.length) return [];
-      cursor = items[items.length - 1].seq;
-      this.accounts.setInboxCursor(uuid, cursor);
-      // 소비분이 많이 쌓였을 때만 압축해 인박스 무한 증가를 막는다(재작성은 드물게).
-      if (this.inbox.size(uuid) > INBOX_COMPACT_THRESHOLD) this.inbox.compact(uuid, cursor);
-      const shown = items.filter(visible);
-      if (shown.length) return shown;
+    outer: while (out.length < max) {
+      const items = this.inbox.since(uuid, scan, max);
+      if (!items.length) break;
+      for (const it of items) {
+        if (out.length >= max) break outer;
+        scan = it.seq;
+        if (it.delivered) { if (!blocked) cursor = it.seq; continue; }
+        if (it.quarantined) { blocked = true; continue; }
+        const ch = this.channels.getChannel(it.channelId);
+        if (ch) {
+          if (!ch.serverId || this.memberships.isMember(ch.serverId, uuid)) out.push(it);
+          done(it);
+          continue;
+        }
+        trashIds ??= this.trashChannelIds();
+        if (this.channelGone(it.channelId, acc.area, trashIds)) { done(it); continue; }
+        it.quarantined = { reason: "check_missing", at: Date.now() };
+        this.qIndexAdd(it.channelId, uuid);
+        blocked = true;
+        dirty = true;
+      }
     }
-    return [];
+    if (dirty) this.inbox.save(uuid);
+    if (cursor !== acc.inboxCursor) this.accounts.setInboxCursor(uuid, cursor);
+    // 소비분이 많이 쌓였을 때만 압축해 인박스 무한 증가를 막는다(재작성은 드물게). 격리 항목은 남는다.
+    if (this.inbox.size(uuid) > INBOX_COMPACT_THRESHOLD) this.inbox.compact(uuid, cursor);
+    return out.map(publicItem);
+  }
+
+  // ───── 받은편지함 격리(2026-11-20) ─────
+  /** 격리 항목이 있는 채널 → 계정들(해제할 곳을 바로 찾기 위한 메모리 색인, 시작 때 다시 만든다). */
+  private qIndex = new Map<string, Set<string>>();
+
+  private qIndexAdd(channelId: string, uuid: string): void {
+    let s = this.qIndex.get(channelId);
+    if (!s) { s = new Set(); this.qIndex.set(channelId, s); }
+    s.add(uuid);
+  }
+
+  /** 휴지통 항목이 가진 채널·DM id(되살릴 수 있는 것). */
+  private trashChannelIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const t of this.trash.list()) {
+      const m = this.trash.readMeta(t.id);
+      if (!m) continue;
+      for (const c of m.channels ?? []) ids.add(c.id);
+      if (m.dm) ids.add(m.dm.channelId);
+      for (const d of m.dms ?? []) ids.add(d.channelId);
+    }
+    return ids;
+  }
+
+  /**
+   * 목록에 없는 채널이 확실히 지워졌는가: 이 PC 채널(앞 표시 없는 id) + 로컬 계정 + 휴지통에도 없음.
+   * 다른 PC 쪽(r:·m.<출처>.·s1:<공간>:)과 연결 영역 계정은 다시 붙을 수 있으니 확실하지 않다.
+   */
+  private channelGone(channelId: string, area: "connection" | undefined, trashIds: Set<string>): boolean {
+    if (/^(r:|m\.|s1:)/.test(channelId)) return false;
+    if (area === "connection") return false;
+    return !trashIds.has(channelId);
+  }
+
+  /** 채널이 목록에서 빠짐: 모든 계정의 그 채널 안 읽은 항목을 격리(참가 안 한 계정 것은 버림). */
+  private quarantineChannel(ch: Channel): void {
+    const now = Date.now();
+    for (const uuid of this.accounts.allUuids()) {
+      const acc = this.accounts.get(uuid);
+      if (!acc) continue;
+      let changed = false;
+      for (const it of this.inbox.since(uuid, acc.inboxCursor, Number.MAX_SAFE_INTEGER)) {
+        if (it.channelId !== ch.id || it.delivered || it.quarantined) continue;
+        if (ch.serverId && !this.memberships.isMember(ch.serverId, uuid)) it.delivered = true;
+        else { it.quarantined = { reason: "channel_removed", at: now }; this.qIndexAdd(ch.id, uuid); }
+        changed = true;
+      }
+      if (changed) this.inbox.save(uuid);
+    }
+  }
+
+  /** 채널이 목록에 들어옴: 그 채널의 격리를 풀고(원래 자리 그대로) 기다리는 세션을 깨운다. */
+  private releaseChannel(ch: Channel): void {
+    const users = this.qIndex.get(ch.id);
+    if (!users) return;
+    this.qIndex.delete(ch.id);
+    for (const uuid of users) {
+      const acc = this.accounts.get(uuid);
+      if (!acc) continue;
+      let changed = false;
+      for (const it of this.inbox.since(uuid, acc.inboxCursor, Number.MAX_SAFE_INTEGER)) {
+        if (it.channelId === ch.id && it.quarantined) { delete it.quarantined; changed = true; }
+      }
+      // 깨우기는 지금 진행 중인 일(예: 서버 복원 — 채널을 올린 다음 참가자 명단을 되돌림)이 끝난 뒤에.
+      // 바로 깨우면 명단이 돌아오기 전이라 참가 안 함으로 보고 버린다.
+      if (changed) { this.inbox.save(uuid); setImmediate(() => { if (!this.stopped) this.wake(uuid); }); }
+    }
+  }
+
+  /**
+   * 시작 때 한 번(모든 로컬 채널 등록 뒤): 목록에 없는 채널 항목을 확실함에 따라 버리거나 격리하고,
+   * 이미 격리된 것은 채널이 돌아왔으면 풀고, 확실히 지워졌으면 버린다. 색인도 여기서 만든다.
+   */
+  private quarantineStartupScan(): void {
+    const trashIds = this.trashChannelIds();
+    const now = Date.now();
+    for (const uuid of this.accounts.allUuids()) {
+      const acc = this.accounts.get(uuid);
+      if (!acc) continue;
+      let changed = false;
+      for (const it of this.inbox.since(uuid, acc.inboxCursor, Number.MAX_SAFE_INTEGER)) {
+        if (it.delivered) continue;
+        if (this.channels.getChannel(it.channelId)) {
+          if (it.quarantined) { delete it.quarantined; changed = true; }
+          continue;
+        }
+        if (this.channelGone(it.channelId, acc.area, trashIds)) {
+          delete it.quarantined;
+          it.delivered = true;
+          changed = true;
+          continue;
+        }
+        if (!it.quarantined) { it.quarantined = { reason: "startup_missing", at: now }; changed = true; }
+        this.qIndexAdd(it.channelId, uuid);
+      }
+      if (changed) this.inbox.save(uuid);
+    }
+  }
+
+  /** 휴지통을 비운 뒤: 되살릴 길이 없어진 격리 항목을 버린다. */
+  private dropGoneQuarantine(): void {
+    const trashIds = this.trashChannelIds();
+    for (const [channelId, users] of [...this.qIndex]) {
+      for (const uuid of [...users]) {
+        const acc = this.accounts.get(uuid);
+        if (!acc || !this.channelGone(channelId, acc.area, trashIds)) continue;
+        this.dropQuarantined(uuid, (it) => it.channelId === channelId);
+      }
+    }
+  }
+
+  /** 계정의 격리 항목 중 맞는 것을 버린다(전달된 것과 같게 — 압축 때 사라짐). 버린 개수. */
+  private dropQuarantined(uuid: string, match: (it: StoredInboxItem) => boolean): number {
+    const acc = this.accounts.get(uuid);
+    if (!acc) return 0;
+    let n = 0;
+    for (const it of this.inbox.since(uuid, acc.inboxCursor, Number.MAX_SAFE_INTEGER)) {
+      if (!it.quarantined || !match(it)) continue;
+      delete it.quarantined;
+      it.delivered = true;
+      n++;
+    }
+    if (n) {
+      this.inbox.save(uuid);
+      this.rebuildQIndexFor(uuid);
+    }
+    return n;
+  }
+
+  private rebuildQIndexFor(uuid: string): void {
+    for (const [cid, users] of this.qIndex) { users.delete(uuid); if (!users.size) this.qIndex.delete(cid); }
+    const acc = this.accounts.get(uuid);
+    if (!acc) return;
+    for (const it of this.inbox.since(uuid, acc.inboxCursor, Number.MAX_SAFE_INTEGER)) if (it.quarantined) this.qIndexAdd(it.channelId, uuid);
+  }
+
+  /** 관리 앱용: 계정별 격리 항목(순서 유지)과 용량. 격리가 없는 계정은 싣지 않는다. */
+  private quarantineSnapshot(): QuarantineSnapshot {
+    const users = new Set<string>();
+    for (const s of this.qIndex.values()) for (const u of s) users.add(u);
+    const accounts: QuarantineSnapshot["accounts"] = [];
+    let totalBytes = 0, totalCount = 0;
+    for (const uuid of [...users].sort()) {
+      const acc = this.accounts.get(uuid);
+      if (!acc) continue;
+      const items: QuarantineSnapshot["accounts"][number]["items"] = [];
+      let bytes = 0;
+      for (const it of this.inbox.since(uuid, acc.inboxCursor, Number.MAX_SAFE_INTEGER)) {
+        if (!it.quarantined) continue;
+        const b = Buffer.byteLength(JSON.stringify(it));
+        bytes += b;
+        items.push({
+          seq: it.seq, ts: it.ts, channelId: it.channelId, channelKind: it.channelKind, channelLabel: it.channelLabel,
+          fromName: it.fromName, preview: it.text.slice(0, 200), reason: it.quarantined.reason, at: it.quarantined.at, bytes: b,
+        });
+      }
+      if (!items.length) continue;
+      accounts.push({ account: uuid, name: acc.name, count: items.length, bytes, items });
+      totalBytes += bytes;
+      totalCount += items.length;
+    }
+    return { totalCount, totalBytes, accounts };
   }
 
   /** peer를 UUID(우선) 또는 유일한 이름으로 해석한다. */

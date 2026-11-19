@@ -1,7 +1,7 @@
 // 관리 앱 왼쪽 목록·하위 탭(v3.1). DOM 없음 → Node에서 시험. 화면 전환은 renderer.ts의 selectSection.
 import type { AdminKey } from "../messages.js";
 
-export type SectionId = "app" | "limits" | "servers" | "accounts" | "security" | "multi" | "trash";
+export type SectionId = "app" | "limits" | "servers" | "accounts" | "security" | "multi" | "trash" | "quarantine";
 export interface NavItem { id: SectionId; key: AdminKey; subs?: readonly { id: string; key: AdminKey }[] }
 
 export const NAV: readonly NavItem[] = [
@@ -12,6 +12,7 @@ export const NAV: readonly NavItem[] = [
   { id: "security", key: "nav_security" },
   { id: "multi", key: "nav_multi", subs: [{ id: "comms", key: "sub_comms" }, { id: "space1", key: "sub_space1" }, { id: "mesh", key: "sub_mesh" }, { id: "storage", key: "sub_storage" }] },
   { id: "trash", key: "nav_trash" },
+  { id: "quarantine", key: "nav_quarantine" },
 ];
 
 export const FIRST_SECTION: SectionId = "app";

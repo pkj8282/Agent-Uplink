@@ -4,7 +4,7 @@ import path from "node:path";
 import { encodeFrame, FrameDecoder } from "./framing.js";
 import { newNonce, isNonce, clientProof, hubProof, proofEquals, readClientKeyFile } from "./auth.js";
 import type { MeshCaseChoice, MeshCommand, RestoreInput, BackupCandidate, RestoreResult, MembershipSyncResult } from "./types.js";
-import type { AdminConfig, ConfigPatch, ConnProfile, ConnStatus, IpcResult, StorageInput, SupabaseInput, VerifyResult, Space1CreateInput, Space1JoinInput, NameConflict, RestoreReport, Snapshot } from "./types.js";
+import type { AdminConfig, ConfigPatch, ConnProfile, ConnStatus, IpcResult, StorageInput, SupabaseInput, VerifyResult, Space1CreateInput, Space1JoinInput, NameConflict, RestoreReport, Snapshot, QuarantineDeleteInput } from "./types.js";
 import { effectiveLang, type Lang } from "./i18n.js";
 import { readLanguageFile } from "./langFile.js";
 import { adminMsg, LEGACY_UNKNOWN_OP, type AdminKey } from "./messages.js";
@@ -132,7 +132,14 @@ export class AdminClient {
       memberships: r.memberships, // 〃(v3.1.1 이전 Hub)
       membershipHistory: r.membershipHistory,
       membershipAccounts: r.membershipAccounts,
+      quarantine: r.quarantine, // 〃(받은편지함 격리 이전 Hub)
     };
+  }
+
+  /** 받은편지함 격리 항목을 지운다(일부·전체, 2026-11-20). */
+  async deleteQuarantine(input: QuarantineDeleteInput): Promise<{ removed: number }> {
+    const payload = "all" in input ? { all: true } : { items: input.items };
+    return { removed: (await this.call("admin_quarantine_delete", payload)).removed ?? 0 };
   }
 
   /** 서버 참가자 종합 리스트를 실제와 맞춘다(v3.1.1). */

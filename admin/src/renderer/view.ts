@@ -1,5 +1,5 @@
 // 렌더러의 순수 로직(DOM 없음 → Node에서 테스트).
-import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, StorageInput, StorageStatus, SupabaseInput, VerifyResult, Space1CreateInput, Space1JoinInput, Space1Status, MeshCaseChoice, MeshCommand, RestoreInput, BackupCandidate, RestoreResult, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem, ConnStatus, Snapshot, MembershipSyncResult } from "../types.js";
+import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, StorageInput, StorageStatus, SupabaseInput, VerifyResult, Space1CreateInput, Space1JoinInput, Space1Status, MeshCaseChoice, MeshCommand, RestoreInput, BackupCandidate, RestoreResult, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem, ConnStatus, Snapshot, MembershipSyncResult, QuarantineSnapshot, QuarantineReason } from "../types.js";
 import { oneLine } from "../text.js";
 import type { AdminKey } from "../messages.js";
 import { getLang, tr } from "./lang.js";
@@ -160,6 +160,25 @@ export function opErrorMessage(code: string | undefined, fallback: string): stri
 export function emptyTrashTargets(items: TrashItem[]): { count: number; bytes: number } {
   const done = items.filter((t) => !t.pending);
   return { count: done.length, bytes: done.reduce((s, t) => s + t.bytes, 0) };
+}
+
+/** 받은편지함 격리 요약(2026-11-20). undefined = 구버전 Hub. */
+export function quarantineSummary(q: QuarantineSnapshot | undefined): string {
+  if (q === undefined) return tr("quarantine_unsupported");
+  return tr("quarantine_summary", { count: q.totalCount, size: formatBytes(q.totalBytes) });
+}
+
+const Q_REASON_KEY: Record<QuarantineReason, AdminKey> = {
+  channel_removed: "quarantine_reason_channel_removed",
+  startup_missing: "quarantine_reason_startup_missing",
+  check_missing: "quarantine_reason_check_missing",
+};
+export function quarantineReasonLabel(r: QuarantineReason): string {
+  return Object.hasOwn(Q_REASON_KEY, r) ? tr(Q_REASON_KEY[r]) : r;
+}
+
+export function quarantineDeleteConfirmMessage(count: number, bytes: number): string {
+  return `${tr("quarantine_delete_confirm", { count, size: formatBytes(bytes) })}${tr("suffix_irreversible")}`;
 }
 
 export function emptyTrashConfirmMessage(count: number, bytes: number): string {

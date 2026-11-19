@@ -42,6 +42,7 @@
       <button type="button" data-nav="security"><span data-i18n="nav_security"></span><span id="security-badge" class="badge" hidden></span></button>
       <button type="button" data-nav="multi" data-i18n="nav_multi"></button>
       <button type="button" data-nav="trash" data-i18n="nav_trash"></button>
+      <button type="button" data-nav="quarantine" data-i18n="nav_quarantine"></button>
     </nav>
     <div class="content">
       <!-- Language stays usable with the hub down, so it lives outside the inert main (shown on App settings, and in the corner when the hub is down). -->
@@ -361,6 +362,12 @@
         <section id="panel-trash" class="panel" hidden>
           <div class="trash-head"><span id="trash-summary" class="meta"></span><button id="empty-trash" type="button" class="danger" data-i18n="btn_empty_trash"></button></div>
           <ul id="trash-list" class="list"></ul>
+        </section>
+
+        <section id="panel-quarantine" class="panel" hidden>
+          <p class="meta" data-i18n="quarantine_help"></p>
+          <div class="trash-head"><span id="quarantine-summary" class="meta"></span><button id="quarantine-delete-all" type="button" class="danger" data-i18n="btn_quarantine_delete_all"></button></div>
+          <ul id="quarantine-list" class="list"></ul>
         </section>
       </main>
     </div>

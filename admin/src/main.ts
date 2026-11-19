@@ -70,6 +70,15 @@ handle("admin:restoreTrash", (arg) => {
   return toResult(() => client.restoreTrash(asId(a.id), a.confirmRename === true));
 });
 handle("admin:emptyTrash", () => toResult(() => client.emptyTrash()));
+handle("admin:deleteQuarantine", (arg) => toResult(() => {
+  const a = (arg ?? {}) as { all?: unknown; items?: unknown };
+  if (a.all === true) return client.deleteQuarantine({ all: true });
+  const items = Array.isArray(a.items) ? a.items.slice(0, 1000).map((x) => {
+    const o = (x ?? {}) as { account?: unknown; seq?: unknown };
+    return { account: asId(o.account), seq: Number.isSafeInteger(o.seq) ? (o.seq as number) : -1 };
+  }) : [];
+  return client.deleteQuarantine({ items });
+}));
 // 뷰어는 같은 Windows 사용자만 열 수 있다: 인증된 Hub에서 1회용 티켓을 받아 기본 브라우저로 연다(형식 검사 후).
 handle("admin:openViewer", () => toResult(async () => {
   const url = await client.viewerTicket();

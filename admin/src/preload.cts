@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("admin", {
   deleteDm: (channelId: string) => ipcRenderer.invoke("admin:deleteDm", channelId),
   restoreTrash: (id: string, confirmRename: boolean) => ipcRenderer.invoke("admin:restoreTrash", { id, confirmRename }),
   emptyTrash: () => ipcRenderer.invoke("admin:emptyTrash"),
+  deleteQuarantine: (input: unknown) => ipcRenderer.invoke("admin:deleteQuarantine", input),
   openViewer: () => ipcRenderer.invoke("admin:openViewer"),
   startHub: () => ipcRenderer.invoke("admin:startHub"),
   syncMemberships: () => ipcRenderer.invoke("admin:syncMemberships"),

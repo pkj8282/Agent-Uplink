@@ -1,8 +1,8 @@
-import type { AdminApi, AdminConfig, BackupCandidate, ConnStatus, IpcResult, MeshCommand, MeshStatus, RestoreInput, RestoreResult, SecurityFinding, Snapshot, SnapshotAccount, SnapshotDm, SnapshotServer, TrashItem } from "../types.js";
+import type { AdminApi, AdminConfig, BackupCandidate, ConnStatus, IpcResult, MeshCommand, MeshStatus, RestoreInput, RestoreResult, SecurityFinding, Snapshot, SnapshotAccount, SnapshotDm, SnapshotServer, TrashItem, QuarantineSnapshot, QuarantineDeleteInput } from "../types.js";
 import {
   ConfigFormState, LatestOnly, accountMeta, conflictConfirmMessage, deleteConfirmMessage, displayName, dmCountOf,
   emptyTrashConfirmMessage, emptyTrashTargets, findingCounts, findingSource, formatBytes, memberNames, opErrorMessage, parseConfigForm, restoreConfirmMessage,
-  restoreResultMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount,
+  restoreResultMessage, quarantineSummary, quarantineReasonLabel, quarantineDeleteConfirmMessage, trashFlags, trashKindLabel, trashSummary, trashTitle, unseenCount,
   parseServerForm, parseInviteForm, parseJoinCode, serverEnableConfirmMessage, inviteConfirmMessage, revokeConfirmMessage,
   connEventLine, connErrorMessage, connUnsupportedMessage, saveBlockedMessage, ChangeGate, parseStorageForm, parseSupabaseForm, parseS1CreateForm, parseS1JoinForm, space1StateLabel, space1RevokeConfirm, space1LeaveConfirm, storageStatusLine, verifyResultMessage, parsePruneForm,
   parseMeshCaseForm, meshCaseLabel, meshUploadLine, meshInviteConfirm, meshRemoveConfirm, meshAcceptConfirm, meshUnacceptConfirm, meshCommandWhat, meshCommandConfirm,
@@ -98,6 +98,7 @@ async function refresh(): Promise<void> {
   renderServers(r.data, sharedServerIds(c.ok ? c.data : null));
   renderAccounts(r.data);
   renderTrash(r.data);
+  renderQuarantine(r.data);
   renderSecurity(r.data);
   renderSaveBlocked(r.data);
   renderConn(c);
@@ -158,6 +159,55 @@ function renderTrash(s: Snapshot): void {
     list.append(li);
   }
 }
+
+// ───── 받은편지함 격리(2026-11-20): 계정별 항목·용량, 일부·전체 삭제 ─────
+let quarantineData: QuarantineSnapshot | undefined;
+
+function renderQuarantine(s: Snapshot): void {
+  quarantineData = s.quarantine;
+  byId("quarantine-summary").textContent = quarantineSummary(s.quarantine);
+  byId<HTMLButtonElement>("quarantine-delete-all").disabled = !s.quarantine || s.quarantine.totalCount === 0;
+  const list = byId("quarantine-list");
+  list.replaceChildren();
+  if (!s.quarantine) return;
+  if (s.quarantine.accounts.length === 0) { list.append(el("li", tr("quarantine_is_empty"), "empty")); return; }
+  const locale = localeOf(getLang());
+  for (const a of s.quarantine.accounts) {
+    const head = el("li", undefined, "row");
+    head.append(el("span", tr("quarantine_account", { name: a.name, count: a.count, size: formatBytes(a.bytes) }), "name"));
+    list.append(head);
+    for (const it of a.items) {
+      const li = el("li", undefined, "row");
+      li.dataset.kind = "quarantine";
+      li.append(
+        el("span", it.channelLabel, "meta"),
+        el("span", `${it.fromName}: ${it.preview}`, "name"),
+        el("span", `${new Date(it.ts).toLocaleString(locale)} · ${quarantineReasonLabel(it.reason)} · ${formatBytes(it.bytes)}`, "meta"),
+      );
+      const b = el("button", tr("btn_delete"));
+      b.type = "button";
+      b.className = "danger";
+      b.addEventListener("click", () => void deleteQuarantineFlow({ items: [{ account: a.account, seq: it.seq }] }, 1, it.bytes, b));
+      li.append(b);
+      list.append(li);
+    }
+  }
+}
+
+async function deleteQuarantineFlow(input: QuarantineDeleteInput, count: number, bytes: number, b: HTMLButtonElement): Promise<void> {
+  if (!window.confirm(quarantineDeleteConfirmMessage(count, bytes))) return;
+  showOpMsg(null);
+  b.disabled = true;
+  const r = await window.admin.deleteQuarantine(input);
+  await refresh();
+  showOpMsg(r.ok ? { text: tr("quarantine_deleted", { count: r.data.removed }), kind: "ok" } : { text: opErrorMessage(r.code, r.error), kind: "err" });
+}
+
+byId("quarantine-delete-all").addEventListener("click", () => {
+  const q = quarantineData;
+  if (!q || q.totalCount === 0) return;
+  void deleteQuarantineFlow({ all: true }, q.totalCount, q.totalBytes, byId<HTMLButtonElement>("quarantine-delete-all"));
+});
 
 /** 복원: 확인 → 이름이 겹치면 확인 입력 창 → 예일 때만 번호를 붙여 복원. */
 async function restoreFlow(t: TrashItem, b: HTMLButtonElement): Promise<void> {

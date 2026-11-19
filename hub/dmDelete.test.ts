@@ -49,16 +49,18 @@ test("DM 삭제: 로그가 휴지통으로, 색인·양쪽 역색인에서 빠�
   s.a.close(); s.b.close(); s.admin.close(); hub.stop();
 });
 
-test("DM 삭제 중 접속한 세션: 삭제 전 쌓인 알림은 그대로 전달(기존 동작), 이후 wait는 정상 타임아웃", async () => {
+test("DM 삭제 중 접속한 세션: 삭제 전 쌓인 알림은 격리(2026-11-20 — 이전엔 그대로 전달), wait는 정상 타임아웃, 되살리면 전달", async () => {
   const { hub, port, token } = await startHub();
   const s = await seed(port);
   await s.a.req("send", { channelId: s.dm, text: "안 읽은 알림" });
   assert.equal((await s.admin.req("admin_delete_dm", { token, channelId: s.dm })).ok, true);
   const w = await s.b.req("wait", { timeoutMs: 200 });
-  assert.equal(w.ok, true);
-  assert.equal(w.items!.some((i) => i.text === "안 읽은 알림"), true);
+  assert.equal(w.ok, true); assert.deepEqual(w.items ?? [], [], "지운 DM의 안 읽은 알림은 격리된다");
+  const snap: any = await s.admin.req("admin_snapshot", { token });
+  assert.equal(snap.quarantine.totalCount, 2, "seed의 'DM 메시지'와 '안 읽은 알림'");
+  assert.equal((await s.admin.req("admin_restore_trash", { token, trashId: snap.trash[0].id })).ok, true);
   const w2 = await s.b.req("wait", { timeoutMs: 200 });
-  assert.equal(w2.ok, true); assert.deepEqual(w2.items ?? [], []);
+  assert.equal(w2.items!.some((i) => i.text === "안 읽은 알림"), true, "되살리면 격리가 풀려 전달된다");
   s.a.close(); s.b.close(); s.admin.close(); hub.stop();
 });
 
