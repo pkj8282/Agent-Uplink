@@ -144,11 +144,11 @@ export class ServerStore {
     return existed;
   }
 
-  allChannels(): { channelId: string; serverName: string; channelName: string }[] {
-    const out: { channelId: string; serverName: string; channelName: string }[] = [];
+  allChannels(): { channelId: string; serverId: string; serverName: string; channelName: string }[] {
+    const out: { channelId: string; serverId: string; serverName: string; channelName: string }[] = [];
     for (const server of this.servers.values()) {
       for (const ch of server.channels) {
-        out.push({ channelId: ch.id, serverName: server.name, channelName: ch.name });
+        out.push({ channelId: ch.id, serverId: server.id, serverName: server.name, channelName: ch.name });
       }
     }
     return out;

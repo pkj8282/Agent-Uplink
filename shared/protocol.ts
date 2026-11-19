@@ -29,6 +29,8 @@ export interface Channel {
   members: string[] | null; // null = 전체 공개(모든 계정), 배열 = 해당 uuid만(DM)
   /** 연결 계정 전용 채널(v3.0: Connection Communications·원격 거울). 로컬 계정은 보내기·읽기 불가. */
   area?: "connection";
+  /** 참가제 서버의 채널이면 그 서버 id(v3.1.1: 로컬 서버·공간 서버 s1:<id>). 있으면 그 서버 참가자만 받고 읽고 쓴다. 로비·DM·연결 영역은 없음. */
+  serverId?: string;
 }
 
 export interface Message {
@@ -133,6 +135,8 @@ export type Request =
   | { op: "list_dms"; id: number }
   | { op: "create_server"; id: number; name: string }
   | { op: "list_servers"; id: number }
+  | { op: "join_server"; id: number; serverId: string }
+  | { op: "leave_server"; id: number; serverId: string }
   | { op: "create_channel"; id: number; serverId: string; name: string }
   | { op: "list_channels"; id: number; serverId: string }
   | { op: "delete_channel"; id: number; channelId: string }
@@ -165,7 +169,8 @@ export interface Response {
   channelId?: string; // open_dm / create_channel
   dms?: { peer: string; peerName: string; channelId: string; peerDescription: string; peerOnline: boolean }[]; // list_dms
   serverId?: string; // create_server
-  servers?: { serverId: string; name: string; channelCount: number; area?: "connection"; remote?: { spaceName: string; hubUser: string } }[]; // list_servers
+  servers?: { serverId: string; name: string; channelCount: number; area?: "connection"; remote?: { spaceName: string; hubUser: string }; joined?: boolean }[]; // list_servers
+  changed?: boolean; // join_server·leave_server: 새로 참가했거나 빠졌으면 true(v3.1.1)
   channels?: { channelId: string; name: string }[]; // list_channels
   config?: { maxChannelsPerServer: number; allowDevDelete: boolean; inboxMaxBatch: number }; // admin_snapshot/set_config
   snapshotServers?: { id: string; name: string; channels: { id: string; name: string }[] }[]; // admin_snapshot

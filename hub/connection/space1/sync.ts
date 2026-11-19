@@ -352,7 +352,8 @@ export class SpaceSync {
     for (const c of plain.channels) {
       const id = this.mirrorId(c.channelId);
       keep.add(id);
-      this.d.channels.register({ id, kind: "server", label: `${plain.spaceName}/${c.name}`, members: null }, path.join(this.dir, "mirror", `${c.channelId}.jsonl`));
+      // 참가제(v3.1.1): 공간 서버 s1:<spaceId>에 참가한 계정만 받고 읽고 쓴다
+      this.d.channels.register({ id, kind: "server", label: `${plain.spaceName}/${c.name}`, members: null, serverId: `s1:${this.cfg.spaceId}` }, path.join(this.dir, "mirror", `${c.channelId}.jsonl`));
     }
     const prefix = this.mirrorId("");
     for (const id of this.d.channels.ids()) if (id.startsWith(prefix) && !keep.has(id)) this.d.channels.unregister(id);

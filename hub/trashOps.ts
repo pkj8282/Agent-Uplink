@@ -373,7 +373,7 @@ export class TrashOps {
         if (meta.files.includes(file)) trash.moveOut(meta.id, file, logFile);
         servers.addChannelWithId(srv.id, { id: ch.id, name });
         if (conn) channels.register({ id: ch.id, kind: "server", label: `${srv.name}/${name}`, members: null, area: "connection" }, logFile);
-        else channels.register({ id: ch.id, kind: "server", label: `${srv.name}/${name}`, members: null });
+        else channels.register({ id: ch.id, kind: "server", label: `${srv.name}/${name}`, members: null, serverId: srv.id });
       }
       trash.remove(meta.id);
       report.itemRemoved = true;

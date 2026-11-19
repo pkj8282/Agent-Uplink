@@ -13,6 +13,8 @@ import { AccountStore } from "./accounts.js";
 import { InboxStore } from "./inbox.js";
 import { DmStore } from "./dm.js";
 import { ServerStore } from "./servers.js";
+import { MembershipStore } from "./memberships.js";
+import fs from "node:fs";
 import { nameKey, validateName } from "./names.js";
 import { isSafeAccountId } from "./ids.js";
 import { TrashStore } from "./trash.js";
@@ -106,6 +108,8 @@ export class Hub {
   protected inbox!: InboxStore;
   protected dm!: DmStore;
   protected servers!: ServerStore;
+  /** 서버 참가자 종합 리스트(v3.1.1) — 계정·서버와 따로 된 저장소. */
+  protected memberships!: MembershipStore;
   protected trash!: TrashStore;
   protected trashOps!: TrashOps;
   private adminKey: string | null = null;
@@ -195,6 +199,7 @@ export class Hub {
     this.inbox = new InboxStore({ dir: this.opts.dataDir, guard });
     this.dm = new DmStore({ dir: this.opts.dataDir, guard });
     this.servers = new ServerStore({ dir: this.opts.dataDir, guard });
+    this.memberships = new MembershipStore({ dataDir: this.opts.dataDir });
     // 손상 원본을 백업하지 못해 이번 실행 동안 저장을 멈춘 색인은 알린다 — 이 실행에서 만든 DM·서버는 재시작 뒤 남지 않는다(v2.1.3).
     for (const [store, sub] of [[this.dm, "dm"], [this.servers, "servers"]] as const) {
       if (store.saveBlocked) {
@@ -240,8 +245,10 @@ export class Hub {
     }
     // 서버 채널 복원(전체 공개)
     for (const c of this.servers.allChannels()) {
-      this.channels.register({ id: c.channelId, kind: "server", label: `${c.serverName}/${c.channelName}`, members: null });
+      this.channels.register({ id: c.channelId, kind: "server", label: `${c.serverName}/${c.channelName}`, members: null, serverId: c.serverId });
     }
+    // 참가자 리스트가 없거나 손상됐으면(3.1.0에서 올라옴) 채널 기록에 글을 쓴 계정을 그 서버 참가자로 한 번 채운다(사용자 결정 A).
+    if (this.memberships.fresh) this.seedMemberships();
     // 이전 버전 삭제·크래시로 남은 로그를 휴지통으로(손상된 서버 인덱스면 서버 쪽은 건너뜀 — 손으로 되살릴 여지)
     this.trashOps.sweepOrphans({ servers: !this.servers.sweepBlocked, dm: true });
     this.security.finishStartupScan();
@@ -864,6 +871,7 @@ export class Hub {
           return;
         }
         const srv = this.servers.createServer(v.name);
+        this.memberships.join(srv.id, uuid); // 만든 계정은 자동 참가
         reply({ ok: true, serverId: srv.id });
         return;
       }
@@ -871,12 +879,26 @@ export class Hub {
       case "list_servers": {
         const me = needLogin();
         if (!me) return;
-        const localServers = this.servers.listServers().map((s) => ({ serverId: s.id, name: s.name, channelCount: s.channels.length }));
+        const localServers = this.servers.listServers().map((s) => ({ serverId: s.id, name: s.name, channelCount: s.channels.length, joined: this.memberships.isMember(s.id, me) }));
         // 연결 계정(v3.0)에게는 통신 서버(Connection Communications)와 원격 공유 서버도.
         const meIsConn = this.accounts.get(me)?.area === "connection";
         // 방식 1 공간(v3.0 4단계)은 로컬 영역이라 모든 계정에게 보인다.
-        const space1 = this.conn.space1ServersFor();
+        const space1 = this.conn.space1ServersFor().map((s) => ({ ...s, joined: this.memberships.isMember(s.serverId, me) }));
         reply({ ok: true, servers: meIsConn ? [...localServers, ...space1, ...this.conn.serversFor()] : [...localServers, ...space1] });
+        return;
+      }
+
+      case "join_server":
+      case "leave_server": {
+        const uuid = needLogin();
+        if (!uuid) return;
+        const id = typeof req.serverId === "string" ? req.serverId : "";
+        if (!this.isJoinableServer(id)) {
+          reply(this.err("server_not_found", "server_not_found", { id: req.serverId }));
+          return;
+        }
+        // changed: 새로 참가했거나(join) 빠졌으면(leave) true — 이미 그 상태면 false(오류 아님)
+        reply({ ok: true, changed: req.op === "join_server" ? this.memberships.join(id, uuid) : this.memberships.leave(id, uuid) });
         return;
       }
 
@@ -925,7 +947,7 @@ export class Hub {
           return;
         }
         const ch = this.servers.addChannel(srv.id, v.name);
-        this.channels.register({ id: ch.id, kind: "server", label: `${srv.name}/${ch.name}`, members: null });
+        this.channels.register({ id: ch.id, kind: "server", label: `${srv.name}/${ch.name}`, members: null, serverId: srv.id });
         reply({ ok: true, channelId: ch.id });
         return;
       }
@@ -1002,6 +1024,10 @@ export class Hub {
           reply(this.err("channel_forbidden", "channel_forbidden"));
           return;
         }
+        if (ch.serverId && !this.memberships.isMember(ch.serverId, uuid)) {
+          reply(this.err("not_joined", "not_joined", { serverId: ch.serverId }));
+          return;
+        }
         const sender = this.accounts.get(uuid)!;
         // 통신 채널(v3.0)은 연결 계정만.
         if (ch.area === "connection" && sender.area !== "connection") {
@@ -1051,6 +1077,10 @@ export class Hub {
         }
         if (ch.members && !ch.members.includes(uuid)) {
           reply(this.err("channel_forbidden", "channel_forbidden"));
+          return;
+        }
+        if (ch.serverId && !this.memberships.isMember(ch.serverId, uuid)) {
+          reply(this.err("not_joined", "not_joined", { serverId: ch.serverId }));
           return;
         }
         if (ch.area === "connection" && this.accounts.get(uuid)?.area !== "connection") {
@@ -1333,8 +1363,50 @@ export class Hub {
   }
 
   /** 채널 메시지를 수신 대상 계정들의 인박스에 append하고, 대기자를 깨운다. */
+  /** 참가할 수 있는 서버: 로컬 서버와 공간 서버(s1:<spaceId>, 구성원 쪽 거울). 로비·DM·연결 영역은 아님. */
+  private isJoinableServer(id: string): boolean {
+    if (!id) return false;
+    if (this.servers.getServer(id)) return true;
+    return this.conn.space1ServersFor().some((s) => s.serverId === id);
+  }
+
+  /** 3.1.0에서 올라올 때 한 번: 채널 기록에 글을 쓴 계정을 그 서버 참가자로(읽기만 한 계정은 직접 참가). */
+  private seedMemberships(): void {
+    const known = new Set(this.accounts.allUuids());
+    const map: Record<string, string[]> = {};
+    const scan = (serverId: string, file: string | undefined) => {
+      const set = new Set(map[serverId] ?? []);
+      if (file) {
+        try {
+          for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+            if (!line) continue;
+            try {
+              const from = (JSON.parse(line) as { from?: unknown }).from;
+              if (typeof from === "string" && known.has(from)) set.add(from);
+            } catch { /* 손상 줄 */ }
+          }
+        } catch { /* 로그 없음 */ }
+      }
+      map[serverId] = [...set];
+    };
+    for (const c of this.servers.allChannels()) scan(c.serverId, this.channels.fileOf(c.channelId));
+    for (const s of this.servers.listServers()) map[s.id] ??= [];
+    // 공간 서버 거울(구성원 쪽): connection/spaces1/<spaceId>/mirror/*.jsonl — 아직 등록 전일 수 있어 파일로 직접 훑는다
+    const sp = path.join(this.opts.dataDir, "connection", "spaces1");
+    let spaces: string[] = [];
+    try { spaces = fs.readdirSync(sp); } catch { /* 없음 */ }
+    for (const id of spaces) {
+      const dir = path.join(sp, id, "mirror");
+      let files: string[] = [];
+      try { files = fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl")); } catch { continue; }
+      for (const f of files) scan(`s1:${id}`, path.join(dir, f));
+    }
+    this.memberships.seed(map);
+  }
+
   protected fanout(ch: Channel, from: string, fromName: string, text: string, ts: number, origin?: MessageOrigin, skipUuid?: string): void {
-    const recipients = ch.members ?? this.accounts.allUuids();
+    // 참가제 서버 채널(v3.1.1)은 그 서버 참가자만, 로비는 전체, DM은 두 사람
+    const recipients = ch.members ?? (ch.serverId ? this.memberships.membersOf(ch.serverId) : this.accounts.allUuids());
     for (const uuid of recipients) {
       if (uuid === from || uuid === skipUuid) continue;
       // 통신 채널(v3.0)은 연결 계정에게만 전달한다.

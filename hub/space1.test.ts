@@ -51,6 +51,7 @@ test("hub_flow_via_admin_ops: 관리 op로 만들기·초대·참여·동기화,
   try {
     const mirrorId = `s1:${s.spaceId}:${s.ch}`;
     const aiB = await login(s.B.port, "b-ai"); // 로컬 계정
+    assert.equal((await aiB.req("join_server", { serverId: `s1:${s.spaceId}` })).changed, true); // v3.1.1 참가제
     assert.equal((await s.aiA.req("send", { channelId: s.ch, text: "에이가 보냄" })).ok, true);
     await s.A.req("admin_conn_s1_sync_now", { spaceId: s.spaceId });
     await s.B.req("admin_conn_s1_sync_now", { spaceId: s.spaceId });
@@ -93,8 +94,10 @@ test("mode1_and_mode2_together: 같은 Hub에서 방식 1 공간과 방식 2 통
     // 방식 1 거울 채널은 로컬 영역(연결 계정은 못 씀), 방식 2 공유 채널은 연결 영역(로컬 계정은 못 씀)
     const mirrorId = `s1:${s.spaceId}:${s.ch}`;
     const localB = await login(s.B.port, "b-local");
+    await localB.req("join_server", { serverId: `s1:${s.spaceId}` }); // v3.1.1 참가제
     for (let i = 0; i < 100; i++) { if ((await s.B.req("admin_conn_status")).joined[0]?.connected) break; await new Promise((r) => setTimeout(r, 20)); }
     const connB = await login(s.B.port, "b-conn", "connection");
+    await connB.req("join_server", { serverId: `s1:${s.spaceId}` });
     assert.equal((await localB.req("send", { channelId: mirrorId, text: "방식1" })).ok, true);
     assert.equal((await localB.req("send", { channelId: `r:${(await s.B.req("admin_conn_status")).joined[0].spaceId}:${cch}`, text: "x" })).ok, false);
     assert.equal((await connB.req("send", { channelId: mirrorId, text: "x" })).ok, true); // 연결 계정은 로컬 채널도 쓸 수 있음(설계 7)
@@ -168,5 +171,24 @@ test("space1_status_carries_channels: 공간 상태에 채널 목록(구성원�
     assert.equal(typeof a.localServerId, "string");
     assert.equal(a.channels[0].channelId, s.ch);
     assert.equal("localServerId" in b, false);
+  } finally { s.A.hub.stop(); s.B.hub.stop(); }
+});
+
+test("space1_mirror_uses_membership: 구성원 쪽 공간 거울 채널도 그 공간 서버(s1:<id>)에 참가한 계정만 받는다", async () => {
+  const s = await setup();
+  try {
+    const aiB = await login(s.B.port, "b-ai");
+    await aiB.req("check");
+    assert.equal((await s.aiA.req("send", { channelId: s.ch, text: "참가 전" })).ok, true);
+    await s.A.req("admin_conn_s1_sync_now", { spaceId: s.spaceId });
+    await s.B.req("admin_conn_s1_sync_now", { spaceId: s.spaceId });
+    assert.deepEqual(((await aiB.req("check")).items ?? []).map((i: any) => i.text), [], "참가 전에는 안 옴");
+    assert.equal((await aiB.req("read", { channelId: `s1:${s.spaceId}:${s.ch}` })).code, "not_joined");
+    assert.equal((await aiB.req("join_server", { serverId: `s1:${s.spaceId}` })).changed, true);
+    assert.equal((await s.aiA.req("send", { channelId: s.ch, text: "참가 후" })).ok, true);
+    await s.A.req("admin_conn_s1_sync_now", { spaceId: s.spaceId });
+    await s.B.req("admin_conn_s1_sync_now", { spaceId: s.spaceId });
+    assert.deepEqual(((await aiB.req("check")).items ?? []).map((i: any) => i.text), ["참가 후"]);
+    aiB.close();
   } finally { s.A.hub.stop(); s.B.hub.stop(); }
 });
