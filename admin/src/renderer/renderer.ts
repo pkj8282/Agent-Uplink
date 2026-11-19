@@ -9,6 +9,7 @@ import {
   parseRestoreForm, backupCandidateLine, backupRestoreConfirm, backupRestoreDone,
   meshCandidateConfirm, meshCandidateRejectConfirm, meshForgetConfirm, parseVerifyLabel, parseVerifyCodeInput,
   splitAccounts, multiChannels, multiPeers, multiChannelLine, peerLine, sharedServerIds, hubAddressLine,
+  membersLine, joinedServersLine, syncResultMessage,
 } from "./view.js";
 import type { FormMessage } from "./view.js";
 import { NAV, panelId, isMultiView, parseNavMemory, type NavMemory, type SectionId } from "./nav.js";
@@ -93,6 +94,7 @@ async function refresh(): Promise<void> {
   showBanner("");
   if (formState.acceptsRefresh()) renderConfig(r.data.config); // 저장 안 된 수정은 덮어쓰지 않는다
   lastSnapshot = r.data;
+  spaceNames = Object.fromEntries((c.ok ? c.data.spaces1 : []).map((sp) => [`s1:${sp.spaceId}`, sp.spaceName]));
   renderServers(r.data, sharedServerIds(c.ok ? c.data : null));
   renderAccounts(r.data);
   renderTrash(r.data);
@@ -197,6 +199,7 @@ function renderServers(s: Snapshot, sharedBySpace: Set<string>): void {
       el("span", srv.id, "id"),
       el("span", tr("server_channels", { count: srv.channels.length }), "meta"),
       ...(sharedBySpace.has(srv.id) ? [el("span", tr("shared_by_space"), "flag")] : []),
+      ...(((m) => (m ? [el("span", m, "desc")] : []))(membersLine(srv.id, s))),
       deleteButton(tr("btn_delete_server"), deleteConfirmMessage({ kind: "server", name: srv.name, channelCount: srv.channels.length }),
         () => window.admin.deleteServer(srv.id)),
     );
@@ -237,6 +240,8 @@ function renderAccountRows(accounts: HTMLElement, list: SnapshotAccount[], s: Sn
       el("span", accountMeta(a.online, n), a.online ? "meta online" : "meta"),
     );
     if (a.description) li.append(el("span", displayName(a.description, 120), "desc"));
+    const joined = joinedServersLine(a.uuid, s, spaceNames);
+    if (joined) li.append(el("span", joined, "meta"));
     li.append(
       deleteButton(tr("btn_delete_account"), deleteConfirmMessage({ kind: "account", name: a.name, uuid: a.uuid, dmCount: n }),
         () => window.admin.deleteAccount(a.uuid)),
@@ -262,6 +267,21 @@ function renderDmRows(dms: HTMLElement, list: SnapshotDm[], s: Snapshot, emptyTe
 
 // --- 다중 연결 목록(v3.1): 서버 및 채널 ▸ 다중 연결, 계정 및 DM ▸ 다중 연결 ---
 let lastSnapshot: Snapshot | null = null;
+/** 공간 서버(s1:<spaceId>) 이름 — 참가 서버 표시용(통신 상태에서). */
+let spaceNames: Record<string, string> = {};
+
+// --- 서버 참가자 리스트 동기화(v3.1.1, 앱 설정) ---
+byId("sync-memberships").addEventListener("click", async () => {
+  if (!window.confirm(tr("sync_memberships_confirm"))) return;
+  const b = byId<HTMLButtonElement>("sync-memberships");
+  const m = byId("sync-msg");
+  b.disabled = true;
+  const r = await window.admin.syncMemberships();
+  b.disabled = false;
+  m.textContent = r.ok ? syncResultMessage(r.data) : tr("sync_memberships_failed", { detail: r.error });
+  m.className = `msg ${r.ok ? "ok" : "err"}`;
+  await refresh();
+});
 
 function renderMulti(st: ConnStatus | null, s: Snapshot): void {
   // 채널: 방식 1·2·3 한 목록, 지우기는 내 통신 채널만(다른 PC 채널엔 버튼 없음)

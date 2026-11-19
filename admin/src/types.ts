@@ -130,6 +130,10 @@ export interface Snapshot {
   findings?: SecurityFinding[];
   /** 이번 실행 동안 저장을 멈춘 색인 파일(데이터 폴더 기준). undefined = 구버전 Hub. */
   saveBlocked?: string[];
+  /** 서버 참가자 종합 리스트(v3.1.1 Hub): 서버 관점 현재 참가자. 옛 Hub는 없음. */
+  memberships?: Record<string, string[]>;
+  /** 서버 관점 참가 전적(한 번이라도 참가한 계정). */
+  membershipHistory?: Record<string, string[]>;
 }
 
 /** IPC 결과 봉투. hubDown은 Hub 미실행(접속 거부)일 때만 true. code는 Hub 오류 코드(관리 앱이 문구로 변환). */
@@ -150,6 +154,8 @@ export interface AdminApi {
   openViewer(): Promise<IpcResult<void>>;
   /** Hub 수동 시작(v3.1). started: false = 이미 떠 있음. 실패 code: no_launch_info | launch_untrusted. */
   startHub(): Promise<IpcResult<{ started: boolean }>>;
+  /** 서버 참가자 종합 리스트 동기화(v3.1.1, 앱 설정 버튼). */
+  syncMemberships(): Promise<IpcResult<MembershipSyncResult>>;
   /** Hub 꺼짐 화면: 수동 시작을 할 수 있는가(code: null = 가능, 아니면 no_launch_info | launch_untrusted). 실행하지 않음. */
   /** 이 관리 앱이 붙는 Hub 포트(맨 위 줄 표시, v3.1). Hub가 꺼져 있어도 답한다. */
   hubInfo(): Promise<IpcResult<{ port: number }>>;
@@ -206,4 +212,6 @@ export interface AdminApi {
 }
 
 /** Hub 수동 시작용 실행 정보(v3.1 Hub가 hub.json의 launch에 적음 — hub/launchInfo.ts와 같은 모양). */
+export interface MembershipSyncResult { removedServers: number; removedMembers: number; addedServers: number; repaired: number }
+
 export interface LaunchInfo { execPath: string; execArgv: string[]; entry: string; env: Record<string, string> }

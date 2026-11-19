@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { encodeFrame, FrameDecoder } from "./framing.js";
 import { newNonce, isNonce, clientProof, hubProof, proofEquals, readClientKeyFile } from "./auth.js";
-import type { MeshCaseChoice, MeshCommand, RestoreInput, BackupCandidate, RestoreResult } from "./types.js";
+import type { MeshCaseChoice, MeshCommand, RestoreInput, BackupCandidate, RestoreResult, MembershipSyncResult } from "./types.js";
 import type { AdminConfig, ConfigPatch, ConnProfile, ConnStatus, IpcResult, StorageInput, SupabaseInput, VerifyResult, Space1CreateInput, Space1JoinInput, NameConflict, RestoreReport, Snapshot } from "./types.js";
 import { effectiveLang, type Lang } from "./i18n.js";
 import { readLanguageFile } from "./langFile.js";
@@ -129,7 +129,15 @@ export class AdminClient {
       trash: r.trash, // 없으면 undefined(구버전 Hub) — 빈 목록과 구분한다
       findings: r.securityFindings, // 〃(v2.1.2 이전 Hub)
       saveBlocked: r.saveBlocked, // 〃(v3.0 이전 Hub)
+      memberships: r.memberships, // 〃(v3.1.1 이전 Hub)
+      membershipHistory: r.membershipHistory,
     };
+  }
+
+  /** 서버 참가자 종합 리스트를 실제와 맞춘다(v3.1.1). */
+  async syncMemberships(): Promise<MembershipSyncResult> {
+    const r = await this.call("admin_sync_memberships", {});
+    return { removedServers: r.removedServers ?? 0, removedMembers: r.removedMembers ?? 0, addedServers: r.addedServers ?? 0, repaired: r.repaired ?? 0 };
   }
 
   async restoreTrash(id: string, confirmRename: boolean): Promise<RestoreReport> {

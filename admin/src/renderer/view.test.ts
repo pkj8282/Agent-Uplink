@@ -812,3 +812,49 @@ test("conn_port_label_says_connection_server: 통신 서버 포트 칸은 Hub �
   assert.match(tr("conn_state_on", { port: 57110, profile: "tls13-chacha20" }), /connection server port 57110/);
   setLang("ko");
 });
+
+// ───── v3.1.1: 서버 참가자 종합 리스트 표시·동기화 ─────
+import { membersLine, joinedServersLine, syncResultMessage } from "./view.js";
+
+const snapM = {
+  config: { maxChannelsPerServer: 30, inboxMaxBatch: 100, allowDevDelete: true },
+  servers: [{ id: "A", name: "프로젝트", channels: [] }, { id: "B", name: "디자인", channels: [] }],
+  accounts: [{ uuid: "a", name: "기획" }, { uuid: "b", name: "검토" }],
+  dms: [],
+  memberships: { A: ["a", "b"], B: ["b"], "s1:sp": ["a"] },
+  membershipHistory: { A: ["a", "b"], B: ["a", "b"], "s1:sp": ["a"] },
+} as any;
+
+test("members_line_ko_en: 서버 줄에 현재 참가자 | 참가 전적(한/영), 모르는 계정은 앞 8자", () => {
+  setLang("ko");
+  assert.equal(membersLine("B", snapM), "참가자: 검토 | 참가 전적: 기획, 검토");
+  assert.equal(membersLine("X", snapM), "참가자 없음");
+  assert.equal(membersLine("A", { ...snapM, memberships: { A: ["a", "ffffffff-0000"] }, membershipHistory: { A: ["a"] } }), "참가자: 기획, ffffffff | 참가 전적: 기획");
+  setLang("en");
+  assert.equal(membersLine("B", snapM), "Members: 검토 | Ever joined: 기획, 검토");
+  setLang("ko");
+});
+
+test("joined_servers_line_ko_en: 계정 줄에 참가 서버(참가자 관점), 공간 서버는 공간 이름", () => {
+  setLang("ko");
+  assert.equal(joinedServersLine("a", snapM, { "s1:sp": "공간" }), "참가 서버: 프로젝트, 공간");
+  assert.equal(joinedServersLine("b", snapM, {}), "참가 서버: 프로젝트, 디자인");
+  assert.equal(joinedServersLine("z", snapM, {}), null);
+  setLang("en");
+  assert.equal(joinedServersLine("b", snapM, {}), "Joined servers: 프로젝트, 디자인");
+  setLang("ko");
+});
+
+test("old_hub_without_memberships_shows_nothing: 옛 Hub(memberships 없음)면 표시하지 않음", () => {
+  const old = { ...snapM, memberships: undefined, membershipHistory: undefined };
+  assert.equal(membersLine("A", old), null);
+  assert.equal(joinedServersLine("a", old, {}), null);
+});
+
+test("sync_result_message: 동기화 결과 문구(맞춘 짝·지운 서버·지운 참가자·더한 서버)", () => {
+  setLang("ko");
+  assert.equal(syncResultMessage({ removedServers: 1, removedMembers: 2, addedServers: 0, repaired: 3 }), "참가자 리스트를 동기화했습니다: 맞춤 3 · 지운 서버 1 · 지운 참가자 2 · 더한 서버 0");
+  setLang("en");
+  assert.equal(syncResultMessage({ removedServers: 0, removedMembers: 0, addedServers: 1, repaired: 0 }), "Member list synced: repaired 0 · removed servers 0 · removed members 0 · added servers 1");
+  setLang("ko");
+});

@@ -108,3 +108,9 @@ test("parse_nav_memory: 기억한 위치는 알려진 칸만 받고, 이상하�
   assert.deepEqual(parseNavMemory(JSON.stringify({ section: "evil", subs: { multi: "x" } })), { section: "app", subs: {} });
   assert.deepEqual(parseNavMemory(JSON.stringify({ section: "multi", subs: { multi: "mesh", servers: "nope" } })), { section: "multi", subs: { multi: "mesh" } });
 });
+
+test("sync_button_in_app_settings: 앱 설정 칸에 참가자 리스트 동기화 버튼과 결과 자리", () => {
+  const app = block("panel-app");
+  assert.ok(app.includes('id="sync-memberships"'));
+  assert.ok(app.includes('id="sync-msg"'));
+});

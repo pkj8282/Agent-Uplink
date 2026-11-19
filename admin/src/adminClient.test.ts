@@ -585,3 +585,17 @@ test("conn_status_passes_remote_accounts: 관리 앱 클라이언트가 통신 �
     bc.close();
   } finally { A.hub.stop(); B.hub.stop(); }
 });
+
+test("snapshot_passes_memberships: 관리 앱 클라이언트가 참가자 리스트(현재·전적)를 버리지 않는다(v3.1.1)", async () => {
+  const t = await startHub();
+  try {
+    const a = new Raw(t.port); await a.ready(); await a.req("login", { uuid: "u1", name: "A" });
+    const srv: any = await a.req("create_server", { name: "S" });
+    const snap = await t.client.snapshot();
+    assert.deepEqual(snap.memberships?.[srv.serverId], ["u1"]);
+    assert.deepEqual(snap.membershipHistory?.[srv.serverId], ["u1"]);
+    const r = await t.client.syncMemberships();
+    assert.equal(typeof r.repaired, "number");
+    a.close();
+  } finally { t.hub.stop(); }
+});

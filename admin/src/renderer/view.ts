@@ -1,5 +1,5 @@
 // 렌더러의 순수 로직(DOM 없음 → Node에서 테스트).
-import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, StorageInput, StorageStatus, SupabaseInput, VerifyResult, Space1CreateInput, Space1JoinInput, Space1Status, MeshCaseChoice, MeshCommand, RestoreInput, BackupCandidate, RestoreResult, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem, ConnStatus } from "../types.js";
+import type { ConfigPatch, ConnEvent, ConnInviteInput, ConnProfile, ConnServerInput, NameConflict, StorageInput, StorageStatus, SupabaseInput, VerifyResult, Space1CreateInput, Space1JoinInput, Space1Status, MeshCaseChoice, MeshCommand, RestoreInput, BackupCandidate, RestoreResult, RestoreReport, SecurityFinding, SnapshotAccount, SnapshotDm, TrashItem, ConnStatus, Snapshot, MembershipSyncResult } from "../types.js";
 import { oneLine } from "../text.js";
 import type { AdminKey } from "../messages.js";
 import { getLang, tr } from "./lang.js";
@@ -644,4 +644,30 @@ export function sharedServerIds(st: ConnStatus | null): Set<string> {
 /** 맨 위 줄: 지금 붙은 이 PC의 Hub(통신 서버 포트와 헷갈리지 않게, v3.1). */
 export function hubAddressLine(port: number): string {
   return tr("hub_addr", { port });
+}
+
+// ───── v3.1.1: 서버 참가자 종합 리스트 ─────
+type MemberSnap = Pick<Snapshot, "servers" | "accounts" | "memberships" | "membershipHistory">;
+const nameOfAccount = (s: MemberSnap, u: string) => s.accounts.find((a) => a.uuid === u)?.name ?? u.slice(0, 8);
+
+/** 서버 줄: "참가자: … | 참가 전적: …"(서버 관점). 옛 Hub(목록 없음)면 null. */
+export function membersLine(serverId: string, s: MemberSnap): string | null {
+  if (!s.memberships) return null;
+  const now = s.memberships[serverId] ?? [];
+  if (now.length === 0 && !(s.membershipHistory?.[serverId]?.length)) return tr("members_none");
+  const names = (l: string[]) => l.map((u) => nameOfAccount(s, u)).join(", ");
+  return tr("members_line", { now: now.length ? names(now) : tr("members_none_short"), ever: names(s.membershipHistory?.[serverId] ?? now) });
+}
+
+/** 계정 줄: "참가 서버: …"(참가자 관점). 공간 서버(s1:)는 spaceNames로 이름을 찾는다. 참가한 서버가 없거나 옛 Hub면 null. */
+export function joinedServersLine(uuid: string, s: MemberSnap, spaceNames: Record<string, string>): string | null {
+  if (!s.memberships) return null;
+  const ids = Object.entries(s.memberships).filter(([, l]) => l.includes(uuid)).map(([id]) => id);
+  if (ids.length === 0) return null;
+  const name = (id: string) => s.servers.find((x) => x.id === id)?.name ?? spaceNames[id] ?? id;
+  return tr("joined_servers_line", { list: ids.map(name).join(", ") });
+}
+
+export function syncResultMessage(r: MembershipSyncResult): string {
+  return tr("sync_memberships_done", r);
 }
