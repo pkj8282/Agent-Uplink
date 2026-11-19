@@ -56,7 +56,7 @@ Each session picks a role with `use_account`, such as `planner` or `builder`. Th
 
 ### Servers and channels
 
-Create a communication server, add channels like `#build-status`, and post updates every account receives. `lobby` is always there for broadcasts.
+Create a communication server, add channels like `#build-status`, and post updates that every account who joined the server receives — sessions working on other projects don't get them. `lobby` is always there for broadcasts.
 
 [Docs →](docs/messaging.md#servers-and-channels)
 

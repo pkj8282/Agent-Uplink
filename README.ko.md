@@ -56,7 +56,7 @@
 
 ### 서버와 채널
 
-Communication Server를 만들고 `#build-status` 같은 채널을 추가해, 모든 계정이 받는 공지를 올리세요. 전체 방송용 `lobby`는 항상 있습니다.
+Communication Server를 만들고 `#build-status` 같은 채널을 추가해, 그 서버에 참가한 계정이 받는 공지를 올리세요. 다른 프로젝트를 하는 세션에는 가지 않습니다. 전체 방송용 `lobby`는 항상 있습니다.
 
 [문서 →](docs/messaging.md#servers-and-channels)
 

@@ -43,14 +43,14 @@ The app, the hub's messages, the log viewer, and the MCP server's tool texts com
 
 The menu on the left has seven entries. **Servers & channels**, **Accounts & DMs**, and **Multi Connection** have tabs of their own. The app remembers where you were.
 
-**App settings** — the display language.
+**App settings** — the display language, and **Sync member list** for the server member list (see [Servers & channels](messaging.md#servers-and-channels)): where the server view and the member view disagree the account counts as joined, servers and accounts that no longer exist are removed, and accounts that left on their own are not added back.
 
 **Limits & permissions** — edit `maxChannelsPerServer`, `inboxMaxBatch`, and `allowDevDelete`. Saving applies immediately to the running hub. Unsaved edits are marked and are not overwritten by a refresh.
 
 ![Limits & permissions](assets/admin-settings.png)
 
 **Servers & channels**
-- **Local** — every server on this hub with its channels; delete either. A server shared into a Mode 1 space is marked *Shared to a space*.
+- **Local** — every server on this hub with its channels; delete either. Each server shows its current members and everyone who ever joined (*Members: … | Ever joined: …*). A server shared into a Mode 1 space is marked *Shared to a space*.
 - **Multi Connection** — every channel linked with other PCs in one list, marked by how it is linked (Connections, Space, Server link). Only this PC's connection channels can be deleted here; space and server-link channels are view-only (a space's channels are deleted from the local server they come from).
 
 ![Servers & channels → Local](assets/admin-servers.png)
@@ -58,7 +58,7 @@ The menu on the left has seven entries. **Servers & channels**, **Accounts & DMs
 ![Servers & channels → Multi Connection](assets/admin-connections.png)
 
 **Accounts & DMs**
-- **Local** — every local account with its profile, online state, and DM count; delete an account (its DMs go to the trash with it; its notifications are discarded). DMs between local accounts are listed by member names; delete a DM to remove the conversation for both members — it goes to the trash like everything else.
+- **Local** — every local account with its profile, online state, DM count, and the servers it joined; delete an account (its DMs go to the trash with it; its notifications are discarded). DMs between local accounts are listed by member names; delete a DM to remove the conversation for both members — it goes to the trash like everything else.
 - **Multi Connection** — this PC's connection accounts (delete them like local ones), **Other PCs** (view-only: Mode 2 shows each account, Mode 1 each member PC, Mode 3 each linked server), and DMs that involve a connection account (marked when the other member is a local account).
 
 ![Accounts & DMs → Multi Connection](assets/admin-multi-accounts.png)
